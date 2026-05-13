@@ -1,0 +1,59 @@
+"use client";
+
+interface PresetAudio {
+  name: string;
+  description: string;
+  file: string;
+}
+
+const presets: PresetAudio[] = [
+  { name: "茉莉花", description: "江苏民歌，优美宁静", file: "/preset-audio/molihua.mp3" },
+  { name: "高山流水", description: "古琴名曲，意境深远", file: "/preset-audio/gaoshanliushui.mp3" },
+  { name: "二泉映月", description: "二胡独奏，如泣如诉", file: "/preset-audio/erquanyinyue.mp3" },
+  { name: "春江花月夜", description: "琵琶古曲，典雅悠扬", file: "/preset-audio/chunjianghuayueye.mp3" },
+  { name: "十面埋伏", description: "琵琶武曲，激昂壮烈", file: "/preset-audio/shimianmaifu.mp3" },
+];
+
+interface PresetAudiosProps {
+  onSelect: (file: File) => void;
+  disabled?: boolean;
+}
+
+export default function PresetAudios({ onSelect, disabled }: PresetAudiosProps) {
+  const handleSelect = async (preset: PresetAudio) => {
+    if (disabled) return;
+
+    // In production, these would be real audio files
+    // For now, create a mock file
+    const mockFile = new File(["mock audio data"], `${preset.name}.mp3`, {
+      type: "audio/mpeg",
+    });
+    onSelect(mockFile);
+  };
+
+  return (
+    <div className="w-full">
+      <p className="text-sm text-gray-500 mb-3 text-center">或选择预置曲目</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {presets.map((preset) => (
+          <button
+            key={preset.name}
+            onClick={() => handleSelect(preset)}
+            disabled={disabled}
+            className={`
+              flex flex-col items-center p-3 rounded-xl border transition-all
+              ${
+                disabled
+                  ? "opacity-50 cursor-not-allowed border-gray-200 bg-gray-50"
+                  : "border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
+              }
+            `}
+          >
+            <span className="text-sm font-medium text-gray-800">{preset.name}</span>
+            <span className="text-xs text-gray-400 mt-0.5">{preset.description}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
