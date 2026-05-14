@@ -118,6 +118,7 @@ export default function ListenPage() {
               revealed.has(char.id) && allComments[char.id] && (
                 <CommentBubble
                   key={char.id}
+                  characterId={char.id}
                   characterName={char.name}
                   focusKeyword={char.focusKeyword}
                   text={allComments[char.id]}

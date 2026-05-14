@@ -70,6 +70,7 @@ export default function ResultPage() {
             {characters.map((char) => (
               <CommentBubble
                 key={char.id}
+                characterId={char.id}
                 characterName={char.name}
                 focusKeyword={char.focusKeyword}
                 text={comments[char.id] || ""}

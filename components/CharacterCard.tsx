@@ -1,6 +1,7 @@
 "use client";
 
 import { Character } from "@/lib/characters";
+import Image from "next/image";
 
 interface CharacterCardProps {
   character: Character;
@@ -17,6 +18,11 @@ export default function CharacterCard({
   onClick,
   disabled,
 }: CharacterCardProps) {
+  // -1 = initial, -2 = activated
+  const imageSrc = selected
+    ? `/characters/${character.id}-2.png`
+    : `/characters/${character.id}-1.png`;
+
   return (
     <button
       onClick={onClick}
@@ -31,14 +37,15 @@ export default function CharacterCard({
         ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
       `}
     >
-      {/* Avatar placeholder */}
-      <div
-        className={`
-          w-16 h-16 rounded-full flex items-center justify-center text-2xl mb-2
-          ${selected ? "bg-blue-100" : "bg-gray-100"}
-        `}
-      >
-        {character.name.charAt(0)}
+      {/* Avatar image */}
+      <div className="w-16 h-16 rounded-full overflow-hidden mb-2 relative">
+        <Image
+          src={imageSrc}
+          alt={character.name}
+          fill
+          className="object-cover"
+          sizes="64px"
+        />
       </div>
 
       {/* Name */}

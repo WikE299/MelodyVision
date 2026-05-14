@@ -1,6 +1,9 @@
 "use client";
 
+import Image from "next/image";
+
 interface CommentBubbleProps {
+  characterId: string;
   characterName: string;
   focusKeyword: string;
   text: string;
@@ -8,6 +11,7 @@ interface CommentBubbleProps {
 }
 
 export default function CommentBubble({
+  characterId,
   characterName,
   focusKeyword,
   text,
@@ -19,8 +23,14 @@ export default function CommentBubble({
     <div className="w-full animate-in fade-in slide-in-from-bottom-2 duration-500">
       <div className="flex items-start gap-3">
         {/* Avatar */}
-        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-lg shrink-0">
-          {characterName.charAt(0)}
+        <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 relative">
+          <Image
+            src={`/characters/${characterId}-2.png`}
+            alt={characterName}
+            fill
+            className="object-cover"
+            sizes="40px"
+          />
         </div>
 
         {/* Bubble */}
