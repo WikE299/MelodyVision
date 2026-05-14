@@ -103,7 +103,7 @@ export default function ListenPage() {
             <CharacterCard
               key={char.id}
               character={char}
-              selected={false}
+              selected={revealed.has(char.id)}
               commented={revealed.has(char.id)}
               onClick={() => handleReveal(char.id)}
               disabled={preloading}
