@@ -7,6 +7,7 @@ interface PresetAudio {
 }
 
 const presets: PresetAudio[] = [
+  { name: "Music2Image", description: "测试曲目·真实音频", file: "/preset-audio/music2image.mp3" },
   { name: "茉莉花", description: "江苏民歌，优美宁静", file: "/preset-audio/molihua.mp3" },
   { name: "高山流水", description: "古琴名曲，意境深远", file: "/preset-audio/gaoshanliushui.mp3" },
   { name: "二泉映月", description: "二胡独奏，如泣如诉", file: "/preset-audio/erquanyinyue.mp3" },
@@ -24,12 +25,16 @@ export default function PresetAudios({ onSelect, disabled }: PresetAudiosProps) 
   const handleSelect = async (preset: PresetAudio) => {
     if (disabled) return;
 
-    // In production, these would be real audio files
-    // For now, create a mock file
-    const mockFile = new File(["mock audio data"], `${preset.name}.mp3`, {
-      type: "audio/mpeg",
-    });
-    onSelect(mockFile);
+    sessionStorage.setItem("audioSrc", preset.file);
+    try {
+      const res = await fetch(preset.file);
+      const blob = await res.blob();
+      const file = new File([blob], `${preset.name}.mp3`, { type: "audio/mpeg" });
+      onSelect(file);
+    } catch {
+      const fallback = new File([""], `${preset.name}.mp3`, { type: "audio/mpeg" });
+      onSelect(fallback);
+    }
   };
 
   return (

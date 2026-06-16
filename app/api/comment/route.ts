@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       systemPrompt,
       userMessage: "请评论这首音乐。",
       temperature: character.temperature,
-      maxTokens: 200,
+      maxTokens: 2000,
     });
 
     return Response.json({
@@ -33,7 +33,8 @@ export async function POST(request: NextRequest) {
       comment: response.content,
       model: response.model,
     });
-  } catch {
-    return Response.json({ error: "Comment generation failed" }, { status: 500 });
+  } catch (err) {
+    console.error("Comment API error:", err);
+    return Response.json({ error: "Comment generation failed", detail: String(err) }, { status: 500 });
   }
 }

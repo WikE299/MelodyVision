@@ -37,12 +37,21 @@ export function formatMusicContext(analysis: {
   mood?: string;
   instruments?: string[];
   energy?: string;
+  brightness?: string;
+  dynamicRange?: string;
+  bpm?: number;
+  duration?: number;
+  description?: string;
 }): string {
   const parts: string[] = [];
-  if (analysis.key) parts.push(`调性：${analysis.key}`);
   if (analysis.tempo) parts.push(`节奏：${analysis.tempo}`);
-  if (analysis.mood) parts.push(`情绪：${analysis.mood}`);
-  if (analysis.instruments?.length) parts.push(`乐器：${analysis.instruments.join("、")}`);
+  if (analysis.mood) parts.push(`情绪特征：${analysis.mood}`);
   if (analysis.energy) parts.push(`能量：${analysis.energy}`);
+  if (analysis.brightness) parts.push(`音色明暗：${analysis.brightness}`);
+  if (analysis.dynamicRange) parts.push(`动态变化：${analysis.dynamicRange}`);
+  if (analysis.key) parts.push(`调性：${analysis.key}`);
+  if (analysis.instruments?.length) parts.push(`乐器：${analysis.instruments.join("、")}`);
+  if (analysis.duration) parts.push(`时长：约${analysis.duration}秒`);
+  if (analysis.description) parts.push(`综合描述：${analysis.description}`);
   return parts.join("\n");
 }

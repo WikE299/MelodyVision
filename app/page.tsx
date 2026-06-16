@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioUploader from "@/components/AudioUploader";
 import PresetAudios from "@/components/PresetAudios";
+import { analyzeAudioFile } from "@/lib/audio/web-analyzer";
 
 export default function Home() {
   const router = useRouter();
@@ -20,21 +21,18 @@ export default function Home() {
     const url = URL.createObjectURL(file);
     sessionStorage.setItem("audioObjectUrl", url);
 
-    // TODO: Upload and analyze audio
-    // For now, mock the analysis
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    // Mock analysis result
-    const mockAnalysis = {
-      key: "D 大调",
-      tempo: "中速 (Andante)",
-      mood: "宁静、优美",
-      instruments: ["古筝", "二胡", "竹笛"],
-      energy: "舒缓",
-      genre: "中国传统民乐",
-      description: "旋律流畅优美，具有典型的江南水乡韵味",
+    const features = await analyzeAudioFile(file);
+    const analysis = {
+      tempo: features.tempo,
+      mood: features.mood,
+      energy: features.energy,
+      brightness: features.brightness,
+      dynamicRange: features.dynamicRange,
+      bpm: features.bpm,
+      duration: features.durationSeconds,
+      description: features.description,
     };
-    sessionStorage.setItem("musicAnalysis", JSON.stringify(mockAnalysis));
+    sessionStorage.setItem("musicAnalysis", JSON.stringify(analysis));
 
     router.push("/select");
   };
