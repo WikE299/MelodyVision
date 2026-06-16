@@ -1,3 +1,5 @@
+import Meyda from "meyda";
+
 export interface AudioFeatures {
   bpm: number;
   energy: "舒缓" | "中等" | "强烈" | "极强";
@@ -6,11 +8,16 @@ export interface AudioFeatures {
   spectralCentroid: number;
   rmsEnergy: number;
   zeroCrossingRate: number;
+  spectralFlatness: number;
+  spectralRolloff: number;
+  mfcc: number[];
   durationSeconds: number;
   tempo: string;
   mood: string;
   description: string;
 }
+
+const BUFFER_SIZE = 2048;
 
 export async function analyzeAudioFile(file: File): Promise<AudioFeatures> {
   const arrayBuffer = await file.arrayBuffer();
@@ -21,17 +28,22 @@ export async function analyzeAudioFile(file: File): Promise<AudioFeatures> {
   const sampleRate = audioBuffer.sampleRate;
   const duration = audioBuffer.duration;
 
-  const rms = calcRMS(channelData);
-  const zcr = calcZeroCrossingRate(channelData);
-  const centroid = calcSpectralCentroid(channelData, sampleRate);
+  const frameFeatures = extractFrameFeatures(channelData, sampleRate);
   const bpm = estimateBPM(channelData, sampleRate);
-  const dynamicRange = calcDynamicRange(channelData, sampleRate);
+  const dynamicRange = calcDynamicRange(frameFeatures.rmsValues);
 
-  const energy = classifyEnergy(rms);
-  const brightness = classifyBrightness(centroid, sampleRate);
+  const avgRms = mean(frameFeatures.rmsValues);
+  const avgCentroid = mean(frameFeatures.centroidValues);
+  const avgZcr = mean(frameFeatures.zcrValues);
+  const avgFlatness = mean(frameFeatures.flatnessValues);
+  const avgRolloff = mean(frameFeatures.rolloffValues);
+  const avgMfcc = averageMfcc(frameFeatures.mfccValues);
+
+  const energy = classifyEnergy(avgRms);
+  const brightness = classifyBrightness(avgCentroid);
   const tempo = classifyTempo(bpm);
-  const mood = inferMood(energy, brightness, bpm);
-  const description = buildDescription(energy, brightness, tempo, bpm, dynamicRange, duration);
+  const mood = inferMood(energy, brightness, bpm, avgFlatness);
+  const description = buildDescription(energy, brightness, tempo, bpm, dynamicRange, duration, avgFlatness);
 
   audioCtx.close();
 
@@ -40,9 +52,12 @@ export async function analyzeAudioFile(file: File): Promise<AudioFeatures> {
     energy,
     brightness,
     dynamicRange,
-    spectralCentroid: Math.round(centroid),
-    rmsEnergy: Math.round(rms * 10000) / 10000,
-    zeroCrossingRate: Math.round(zcr),
+    spectralCentroid: Math.round(avgCentroid),
+    rmsEnergy: Math.round(avgRms * 10000) / 10000,
+    zeroCrossingRate: Math.round(avgZcr),
+    spectralFlatness: Math.round(avgFlatness * 10000) / 10000,
+    spectralRolloff: Math.round(avgRolloff),
+    mfcc: avgMfcc.map((v) => Math.round(v * 100) / 100),
     durationSeconds: Math.round(duration),
     tempo,
     mood,
@@ -50,87 +65,66 @@ export async function analyzeAudioFile(file: File): Promise<AudioFeatures> {
   };
 }
 
-function calcRMS(data: Float32Array): number {
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) {
-    sum += data[i] * data[i];
-  }
-  return Math.sqrt(sum / data.length);
+interface FrameFeatures {
+  rmsValues: number[];
+  centroidValues: number[];
+  zcrValues: number[];
+  flatnessValues: number[];
+  rolloffValues: number[];
+  mfccValues: number[][];
 }
 
-function calcZeroCrossingRate(data: Float32Array): number {
-  let crossings = 0;
-  for (let i = 1; i < data.length; i++) {
-    if ((data[i] >= 0 && data[i - 1] < 0) || (data[i] < 0 && data[i - 1] >= 0)) {
-      crossings++;
+function extractFrameFeatures(channelData: Float32Array, sampleRate: number): FrameFeatures {
+  const result: FrameFeatures = {
+    rmsValues: [],
+    centroidValues: [],
+    zcrValues: [],
+    flatnessValues: [],
+    rolloffValues: [],
+    mfccValues: [],
+  };
+
+  const previousConfig = {
+    bufferSize: Meyda.bufferSize,
+    sampleRate: Meyda.sampleRate,
+    numberOfMFCCCoefficients: Meyda.numberOfMFCCCoefficients,
+  };
+
+  Meyda.bufferSize = BUFFER_SIZE;
+  Meyda.sampleRate = sampleRate;
+  Meyda.numberOfMFCCCoefficients = 13;
+
+  const hopSize = BUFFER_SIZE / 2;
+  const totalFrames = Math.floor((channelData.length - BUFFER_SIZE) / hopSize);
+
+  try {
+    for (let i = 0; i < totalFrames; i++) {
+      const start = i * hopSize;
+      const frame = channelData.slice(start, start + BUFFER_SIZE);
+
+      const features = Meyda.extract(
+        ["rms", "spectralCentroid", "zcr", "spectralFlatness", "spectralRolloff", "mfcc"],
+        frame
+      );
+
+      if (features) {
+        if (typeof features.rms === "number") result.rmsValues.push(features.rms);
+        if (typeof features.spectralCentroid === "number") {
+          result.centroidValues.push(features.spectralCentroid * (sampleRate / 2) / (BUFFER_SIZE / 2));
+        }
+        if (typeof features.zcr === "number") result.zcrValues.push(features.zcr);
+        if (typeof features.spectralFlatness === "number") result.flatnessValues.push(features.spectralFlatness);
+        if (typeof features.spectralRolloff === "number") result.rolloffValues.push(features.spectralRolloff);
+        if (Array.isArray(features.mfcc)) result.mfccValues.push(features.mfcc);
+      }
     }
-  }
-  return crossings / (data.length / 44100);
-}
-
-function calcSpectralCentroid(data: Float32Array, sampleRate: number): number {
-  const fftSize = 4096;
-  const numFrames = Math.floor(data.length / fftSize);
-  if (numFrames === 0) return 0;
-
-  let totalCentroid = 0;
-  const real = new Float64Array(fftSize);
-  const imag = new Float64Array(fftSize);
-
-  const framesToSample = Math.min(numFrames, 50);
-  const step = Math.max(1, Math.floor(numFrames / framesToSample));
-
-  let sampledCount = 0;
-  for (let f = 0; f < numFrames; f += step) {
-    const offset = f * fftSize;
-    for (let i = 0; i < fftSize; i++) {
-      real[i] = data[offset + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (fftSize - 1)));
-      imag[i] = 0;
-    }
-
-    simpleDFT(real, imag, fftSize);
-
-    let weightedSum = 0;
-    let magnitudeSum = 0;
-    const halfSize = fftSize / 2;
-    for (let i = 0; i < halfSize; i++) {
-      const mag = Math.sqrt(real[i] * real[i] + imag[i] * imag[i]);
-      const freq = (i * sampleRate) / fftSize;
-      weightedSum += freq * mag;
-      magnitudeSum += mag;
-    }
-
-    if (magnitudeSum > 0) {
-      totalCentroid += weightedSum / magnitudeSum;
-    }
-    sampledCount++;
-  }
-
-  return totalCentroid / sampledCount;
-}
-
-function simpleDFT(real: Float64Array, imag: Float64Array, n: number) {
-  const halfN = n / 2;
-  const outReal = new Float64Array(halfN);
-  const outImag = new Float64Array(halfN);
-
-  for (let k = 0; k < halfN; k++) {
-    let sumReal = 0;
-    let sumImag = 0;
-    const step = Math.max(1, Math.floor(n / 512));
-    for (let t = 0; t < n; t += step) {
-      const angle = (2 * Math.PI * k * t) / n;
-      sumReal += real[t] * Math.cos(angle) + imag[t] * Math.sin(angle);
-      sumImag += -real[t] * Math.sin(angle) + imag[t] * Math.cos(angle);
-    }
-    outReal[k] = sumReal;
-    outImag[k] = sumImag;
+  } finally {
+    Meyda.bufferSize = previousConfig.bufferSize;
+    Meyda.sampleRate = previousConfig.sampleRate;
+    Meyda.numberOfMFCCCoefficients = previousConfig.numberOfMFCCCoefficients;
   }
 
-  for (let k = 0; k < halfN; k++) {
-    real[k] = outReal[k];
-    imag[k] = outImag[k];
-  }
+  return result;
 }
 
 function estimateBPM(data: Float32Array, sampleRate: number): number {
@@ -176,28 +170,31 @@ function estimateBPM(data: Float32Array, sampleRate: number): number {
   return (60 * sampleRate) / (bestLag * hopSize);
 }
 
-function calcDynamicRange(data: Float32Array, sampleRate: number): "平稳" | "有起伏" | "大起大落" {
-  const windowSize = Math.floor(sampleRate * 0.5);
-  const step = Math.floor(windowSize / 2);
-  const rmsValues: number[] = [];
-
-  for (let i = 0; i + windowSize <= data.length; i += step) {
-    let sum = 0;
-    for (let j = i; j < i + windowSize; j++) {
-      sum += data[j] * data[j];
-    }
-    rmsValues.push(Math.sqrt(sum / windowSize));
-  }
-
+function calcDynamicRange(rmsValues: number[]): "平稳" | "有起伏" | "大起大落" {
   if (rmsValues.length < 2) return "平稳";
-
-  const mean = rmsValues.reduce((a, b) => a + b, 0) / rmsValues.length;
-  const variance = rmsValues.reduce((a, b) => a + (b - mean) ** 2, 0) / rmsValues.length;
-  const cv = Math.sqrt(variance) / (mean || 1);
-
+  const avg = mean(rmsValues);
+  const variance = rmsValues.reduce((a, b) => a + (b - avg) ** 2, 0) / rmsValues.length;
+  const cv = Math.sqrt(variance) / (avg || 1);
   if (cv < 0.3) return "平稳";
   if (cv < 0.6) return "有起伏";
   return "大起大落";
+}
+
+function mean(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function averageMfcc(mfccFrames: number[][]): number[] {
+  if (mfccFrames.length === 0) return new Array(13).fill(0);
+  const dim = mfccFrames[0].length;
+  const avg = new Array(dim).fill(0);
+  for (const frame of mfccFrames) {
+    for (let i = 0; i < dim; i++) {
+      avg[i] += frame[i];
+    }
+  }
+  return avg.map((v) => v / mfccFrames.length);
 }
 
 function classifyEnergy(rms: number): AudioFeatures["energy"] {
@@ -207,7 +204,7 @@ function classifyEnergy(rms: number): AudioFeatures["energy"] {
   return "极强";
 }
 
-function classifyBrightness(centroid: number, _sampleRate: number): AudioFeatures["brightness"] {
+function classifyBrightness(centroid: number): AudioFeatures["brightness"] {
   if (centroid < 800) return "暗沉";
   if (centroid < 2000) return "柔和";
   if (centroid < 4000) return "明亮";
@@ -222,7 +219,7 @@ function classifyTempo(bpm: number): string {
   return `急速 (Presto, ~${Math.round(bpm)} BPM)`;
 }
 
-function inferMood(energy: string, brightness: string, bpm: number): string {
+function inferMood(energy: string, brightness: string, bpm: number, flatness: number): string {
   const moods: string[] = [];
 
   if (energy === "舒缓" && bpm < 100) moods.push("宁静");
@@ -237,6 +234,9 @@ function inferMood(energy: string, brightness: string, bpm: number): string {
   if (bpm > 140) moods.push("热烈");
   if (bpm < 80 && brightness === "暗沉") moods.push("忧郁");
 
+  if (flatness > 0.1) moods.push("噪感");
+  if (flatness < 0.01) moods.push("纯净");
+
   return moods.length > 0 ? moods.slice(0, 3).join("、") : "平和";
 }
 
@@ -246,7 +246,8 @@ function buildDescription(
   tempo: string,
   bpm: number,
   dynamicRange: string,
-  duration: number
+  duration: number,
+  flatness: number
 ): string {
   const parts: string[] = [];
   parts.push(`这是一段${Math.round(duration)}秒的音频`);
@@ -254,5 +255,7 @@ function buildDescription(
   parts.push(`整体能量${energy}`);
   parts.push(`音色${brightness}`);
   parts.push(`动态${dynamicRange}`);
+  if (flatness < 0.01) parts.push("音色纯净有调性");
+  else if (flatness > 0.1) parts.push("包含较多噪声或打击乐成分");
   return parts.join("，");
 }

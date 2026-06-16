@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
 export interface Presets {
   style: string;
   mood: string;

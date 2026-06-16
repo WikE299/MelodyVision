@@ -12,6 +12,7 @@ export default function GeneratePage() {
     tone: "淡雅",
   });
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
@@ -22,18 +23,61 @@ export default function GeneratePage() {
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setError(null);
 
-    // TODO: Call actual API
-    // For now, mock the generation
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    try {
+      const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
+      const userNote = sessionStorage.getItem("userNote") || "";
+      const musicAnalysis = JSON.parse(
+        sessionStorage.getItem("musicAnalysis") || "{}"
+      );
+      const selectedCharacters = JSON.parse(
+        sessionStorage.getItem("selectedCharacters") || "[]"
+      ) as string[];
+      const commentList = selectedCharacters
+        .filter((characterId) => comments[characterId])
+        .map((characterId) => ({
+          characterId,
+          text: comments[characterId],
+        }));
 
-    sessionStorage.setItem("imagePresets", JSON.stringify(presets));
-    sessionStorage.setItem(
-      "generatedImageUrl",
-      `https://placehold.co/1024x1024/1a1a2e/e0e0e0?text=${encodeURIComponent(presets.style)}`
-    );
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          comments: commentList,
+          presets,
+          userNote,
+          musicAnalysis,
+        }),
+      });
 
-    router.push("/result");
+      const data = await response.json();
+
+      if (!response.ok || !data.imageUrl) {
+        throw new Error(data.detail || data.error || "生成失败");
+      }
+
+      sessionStorage.setItem("imagePresets", JSON.stringify(presets));
+      sessionStorage.setItem("generatedImageUrl", data.imageUrl);
+      sessionStorage.setItem("generatedRemoteImageUrl", data.remoteImageUrl || "");
+      sessionStorage.setItem("generatedImagePrompt", data.prompt || "");
+      sessionStorage.setItem("imageGenerationMeta", JSON.stringify({
+        runId: data.runId,
+        provider: data.provider,
+        model: data.model,
+        requestId: data.requestId,
+        promptSource: data.promptSource,
+        logPath: data.logPath,
+        timings: data.timings,
+        usage: data.usage,
+      }));
+
+      router.push("/result");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "生成失败，请稍后重试");
+      setGenerating(false);
+    }
   };
 
   return (
@@ -75,6 +119,10 @@ export default function GeneratePage() {
             "生成画作"
           )}
         </button>
+
+        {error && (
+          <p className="text-sm text-red-500 text-center">{error}</p>
+        )}
       </div>
     </div>
   );

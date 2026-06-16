@@ -6,41 +6,63 @@ import { getCharactersByIds, Character } from "@/lib/characters";
 import CharacterCard from "@/components/CharacterCard";
 import CommentBubble from "@/components/CommentBubble";
 
+const WAVE_BAR_HEIGHTS = [14, 20, 11, 17];
+
+function getInitialListenState() {
+  if (typeof window === "undefined") {
+    return {
+      selectedChars: [] as Character[],
+      audioSrc: "",
+      audioName: "",
+    };
+  }
+
+  const ids = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
+  const src = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
+  const name = sessionStorage.getItem("audioFileName") || "音乐";
+
+  return {
+    selectedChars: getCharactersByIds(ids),
+    audioSrc: src,
+    audioName: name.replace(/\.\w+$/, ""),
+  };
+}
+
 export default function ListenPage() {
   const router = useRouter();
-  const [selectedChars, setSelectedChars] = useState<Character[]>([]);
+  const [initialState] = useState(getInitialListenState);
+  const [selectedChars] = useState<Character[]>(initialState.selectedChars);
   const [allComments, setAllComments] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [userNote, setUserNote] = useState("");
   const [showUserInput, setShowUserInput] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [audioName, setAudioName] = useState("");
+  const [audioName] = useState(initialState.audioName);
+  const [audioSrc] = useState(initialState.audioSrc);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    const ids = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
-    if (ids.length === 0) {
+    if (selectedChars.length === 0) {
       router.push("/select");
-      return;
     }
-    setSelectedChars(getCharactersByIds(ids));
+  }, [router, selectedChars.length]);
 
-    const src = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
-    const name = sessionStorage.getItem("audioFileName") || "音乐";
-    setAudioName(name.replace(/\.\w+$/, ""));
-    if (src) {
-      const audio = new Audio(src);
-      audio.loop = true;
-      audio.addEventListener("ended", () => setIsPlaying(false));
-      audioRef.current = audio;
-    }
+  useEffect(() => {
+    if (!audioSrc) return;
+
+    const audio = new Audio(audioSrc);
+    audio.loop = true;
+    const handleEnded = () => setIsPlaying(false);
+    audio.addEventListener("ended", handleEnded);
+    audioRef.current = audio;
 
     return () => {
-      audioRef.current?.pause();
+      audio.pause();
+      audio.removeEventListener("ended", handleEnded);
       audioRef.current = null;
     };
-  }, [router]);
+  }, [audioSrc]);
 
   useEffect(() => {
     if (
@@ -122,7 +144,7 @@ export default function ListenPage() {
         </div>
 
         {/* Audio player */}
-        {audioRef.current && (
+        {audioSrc && (
           <button
             onClick={togglePlay}
             className="flex items-center gap-3 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 transition-all"
@@ -145,11 +167,11 @@ export default function ListenPage() {
             </div>
             {isPlaying && (
               <div className="ml-auto flex items-center gap-0.5">
-                {[1, 2, 3, 4].map((i) => (
+                {WAVE_BAR_HEIGHTS.map((height, index) => (
                   <span
-                    key={i}
+                    key={height}
                     className="w-1 bg-blue-500 rounded-full animate-pulse"
-                    style={{ height: `${8 + Math.random() * 12}px`, animationDelay: `${i * 0.15}s` }}
+                    style={{ height: `${height}px`, animationDelay: `${(index + 1) * 0.15}s` }}
                   />
                 ))}
               </div>

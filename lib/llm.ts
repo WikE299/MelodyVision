@@ -54,8 +54,8 @@ export async function callLLMForImagePrompt(
 ): Promise<string> {
   const response = await client.chat.completions.create({
     model: MODEL,
-    max_tokens: 500,
-    temperature: 0.7,
+    max_tokens: 1500,
+    temperature: 0.55,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },

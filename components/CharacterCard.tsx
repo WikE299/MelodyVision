@@ -12,11 +12,6 @@ interface CharacterCardProps {
   disabled?: boolean;
 }
 
-const cultureColors: Record<string, { bg: string; text: string; border: string }> = {
-  chinese: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
-  western: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
-};
-
 const fallbackColors: Record<string, string> = {
   boya: "#6B7280",
   jikang: "#4B5563",
@@ -53,8 +48,6 @@ export default function CharacterCard({
   const imageSrc = selected
     ? `/characters/${character.id}-2.png`
     : `/characters/${character.id}-1.png`;
-
-  const culture = cultureColors[character.culture] || cultureColors.chinese;
 
   return (
     <button

@@ -31,6 +31,9 @@ export default function Home() {
       bpm: features.bpm,
       duration: features.durationSeconds,
       description: features.description,
+      spectralCentroid: features.spectralCentroid,
+      spectralFlatness: features.spectralFlatness,
+      spectralRolloff: features.spectralRolloff,
     };
     sessionStorage.setItem("musicAnalysis", JSON.stringify(analysis));
 

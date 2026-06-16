@@ -60,6 +60,8 @@ const mockAnalyses: AudioAnalysis[] = [
 export async function analyzeAudio(
   _audioBuffer: Buffer
 ): Promise<AudioAnalysis> {
+  void _audioBuffer;
+
   // Mock: simulate analysis delay
   await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -72,6 +74,8 @@ export async function analyzeAudio(
  * Analyze audio from a URL (e.g., preset audio).
  */
 export async function analyzeAudioUrl(_url: string): Promise<AudioAnalysis> {
+  void _url;
+
   await new Promise((resolve) => setTimeout(resolve, 500));
   const index = Math.floor(Math.random() * mockAnalyses.length);
   return mockAnalyses[index];

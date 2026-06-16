@@ -42,6 +42,9 @@ export function formatMusicContext(analysis: {
   bpm?: number;
   duration?: number;
   description?: string;
+  spectralCentroid?: number;
+  spectralFlatness?: number;
+  spectralRolloff?: number;
 }): string {
   const parts: string[] = [];
   if (analysis.tempo) parts.push(`节奏：${analysis.tempo}`);
@@ -49,6 +52,11 @@ export function formatMusicContext(analysis: {
   if (analysis.energy) parts.push(`能量：${analysis.energy}`);
   if (analysis.brightness) parts.push(`音色明暗：${analysis.brightness}`);
   if (analysis.dynamicRange) parts.push(`动态变化：${analysis.dynamicRange}`);
+  if (analysis.spectralFlatness != null) {
+    const tonal = analysis.spectralFlatness < 0.01 ? "有明显调性" : analysis.spectralFlatness > 0.1 ? "噪声感较强" : "调性与噪声混合";
+    parts.push(`音色纯净度：${tonal}（spectral flatness: ${analysis.spectralFlatness}）`);
+  }
+  if (analysis.spectralRolloff) parts.push(`高频截止：${analysis.spectralRolloff} Hz`);
   if (analysis.key) parts.push(`调性：${analysis.key}`);
   if (analysis.instruments?.length) parts.push(`乐器：${analysis.instruments.join("、")}`);
   if (analysis.duration) parts.push(`时长：约${analysis.duration}秒`);
