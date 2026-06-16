@@ -14,7 +14,7 @@ interface PresetSelectorProps {
   disabled?: boolean;
 }
 
-const styleOptions = ["水墨", "油画", "抽象", "写实"];
+const styleOptions = ["水墨", "工笔", "油画", "印象派", "抽象", "写实"];
 const moodOptions = ["宁静", "激昂", "忧伤", "欢快"];
 const toneOptions = ["暖色", "冷色", "淡雅", "浓烈"];
 

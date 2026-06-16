@@ -51,7 +51,7 @@ export default function Home() {
             音乐画师 — 当音乐作画
           </p>
           <p className="mt-1 text-xs text-gray-400">
-            上传一首曲子，让古代音乐家为你点评，再生成一幅画
+            上传一首曲子，让古今中外的音乐家陪你一起听，再生成一幅画
           </p>
         </div>
 

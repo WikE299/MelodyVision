@@ -10,8 +10,9 @@ const presets: PresetAudio[] = [
   { name: "茉莉花", description: "江苏民歌，优美宁静", file: "/preset-audio/molihua.mp3" },
   { name: "高山流水", description: "古琴名曲，意境深远", file: "/preset-audio/gaoshanliushui.mp3" },
   { name: "二泉映月", description: "二胡独奏，如泣如诉", file: "/preset-audio/erquanyinyue.mp3" },
-  { name: "春江花月夜", description: "琵琶古曲，典雅悠扬", file: "/preset-audio/chunjianghuayueye.mp3" },
-  { name: "十面埋伏", description: "琵琶武曲，激昂壮烈", file: "/preset-audio/shimianmaifu.mp3" },
+  { name: "欢乐颂", description: "贝多芬·第九交响曲", file: "/preset-audio/ode-to-joy.mp3" },
+  { name: "G弦上的咏叹调", description: "巴赫·管弦乐组曲", file: "/preset-audio/air-on-g-string.mp3" },
+  { name: "What a Wonderful World", description: "阿姆斯特朗·爵士经典", file: "/preset-audio/wonderful-world.mp3" },
 ];
 
 interface PresetAudiosProps {

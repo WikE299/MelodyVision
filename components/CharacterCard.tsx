@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Character } from "@/lib/characters";
 import Image from "next/image";
 
@@ -11,6 +12,36 @@ interface CharacterCardProps {
   disabled?: boolean;
 }
 
+const cultureColors: Record<string, { bg: string; text: string; border: string }> = {
+  chinese: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
+  western: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
+};
+
+const fallbackColors: Record<string, string> = {
+  boya: "#6B7280",
+  jikang: "#4B5563",
+  caiwenji: "#9F7AEA",
+  abing: "#6B7280",
+  tandun: "#2563EB",
+  bach: "#92400E",
+  mozart: "#D97706",
+  beethoven: "#DC2626",
+  armstrong: "#059669",
+  lennon: "#7C3AED",
+};
+
+function AvatarFallback({ name, id }: { name: string; id: string }) {
+  const color = fallbackColors[id] || "#6B7280";
+  return (
+    <div
+      className="w-full h-full flex items-center justify-center text-white font-bold text-lg"
+      style={{ backgroundColor: color }}
+    >
+      {name.charAt(0)}
+    </div>
+  );
+}
+
 export default function CharacterCard({
   character,
   selected,
@@ -18,10 +49,12 @@ export default function CharacterCard({
   onClick,
   disabled,
 }: CharacterCardProps) {
-  // -1 = initial, -2 = activated
+  const [imgError, setImgError] = useState(false);
   const imageSrc = selected
     ? `/characters/${character.id}-2.png`
     : `/characters/${character.id}-1.png`;
+
+  const culture = cultureColors[character.culture] || cultureColors.chinese;
 
   return (
     <button
@@ -37,21 +70,24 @@ export default function CharacterCard({
         ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
       `}
     >
-      {/* Avatar image */}
+      {/* Avatar */}
       <div className="w-16 h-16 rounded-full overflow-hidden mb-2 relative">
-        <Image
-          src={imageSrc}
-          alt={character.name}
-          fill
-          className="object-cover"
-          sizes="64px"
-        />
+        {imgError ? (
+          <AvatarFallback name={character.name} id={character.id} />
+        ) : (
+          <Image
+            src={imageSrc}
+            alt={character.name}
+            fill
+            className="object-cover"
+            sizes="64px"
+            onError={() => setImgError(true)}
+          />
+        )}
       </div>
 
-      {/* Name */}
+      {/* Name + era */}
       <span className="text-sm font-medium text-gray-800">{character.name}</span>
-
-      {/* Era */}
       <span className="text-xs text-gray-400">{character.era}</span>
 
       {/* Focus keyword badge */}
