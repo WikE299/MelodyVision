@@ -68,6 +68,7 @@ export default function GeneratePage() {
         model: data.model,
         requestId: data.requestId,
         promptSource: data.promptSource,
+        promptDirector: data.promptDirector,
         logPath: data.logPath,
         timings: data.timings,
         usage: data.usage,

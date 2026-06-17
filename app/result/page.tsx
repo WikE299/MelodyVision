@@ -11,6 +11,7 @@ interface GenerationMeta {
   model?: string;
   requestId?: string;
   promptSource?: string;
+  promptDirector?: unknown;
   logPath?: string;
   timings?: Record<string, number>;
   usage?: unknown;
@@ -265,15 +266,13 @@ export default function ResultPage() {
           >
             重新开始
           </button>
-          <button
-            onClick={() => {
-              // TODO: Implement save functionality
-              alert("保存功能即将上线");
-            }}
-            className="flex-1 py-3 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all"
+          <a
+            href={imageUrl}
+            download={`melodyvision-${debugInfo?.meta?.runId || "artwork"}.png`}
+            className="flex-1 py-3 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all text-center"
           >
             保存画作
-          </button>
+          </a>
         </div>
       </div>
     </div>

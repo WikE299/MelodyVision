@@ -14,17 +14,20 @@ function getInitialListenState() {
       selectedChars: [] as Character[],
       audioSrc: "",
       audioName: "",
+      comments: {} as Record<string, string>,
     };
   }
 
   const ids = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
   const src = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
   const name = sessionStorage.getItem("audioFileName") || "音乐";
+  const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
 
   return {
     selectedChars: getCharactersByIds(ids),
     audioSrc: src,
     audioName: name.replace(/\.\w+$/, ""),
+    comments,
   };
 }
 
@@ -32,7 +35,7 @@ export default function ListenPage() {
   const router = useRouter();
   const [initialState] = useState(getInitialListenState);
   const [selectedChars] = useState<Character[]>(initialState.selectedChars);
-  const [allComments, setAllComments] = useState<Record<string, string>>({});
+  const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [userNote, setUserNote] = useState("");
@@ -105,6 +108,11 @@ export default function ListenPage() {
   const handleReveal = async (charId: string) => {
     if (revealed.has(charId) || loading.has(charId)) return;
 
+    if (allComments[charId]) {
+      setRevealed((prev) => new Set(prev).add(charId));
+      return;
+    }
+
     setLoading((prev) => new Set(prev).add(charId));
 
     try {
@@ -139,7 +147,7 @@ export default function ListenPage() {
         <div className="text-center">
           <h2 className="text-xl font-semibold text-gray-900">聆听与点评</h2>
           <p className="text-sm text-gray-500 mt-1">
-            点击头像，听他怎么说
+            点击头像，查看他的点评
           </p>
         </div>
 

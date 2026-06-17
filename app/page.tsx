@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioUploader from "@/components/AudioUploader";
-import PresetAudios from "@/components/PresetAudios";
 import { analyzeAudioFile } from "@/lib/audio/web-analyzer";
 
 export default function Home() {
@@ -16,6 +15,7 @@ export default function Home() {
     // Store file info in sessionStorage for the flow
     sessionStorage.setItem("audioFileName", file.name);
     sessionStorage.setItem("audioFileSize", String(file.size));
+    sessionStorage.removeItem("audioSrc");
 
     // Create object URL for later use
     const url = URL.createObjectURL(file);
@@ -58,9 +58,6 @@ export default function Home() {
 
         {/* Upload area */}
         <AudioUploader onFileSelect={handleFileSelect} disabled={analyzing} />
-
-        {/* Preset audios */}
-        {!analyzing && <PresetAudios onSelect={handleFileSelect} />}
 
         {/* Loading state */}
         {analyzing && (

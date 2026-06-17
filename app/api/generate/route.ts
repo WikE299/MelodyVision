@@ -2,8 +2,14 @@ import { NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { synthesizeImagePrompt } from "@/lib/prompts/image-gen";
-import { callLLMForImagePrompt } from "@/lib/llm";
+import {
+  buildPromptDirectorInput,
+  buildPromptDirectorInstruction,
+  buildPromptDirectorRepairInstruction,
+  PromptDirectorBrief,
+  PromptDirectorInput,
+} from "@/lib/prompts/image-gen";
+import { callPromptDirector, callPromptDirectorRepair, PromptDirectorResult } from "@/lib/llm";
 import { characters } from "@/lib/characters";
 
 interface CommentInput {
@@ -34,6 +40,24 @@ interface SavedImage {
   publicUrl: string;
   bytes: number;
   contentType: string;
+}
+
+interface PromptDirectorValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+interface PromptDirectorStep {
+  rawOutput: string;
+  parsed: PromptDirectorBrief | null;
+  validation: PromptDirectorValidation;
+  meta: {
+    model: string;
+    finishReason: string | null;
+    usage?: PromptDirectorResult["usage"];
+    parseStatus: "ok" | "invalid-json";
+  };
 }
 
 function normalizeComments(comments: unknown): CommentInput[] {
@@ -69,7 +93,8 @@ function normalizeComments(comments: unknown): CommentInput[] {
 function buildFallbackImagePrompt(
   comments: CommentInput[],
   presets: { style?: string; mood?: string; tone?: string },
-  userNote?: string
+  userNote?: string,
+  musicAnalysis?: Record<string, unknown>
 ): string {
   const styleMap: Record<string, string> = {
     水墨: "Chinese ink wash painting",
@@ -92,16 +117,33 @@ function buildFallbackImagePrompt(
   const style = styleMap[presets.style || ""] || "poetic painterly";
   const mood = moodMap[presets.mood || ""] || "serene and contemplative";
   const tone = toneMap[presets.tone || ""] || "muted elegant";
-  const hasForce = comments.some((comment) => /命运|力|拳|搏|抗|火/.test(comment.text));
-  const hasWater = comments.some((comment) => /水|溪|河|流|潭|山/.test(comment.text));
-  const hasEcho = comments.some((comment) => /回响|回声|弦外|远/.test(comment.text)) || Boolean(userNote);
-  const motifs = [
-    hasWater ? "a winding river through layered mountains" : "layered mountains and drifting mist",
-    hasEcho ? "distant echoes visualized as faint ripples of light" : "subtle flowing brush strokes",
-    hasForce ? "a restrained undercurrent of tension beneath the calm surface" : "quiet emotional depth",
-  ].join(", ");
+  const sourceFragments = comments
+    .map((comment) => comment.text.trim())
+    .filter(Boolean)
+    .join(" / ");
+  const musicContext = musicAnalysis
+    ? [
+        musicAnalysis.description,
+        musicAnalysis.tempo,
+        musicAnalysis.mood,
+        musicAnalysis.energy,
+        musicAnalysis.brightness,
+      ]
+        .filter(Boolean)
+        .map(String)
+        .join(" / ")
+    : "";
 
-  return `Create a ${style} with a ${mood} atmosphere and a ${tone} color palette. The scene should transform musical impressions into visual motifs: ${motifs}. Use clear composition, layered depth, expressive light, delicate texture, and a poetic sense of space. No text, no watermark, no logo.`;
+  return [
+    `Create a ${style} with a ${mood} atmosphere and a ${tone} color palette.`,
+    `Use the following source impressions as mandatory visual anchors: ${sourceFragments}.`,
+    userNote ? `Preserve this personal memory as the emotional core: ${userNote}.` : "",
+    musicContext ? `Reflect these audio traits through composition and lighting: ${musicContext}.` : "",
+    "Compose a concrete image with a clear subject, foreground, background, color, light, texture, and emotional tension.",
+    "No text, no watermark, no logo.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function cleanImagePrompt(prompt: string): string {
@@ -111,6 +153,189 @@ function cleanImagePrompt(prompt: string): string {
     .replace(/^["“]|["”]$/g, "")
     .trim();
   return cleaned === "……" ? "" : cleaned;
+}
+
+function parsePromptDirectorBrief(content: string): PromptDirectorBrief | null {
+  const cleaned = content
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as PromptDirectorBrief;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasStringItems(value: unknown): value is string[] {
+  return Array.isArray(value) && value.some((item) => hasText(item));
+}
+
+function collectForbiddenIpTerms(input: PromptDirectorInput): string[] {
+  const text = `${input.userNote} ${input.comments.map((comment) => comment.comment).join(" ")}`;
+  const terms = ["植物大战僵尸", "Plants vs. Zombies"];
+  return terms.filter((term) => text.toLowerCase().includes(term.toLowerCase()));
+}
+
+function validatePromptDirectorBrief(
+  brief: PromptDirectorBrief | null,
+  input: PromptDirectorInput,
+  parseStatus: "ok" | "invalid-json"
+): PromptDirectorValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (parseStatus === "invalid-json" || !brief) {
+    return {
+      ok: false,
+      errors: ["JSON parse failed"],
+      warnings,
+    };
+  }
+
+  if (!hasText(brief.finalPrompt)) {
+    errors.push("Missing finalPrompt");
+  } else {
+    const wordCount = countWords(brief.finalPrompt);
+    if (wordCount < 60) {
+      errors.push(`finalPrompt is too short: ${wordCount} words`);
+    }
+    if (wordCount > 170) {
+      errors.push(`finalPrompt is too long: ${wordCount} words`);
+    }
+
+    const forbiddenMetaTerms = ["music", "comment", "bpm", "musician", "analysis", "prompt"];
+    const promptLower = brief.finalPrompt.toLowerCase();
+    const usedMetaTerms = forbiddenMetaTerms.filter((term) =>
+      new RegExp(`\\b${term}\\b`, "i").test(promptLower)
+    );
+    if (usedMetaTerms.length > 0) {
+      errors.push(`finalPrompt contains forbidden meta terms: ${usedMetaTerms.join(", ")}`);
+    }
+
+    const forbiddenIpTerms = collectForbiddenIpTerms(input).filter((term) =>
+      promptLower.includes(term.toLowerCase())
+    );
+    if (forbiddenIpTerms.length > 0) {
+      errors.push(`finalPrompt contains forbidden IP terms: ${forbiddenIpTerms.join(", ")}`);
+    }
+
+    const forbiddenVisualTerms = [
+      "person",
+      "people",
+      "human",
+      "figure",
+      "face",
+      "portrait",
+      "silhouette",
+      "crowd",
+      "character",
+      "text",
+      "letter",
+      "caption",
+      "handwriting",
+      "sign",
+      "subtitle",
+      "logo",
+      "watermark",
+    ];
+    const usedVisualTerms = forbiddenVisualTerms.filter((term) =>
+      new RegExp(`\\b${term}\\b`, "i").test(promptLower)
+    );
+    if (usedVisualTerms.length > 0) {
+      errors.push(`finalPrompt contains forbidden visual terms: ${usedVisualTerms.join(", ")}`);
+    }
+  }
+
+  if (!hasText(brief.negativePrompt)) {
+    errors.push("Missing negativePrompt");
+  } else if (brief.negativePrompt.split(",").filter((item) => item.trim()).length < 3) {
+    warnings.push("negativePrompt is short");
+  } else {
+    const negativePromptLower = brief.negativePrompt.toLowerCase();
+    const requiredNegativeTerms = ["people", "face", "text", "logo", "watermark"];
+    const missingNegativeTerms = requiredNegativeTerms.filter(
+      (term) => !negativePromptLower.includes(term)
+    );
+    if (missingNegativeTerms.length > 0) {
+      errors.push(`negativePrompt is missing required terms: ${missingNegativeTerms.join(", ")}`);
+    }
+  }
+
+  if (!hasStringItems(brief.visualKeywords)) {
+    errors.push("visualKeywords must contain at least one item");
+  }
+  if (!hasStringItems(brief.symbolicElements)) {
+    errors.push("symbolicElements must contain at least one item");
+  }
+  if (!hasStringItems(brief.mustInclude)) {
+    errors.push("mustInclude must contain at least one item");
+  }
+
+  if (input.comments.length > 0 && hasStringItems(brief.mustInclude)) {
+    const mustIncludeText = brief.mustInclude.join(" ").toLowerCase();
+    const missingSpeakers = input.comments
+      .map((comment) => comment.speaker)
+      .filter((speaker) => !mustIncludeText.includes(speaker.toLowerCase()));
+
+    if (missingSpeakers.length > 0) {
+      errors.push(`mustInclude does not cover all speakers: ${missingSpeakers.join(", ")}`);
+    }
+  }
+
+  if (!hasText(brief.coreEmotion) || countWords(brief.coreEmotion) < 2) {
+    warnings.push("coreEmotion is very short");
+  }
+  if (!hasText(brief.scene) || /abstract|feeling|emotion|mood/i.test(brief.scene)) {
+    warnings.push("scene may be too abstract");
+  }
+  if (!hasText(brief.visualSubject) || /abstract|feeling|emotion|mood/i.test(brief.visualSubject)) {
+    warnings.push("visualSubject may be too abstract");
+  }
+  if (
+    hasText(brief.finalPrompt) &&
+    !brief.finalPrompt.toLowerCase().includes(input.visualPreset.style.toLowerCase())
+  ) {
+    warnings.push("finalPrompt may not clearly reflect visual preset style");
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+function buildPromptDirectorStep(
+  result: PromptDirectorResult,
+  input: PromptDirectorInput
+): PromptDirectorStep {
+  const parsed = parsePromptDirectorBrief(result.content);
+  const parseStatus = parsed ? "ok" : "invalid-json";
+
+  return {
+    rawOutput: result.content,
+    parsed,
+    validation: validatePromptDirectorBrief(parsed, input, parseStatus),
+    meta: {
+      model: result.model,
+      finishReason: result.finishReason,
+      usage: result.usage,
+      parseStatus,
+    },
+  };
 }
 
 function getImageExtension(contentType: string): string {
@@ -154,7 +379,7 @@ async function writeGenerationRunLog(runId: string, log: unknown) {
   return localPath;
 }
 
-async function generateImageWithDashScope(prompt: string) {
+async function generateImageWithDashScope(prompt: string, negativePrompt?: string) {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   const endpoint =
     process.env.IMAGE_API_BASE_URL ||
@@ -187,6 +412,7 @@ async function generateImageWithDashScope(prompt: string) {
         n: 1,
         size: "1280*1280",
         negative_prompt:
+          negativePrompt ||
           "text, watermark, logo, signature, blurry, low quality, distorted anatomy, extra limbs",
       },
     }),
@@ -229,26 +455,57 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Comments required" }, { status: 400 });
     }
 
-    const imageGenPrompt = synthesizeImagePrompt(
+    const promptDirectorInput = buildPromptDirectorInput(
       characters,
       normalizedComments,
       presets || {},
-      userNote
+      userNote,
+      musicAnalysis
     );
+    const promptDirectorInstruction = buildPromptDirectorInstruction(promptDirectorInput);
 
     const promptStartedAt = Date.now();
-    const rawImagePrompt = await callLLMForImagePrompt(
-      imageGenPrompt,
-      "Generate the final image prompt now. Output only the English prompt, without explanation or markdown."
-    );
+    const promptDirector = await callPromptDirector(promptDirectorInstruction);
     timings.promptRewriteMs = Date.now() - promptStartedAt;
 
-    const cleanedPrompt = cleanImagePrompt(rawImagePrompt);
-    const promptSource = cleanedPrompt ? "llm" : "fallback";
-    const imagePrompt = cleanedPrompt || buildFallbackImagePrompt(normalizedComments, presets || {}, userNote);
+    const initialDirectorStep = buildPromptDirectorStep(promptDirector, promptDirectorInput);
+    let finalDirectorStep = initialDirectorStep;
+    let repairDirectorStep: PromptDirectorStep | undefined;
+    let promptSource: "prompt-director" | "prompt-director-repaired" | "deterministic-fallback" =
+      "prompt-director";
+
+    if (!initialDirectorStep.validation.ok) {
+      const repairStartedAt = Date.now();
+      const repairInstruction = buildPromptDirectorRepairInstruction({
+        originalInput: promptDirectorInput,
+        previousRawOutput: initialDirectorStep.rawOutput,
+        parsedBrief: initialDirectorStep.parsed,
+        validationErrors: initialDirectorStep.validation.errors,
+        validationWarnings: initialDirectorStep.validation.warnings,
+      });
+      const promptDirectorRepair = await callPromptDirectorRepair(repairInstruction);
+      timings.promptRepairMs = Date.now() - repairStartedAt;
+      repairDirectorStep = buildPromptDirectorStep(promptDirectorRepair, promptDirectorInput);
+      finalDirectorStep = repairDirectorStep;
+      promptSource = repairDirectorStep.validation.ok
+        ? "prompt-director-repaired"
+        : "deterministic-fallback";
+    }
+
+    const promptBrief = finalDirectorStep.validation.ok ? finalDirectorStep.parsed : null;
+    const cleanedPrompt = cleanImagePrompt(promptBrief?.finalPrompt || "");
+    if (!cleanedPrompt) {
+      promptSource = "deterministic-fallback";
+    }
+    const imagePrompt =
+      cleanedPrompt ||
+      buildFallbackImagePrompt(normalizedComments, presets || {}, userNote, musicAnalysis);
+    const negativePrompt =
+      promptBrief?.negativePrompt ||
+      "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs";
 
     const imageStartedAt = Date.now();
-    const imageResult = await generateImageWithDashScope(imagePrompt);
+    const imageResult = await generateImageWithDashScope(imagePrompt, negativePrompt);
     timings.imageGenerationMs = Date.now() - imageStartedAt;
 
     const saveStartedAt = Date.now();
@@ -269,10 +526,13 @@ export async function POST(request: NextRequest) {
         userNote,
       },
       prompt: {
-        synthesisInstruction: imageGenPrompt,
-        rawImagePrompt,
-        finalImagePrompt: imagePrompt,
         source: promptSource,
+        director: {
+          initial: initialDirectorStep,
+          repair: repairDirectorStep,
+        },
+        finalImagePrompt: imagePrompt,
+        negativePrompt,
       },
       image: {
         provider: imageResult.provider,
@@ -295,6 +555,13 @@ export async function POST(request: NextRequest) {
       remoteImageUrl: imageResult.remoteImageUrl,
       prompt: imagePrompt,
       promptSource,
+      promptDirector: {
+        source: promptSource,
+        result: promptBrief,
+        validation: finalDirectorStep.validation,
+        repaired: Boolean(repairDirectorStep),
+        meta: finalDirectorStep.meta,
+      },
       presets,
       provider: imageResult.provider,
       model: imageResult.model,

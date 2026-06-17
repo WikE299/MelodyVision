@@ -6,12 +6,16 @@ import { chineseCharacters, westernCharacters } from "@/lib/characters";
 import CharacterCard from "@/components/CharacterCard";
 
 const DEFAULT_COMBO = ["boya", "beethoven", "abing", "armstrong"];
+const COMMENT_FAILED_TEXT = "（评论生成失败，请重试）";
 
 export default function SelectPage() {
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState("");
 
   const toggleCharacter = (id: string) => {
+    if (generating) return;
     setSelected((prev) => {
       if (prev.includes(id)) {
         return prev.filter((c) => c !== id);
@@ -22,13 +26,65 @@ export default function SelectPage() {
   };
 
   const applyDefaultCombo = () => {
+    if (generating) return;
     setSelected(DEFAULT_COMBO);
   };
 
-  const handleContinue = () => {
-    if (selected.length === 0) return;
+  const generateComment = async (characterId: string, musicAnalysis: unknown) => {
+    const res = await fetch("/api/comment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        characterId,
+        musicAnalysis,
+      }),
+    });
+
+    if (!res.ok) throw new Error("Comment API failed");
+    const data = await res.json();
+    return data.comment as string;
+  };
+
+  const handleContinue = async () => {
+    if (selected.length === 0 || generating) return;
+
+    setGenerating(true);
+    setError("");
     sessionStorage.setItem("selectedCharacters", JSON.stringify(selected));
-    router.push("/listen");
+    sessionStorage.removeItem("comments");
+
+    try {
+      const musicAnalysis = JSON.parse(
+        sessionStorage.getItem("musicAnalysis") || "{}"
+      );
+      const results = await Promise.allSettled(
+        selected.map(async (characterId) => ({
+          characterId,
+          comment: await generateComment(characterId, musicAnalysis),
+        }))
+      );
+      const successCount = results.filter((result) => result.status === "fulfilled").length;
+
+      if (successCount === 0) {
+        throw new Error("All comment requests failed");
+      }
+
+      const comments = Object.fromEntries(
+        results.map((result, index) => {
+          const characterId = selected[index];
+          if (result.status === "fulfilled") {
+            return [result.value.characterId, result.value.comment];
+          }
+          return [characterId, COMMENT_FAILED_TEXT];
+        })
+      );
+
+      sessionStorage.setItem("comments", JSON.stringify(comments));
+      router.push("/listen");
+    } catch {
+      setError("评论生成失败，请稍后重试");
+      setGenerating(false);
+    }
   };
 
   return (
@@ -43,7 +99,8 @@ export default function SelectPage() {
         {/* Quick combo */}
         <button
           onClick={applyDefaultCombo}
-          className="px-4 py-1.5 rounded-full text-xs border border-blue-200 text-blue-600 hover:bg-blue-50 transition-all"
+          disabled={generating}
+          className="px-4 py-1.5 rounded-full text-xs border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           推荐组合：伯牙 + 贝多芬 + 阿炳 + 阿姆斯特朗
         </button>
@@ -62,6 +119,7 @@ export default function SelectPage() {
                 selected={selected.includes(char.id)}
                 commented={false}
                 onClick={() => toggleCharacter(char.id)}
+                disabled={generating}
               />
             ))}
           </div>
@@ -81,6 +139,7 @@ export default function SelectPage() {
                 selected={selected.includes(char.id)}
                 commented={false}
                 onClick={() => toggleCharacter(char.id)}
+                disabled={generating}
               />
             ))}
           </div>
@@ -94,18 +153,30 @@ export default function SelectPage() {
         {/* Continue button */}
         <button
           onClick={handleContinue}
-          disabled={selected.length === 0}
+          disabled={selected.length === 0 || generating}
           className={`
             w-full py-3 rounded-xl text-sm font-medium transition-all
             ${
-              selected.length > 0
+              selected.length > 0 && !generating
                 ? "bg-gray-900 text-white hover:bg-gray-800"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed"
             }
           `}
         >
-          {selected.length === 0 ? "请选择至少一位音乐家" : "开始聆听"}
+          {generating
+            ? "正在分析并生成评论..."
+            : selected.length === 0
+              ? "请选择至少一位音乐家"
+              : "开始聆听"}
         </button>
+        {generating && (
+          <p className="text-xs text-gray-400 text-center">
+            音乐家正在并行点评，完成后会自动进入聆听页
+          </p>
+        )}
+        {error && (
+          <p className="text-xs text-red-500 text-center">{error}</p>
+        )}
       </div>
     </div>
   );
