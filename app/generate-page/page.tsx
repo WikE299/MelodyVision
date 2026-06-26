@@ -3,13 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import PresetSelector, { Presets } from "@/components/PresetSelector";
+import { getExperimentSessionId } from "@/lib/experiment-session";
 
 export default function GeneratePage() {
   const router = useRouter();
   const [presets, setPresets] = useState<Presets>({
-    style: "水墨",
-    mood: "宁静",
-    tone: "淡雅",
+    style: "自动",
+    mood: "自动",
+    tone: "自动",
   });
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,11 +41,14 @@ export default function GeneratePage() {
           characterId,
           text: comments[characterId],
         }));
+      const sessionId = await getExperimentSessionId();
 
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sessionId,
+          selectedCharacters,
           comments: commentList,
           presets,
           userNote,
@@ -62,8 +66,10 @@ export default function GeneratePage() {
       sessionStorage.setItem("generatedImageUrl", data.imageUrl);
       sessionStorage.setItem("generatedRemoteImageUrl", data.remoteImageUrl || "");
       sessionStorage.setItem("generatedImagePrompt", data.prompt || "");
+      sessionStorage.setItem("experimentSessionId", data.sessionId || sessionId);
       sessionStorage.setItem("imageGenerationMeta", JSON.stringify({
         runId: data.runId,
+        sessionId: data.sessionId || sessionId,
         provider: data.provider,
         model: data.model,
         requestId: data.requestId,

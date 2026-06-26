@@ -1,4 +1,8 @@
 import { Character } from "../characters";
+import {
+  buildVisualPresetPrompt,
+  type VisualPresetPrompt,
+} from "./visual-presets";
 
 export interface PromptDirectorInput {
   comments: Array<{
@@ -20,18 +24,22 @@ export interface PromptDirectorInput {
     spectralFlatness?: unknown;
     spectralRolloff?: unknown;
   };
-  visualPreset: {
-    style: string;
-    mood: string;
-    tone: string;
-  };
+  visualPreset: VisualPresetPrompt;
 }
 
 export interface PromptDirectorBrief {
   coreEmotion: string;
+  visualDomain: string;
+  userNoteTrace: string;
+  sourceMappings: Array<{
+    characterId: string;
+    speaker: string;
+    visualTranslation: string;
+  }>;
   visualSubject: string;
   scene: string;
   composition: string;
+  noveltyStrategy: string;
   style: string;
   colorPalette: string;
   lighting: string;
@@ -92,10 +100,11 @@ ${commentSummary}`;
     }
   }
 
+  const visualPreset = buildVisualPresetPrompt(presets);
   prompt += `\n\n视觉预设：
-风格：${presets.style || "水墨"}
-情绪：${presets.mood || "宁静"}
-色调：${presets.tone || "淡雅"}`;
+风格：${visualPreset.style} — ${visualPreset.stylePrompt}
+情绪：${visualPreset.mood} — ${visualPreset.moodPrompt}
+色调：${visualPreset.tone} — ${visualPreset.tonePrompt}`;
 
   prompt += `
 
@@ -149,32 +158,33 @@ export function buildPromptDirectorInput(
     comments: commentSummary,
     userNote: userNote || "",
     musicAnalysis: musicContext,
-    visualPreset: {
-      style: presets.style || "水墨",
-      mood: presets.mood || "宁静",
-      tone: presets.tone || "淡雅",
-    },
+    visualPreset: buildVisualPresetPrompt(presets),
   };
 }
 
 export function buildPromptDirectorInstruction(input: PromptDirectorInput): string {
   return `You are Prompt Director for a music-to-image product.
 
-Your job is to synthesize every musician comment, the user's personal note, the audio analysis, and the visual preset into standardized visual vocabulary for an image-generation model.
+Your job is to act as a visual creative director and reliability agent. First build a concise visual plan that faithfully translates the source material, then write the image-generation prompt. The selected visual preset provides production constraints, not a reusable scene template.
 
 Hard rules:
 1. User note has the highest priority for personal meaning.
-2. Every musician comment must influence the visual plan. Do not drop any speaker.
-3. Convert phrases into drawable visual terms: subject, setting, objects, motion, texture, palette, lighting, atmosphere, composition.
+2. Every musician comment must influence the visual plan. Do not drop any speaker, and preserve each characterId exactly in sourceMappings.
+3. Convert phrases into drawable visual terms: subject, setting, objects, motion, texture, palette, lighting, atmosphere, composition. Do not simply quote or summarize the comments.
 4. Audio analysis controls motion, density, contrast, brightness, and tension.
-5. Visual preset controls final appearance, but must not erase the emotional core.
+5. Treat visualPreset.stylePrompt, moodPrompt, and tonePrompt as hard production constraints. Integrate them into finalPrompt naturally. "自动" means you must make a deliberate choice from this specific source material, not reuse a default.
 6. If inputs conflict, preserve the conflict visually, for example calm surface with hidden pressure.
 7. Do not mention music, comments, BPM, musicians, analysis, or prompt in finalPrompt.
 8. finalPrompt must be concrete and imageable, not abstract.
 9. Avoid copyrighted game character names or exact franchise names in finalPrompt; translate them into visual traits instead.
 10. Do not include any people, human figures, faces, bodies, portraits, silhouettes, crowds, or characters in the image.
 11. Do not include any visible text, letters, captions, handwriting, signs, subtitles, logos, or watermarks in the image.
-12. Return valid JSON only.
+12. Choose a visualDomain before writing finalPrompt. Consider objects, interiors, architecture, natural phenomena, still life, material studies, geometric space, microscopic worlds, surreal environments, machines, weather systems, or ceremonial spaces as appropriate.
+13. Do not default to mountains, rivers, mist, bamboo, moonlight, bridges, or generic tranquil landscapes unless those motifs are directly justified by the inputs.
+14. The medium describes how the image is made; it must not dictate what the image depicts. An ink painting does not automatically require a landscape.
+15. Commit to one clear focal subject and one distinctive compositional idea. Avoid generic collections of poetic motifs.
+16. finalPrompt must be a true composite of music traits, musician comments, and user note. If userNote is empty, userNoteTrace must say "none".
+17. Return valid JSON only.
 
 Input:
 ${JSON.stringify(input, null, 2)}
@@ -182,9 +192,19 @@ ${JSON.stringify(input, null, 2)}
 Return this exact JSON shape:
 {
   "coreEmotion": "short English phrase",
+  "visualDomain": "one concrete domain, such as interior, architecture, object still life, weather system, microscopic world, surreal space",
+  "userNoteTrace": "how the user note becomes a visual detail, or none",
+  "sourceMappings": [
+    {
+      "characterId": "exact characterId from input",
+      "speaker": "speaker name from input",
+      "visualTranslation": "specific drawable contribution from this comment"
+    }
+  ],
   "visualSubject": "short English phrase",
   "scene": "short English phrase",
   "composition": "short English phrase",
+  "noveltyStrategy": "how this avoids a default landscape or repeated style",
   "style": "short English phrase",
   "colorPalette": "short English phrase",
   "lighting": "short English phrase",
@@ -204,10 +224,11 @@ export function buildPromptDirectorRepairInstruction(params: {
   parsedBrief: PromptDirectorBrief | null;
   validationErrors: string[];
   validationWarnings: string[];
+  attempt: number;
 }): string {
   return `${buildPromptDirectorInstruction(params.originalInput)}
 
-Your previous output failed validation.
+Your previous output failed validation during agent-loop attempt ${params.attempt}.
 
 Validation errors:
 ${params.validationErrors.map((error) => `- ${error}`).join("\n") || "- none"}
@@ -223,6 +244,8 @@ ${JSON.stringify(params.parsedBrief, null, 2)}
 
 Repair the output. Return the same JSON shape only.
 Do not explain.
+Keep every input characterId exactly once in sourceMappings.
+Make userNoteTrace concrete when userNote is present.
 Do not remove any musician's influence.
 Do not include forbidden meta words in finalPrompt.
 Do not include any people or visible text in finalPrompt.`;

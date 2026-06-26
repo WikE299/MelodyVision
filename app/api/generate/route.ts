@@ -11,6 +11,10 @@ import {
 } from "@/lib/prompts/image-gen";
 import { callPromptDirector, callPromptDirectorRepair, PromptDirectorResult } from "@/lib/llm";
 import { characters } from "@/lib/characters";
+import { buildVisualPresetPrompt } from "@/lib/prompts/visual-presets";
+import { insertGenerationRun } from "@/lib/db/generation-runs";
+
+export const runtime = "nodejs";
 
 interface CommentInput {
   characterId: string;
@@ -49,6 +53,7 @@ interface PromptDirectorValidation {
 }
 
 interface PromptDirectorStep {
+  label: "initial" | "repair";
   rawOutput: string;
   parsed: PromptDirectorBrief | null;
   validation: PromptDirectorValidation;
@@ -59,6 +64,8 @@ interface PromptDirectorStep {
     parseStatus: "ok" | "invalid-json";
   };
 }
+
+const PROMPT_DIRECTOR_MAX_REPAIRS = 2;
 
 function normalizeComments(comments: unknown): CommentInput[] {
   if (Array.isArray(comments)) {
@@ -96,27 +103,6 @@ function buildFallbackImagePrompt(
   userNote?: string,
   musicAnalysis?: Record<string, unknown>
 ): string {
-  const styleMap: Record<string, string> = {
-    水墨: "Chinese ink wash painting",
-    油画: "expressive oil painting",
-    抽象: "abstract atmospheric painting",
-    写实: "realistic cinematic painting",
-  };
-  const moodMap: Record<string, string> = {
-    宁静: "serene and contemplative",
-    激昂: "dramatic and powerful",
-    忧伤: "melancholic and restrained",
-    欢快: "bright and joyful",
-  };
-  const toneMap: Record<string, string> = {
-    暖色: "warm amber and gold",
-    冷色: "cool blue and silver",
-    淡雅: "muted elegant gray-green",
-    浓烈: "rich high-contrast colors",
-  };
-  const style = styleMap[presets.style || ""] || "poetic painterly";
-  const mood = moodMap[presets.mood || ""] || "serene and contemplative";
-  const tone = toneMap[presets.tone || ""] || "muted elegant";
   const sourceFragments = comments
     .map((comment) => comment.text.trim())
     .filter(Boolean)
@@ -135,7 +121,7 @@ function buildFallbackImagePrompt(
     : "";
 
   return [
-    `Create a ${style} with a ${mood} atmosphere and a ${tone} color palette.`,
+    "Create one distinctive visual concept with a clear focal subject. Do not default to a generic landscape.",
     `Use the following source impressions as mandatory visual anchors: ${sourceFragments}.`,
     userNote ? `Preserve this personal memory as the emotional core: ${userNote}.` : "",
     musicContext ? `Reflect these audio traits through composition and lighting: ${musicContext}.` : "",
@@ -144,6 +130,25 @@ function buildFallbackImagePrompt(
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function appendVisualPresetPrompt(prompt: string, presets: Record<string, unknown>): string {
+  const visualPreset = buildVisualPresetPrompt({
+    style: typeof presets.style === "string" ? presets.style : undefined,
+    mood: typeof presets.mood === "string" ? presets.mood : undefined,
+    tone: typeof presets.tone === "string" ? presets.tone : undefined,
+  });
+  const selectedPrompts = [
+    visualPreset.style !== "自动" ? visualPreset.stylePrompt : "",
+    visualPreset.mood !== "自动" ? visualPreset.moodPrompt : "",
+    visualPreset.tone !== "自动" ? visualPreset.tonePrompt : "",
+  ].filter(Boolean);
+
+  if (selectedPrompts.length === 0) {
+    return prompt.trim();
+  }
+
+  return `${prompt.trim()} Render with these selected production constraints: ${selectedPrompts.join(" ")}`;
 }
 
 function cleanImagePrompt(prompt: string): string {
@@ -181,6 +186,20 @@ function hasText(value: unknown): value is string {
 
 function hasStringItems(value: unknown): value is string[] {
   return Array.isArray(value) && value.some((item) => hasText(item));
+}
+
+function hasSourceMappings(value: unknown): value is PromptDirectorBrief["sourceMappings"] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        hasText((item as { characterId?: unknown }).characterId) &&
+        hasText((item as { speaker?: unknown }).speaker) &&
+        hasText((item as { visualTranslation?: unknown }).visualTranslation)
+    )
+  );
 }
 
 function collectForbiddenIpTerms(input: PromptDirectorInput): string[] {
@@ -280,19 +299,47 @@ function validatePromptDirectorBrief(
   if (!hasStringItems(brief.symbolicElements)) {
     errors.push("symbolicElements must contain at least one item");
   }
+  if (!hasText(brief.visualDomain)) {
+    errors.push("Missing visualDomain");
+  }
+  if (!hasText(brief.noveltyStrategy)) {
+    errors.push("Missing noveltyStrategy");
+  }
+  if (hasText(input.userNote) && !hasText(brief.userNoteTrace)) {
+    errors.push("Missing userNoteTrace for provided userNote");
+  } else if (hasText(input.userNote) && brief.userNoteTrace.trim().toLowerCase() === "none") {
+    errors.push("userNoteTrace cannot be none when userNote is provided");
+  }
+  if (!hasText(input.userNote) && hasText(brief.userNoteTrace) && brief.userNoteTrace !== "none") {
+    warnings.push("userNoteTrace should be none when userNote is empty");
+  }
+  if (!hasSourceMappings(brief.sourceMappings)) {
+    errors.push("sourceMappings must contain characterId, speaker, and visualTranslation");
+  } else {
+    const mappingIds = brief.sourceMappings.map((mapping) => mapping.characterId);
+    const mappedIds = new Set(mappingIds);
+    const missingIds = input.comments
+      .map((comment) => comment.characterId)
+      .filter((characterId) => !mappedIds.has(characterId));
+    const extraIds = brief.sourceMappings
+      .map((mapping) => mapping.characterId)
+      .filter((characterId) => !input.comments.some((comment) => comment.characterId === characterId));
+    const duplicateIds = mappingIds.filter(
+      (characterId, index) => mappingIds.indexOf(characterId) !== index
+    );
+
+    if (missingIds.length > 0) {
+      errors.push(`sourceMappings missing characterIds: ${missingIds.join(", ")}`);
+    }
+    if (extraIds.length > 0) {
+      errors.push(`sourceMappings contains unknown characterIds: ${extraIds.join(", ")}`);
+    }
+    if (duplicateIds.length > 0) {
+      errors.push(`sourceMappings contains duplicate characterIds: ${duplicateIds.join(", ")}`);
+    }
+  }
   if (!hasStringItems(brief.mustInclude)) {
     errors.push("mustInclude must contain at least one item");
-  }
-
-  if (input.comments.length > 0 && hasStringItems(brief.mustInclude)) {
-    const mustIncludeText = brief.mustInclude.join(" ").toLowerCase();
-    const missingSpeakers = input.comments
-      .map((comment) => comment.speaker)
-      .filter((speaker) => !mustIncludeText.includes(speaker.toLowerCase()));
-
-    if (missingSpeakers.length > 0) {
-      errors.push(`mustInclude does not cover all speakers: ${missingSpeakers.join(", ")}`);
-    }
   }
 
   if (!hasText(brief.coreEmotion) || countWords(brief.coreEmotion) < 2) {
@@ -306,6 +353,7 @@ function validatePromptDirectorBrief(
   }
   if (
     hasText(brief.finalPrompt) &&
+    input.visualPreset.style !== "自动" &&
     !brief.finalPrompt.toLowerCase().includes(input.visualPreset.style.toLowerCase())
   ) {
     warnings.push("finalPrompt may not clearly reflect visual preset style");
@@ -320,12 +368,14 @@ function validatePromptDirectorBrief(
 
 function buildPromptDirectorStep(
   result: PromptDirectorResult,
-  input: PromptDirectorInput
+  input: PromptDirectorInput,
+  label: PromptDirectorStep["label"]
 ): PromptDirectorStep {
   const parsed = parsePromptDirectorBrief(result.content);
   const parseStatus = parsed ? "ok" : "invalid-json";
 
   return {
+    label,
     rawOutput: result.content,
     parsed,
     validation: validatePromptDirectorBrief(parsed, input, parseStatus),
@@ -335,6 +385,52 @@ function buildPromptDirectorStep(
       usage: result.usage,
       parseStatus,
     },
+  };
+}
+
+async function runPromptDirectorLoop(
+  instruction: string,
+  input: PromptDirectorInput
+): Promise<{
+  finalStep: PromptDirectorStep;
+  attempts: PromptDirectorStep[];
+  repairSteps: PromptDirectorStep[];
+  timings: Record<string, number>;
+}> {
+  const timings: Record<string, number> = {};
+  const attempts: PromptDirectorStep[] = [];
+
+  const promptStartedAt = Date.now();
+  const promptDirector = await callPromptDirector(instruction);
+  timings.promptRewriteMs = Date.now() - promptStartedAt;
+
+  attempts.push(buildPromptDirectorStep(promptDirector, input, "initial"));
+
+  for (let repairIndex = 0; repairIndex < PROMPT_DIRECTOR_MAX_REPAIRS; repairIndex += 1) {
+    const latestStep = attempts[attempts.length - 1];
+    if (latestStep.validation.ok) break;
+
+    const repairStartedAt = Date.now();
+    const repairInstruction = buildPromptDirectorRepairInstruction({
+      originalInput: input,
+      previousRawOutput: latestStep.rawOutput,
+      parsedBrief: latestStep.parsed,
+      validationErrors: latestStep.validation.errors,
+      validationWarnings: latestStep.validation.warnings,
+      attempt: repairIndex + 1,
+    });
+    const promptDirectorRepair = await callPromptDirectorRepair(repairInstruction);
+    timings[`promptRepair${repairIndex + 1}Ms`] = Date.now() - repairStartedAt;
+    attempts.push(buildPromptDirectorStep(promptDirectorRepair, input, "repair"));
+  }
+
+  const repairSteps = attempts.filter((attempt) => attempt.label === "repair");
+
+  return {
+    finalStep: attempts[attempts.length - 1],
+    attempts,
+    repairSteps,
+    timings,
   };
 }
 
@@ -449,6 +545,13 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { comments, presets, userNote, musicAnalysis } = body;
+    const sessionId =
+      typeof body.sessionId === "string" && body.sessionId.trim()
+        ? body.sessionId.trim()
+        : runId;
+    const selectedCharacters = Array.isArray(body.selectedCharacters)
+      ? body.selectedCharacters.filter((characterId: unknown) => typeof characterId === "string")
+      : [];
     const normalizedComments = normalizeComments(comments);
 
     if (normalizedComments.length === 0) {
@@ -464,32 +567,23 @@ export async function POST(request: NextRequest) {
     );
     const promptDirectorInstruction = buildPromptDirectorInstruction(promptDirectorInput);
 
-    const promptStartedAt = Date.now();
-    const promptDirector = await callPromptDirector(promptDirectorInstruction);
-    timings.promptRewriteMs = Date.now() - promptStartedAt;
+    const promptDirectorLoop = await runPromptDirectorLoop(
+      promptDirectorInstruction,
+      promptDirectorInput
+    );
+    Object.assign(timings, promptDirectorLoop.timings);
 
-    const initialDirectorStep = buildPromptDirectorStep(promptDirector, promptDirectorInput);
-    let finalDirectorStep = initialDirectorStep;
-    let repairDirectorStep: PromptDirectorStep | undefined;
+    const initialDirectorStep = promptDirectorLoop.attempts[0];
+    const repairDirectorSteps = promptDirectorLoop.repairSteps;
+    const repairDirectorStep = repairDirectorSteps[repairDirectorSteps.length - 1];
+    const finalDirectorStep = promptDirectorLoop.finalStep;
     let promptSource: "prompt-director" | "prompt-director-repaired" | "deterministic-fallback" =
-      "prompt-director";
-
-    if (!initialDirectorStep.validation.ok) {
-      const repairStartedAt = Date.now();
-      const repairInstruction = buildPromptDirectorRepairInstruction({
-        originalInput: promptDirectorInput,
-        previousRawOutput: initialDirectorStep.rawOutput,
-        parsedBrief: initialDirectorStep.parsed,
-        validationErrors: initialDirectorStep.validation.errors,
-        validationWarnings: initialDirectorStep.validation.warnings,
-      });
-      const promptDirectorRepair = await callPromptDirectorRepair(repairInstruction);
-      timings.promptRepairMs = Date.now() - repairStartedAt;
-      repairDirectorStep = buildPromptDirectorStep(promptDirectorRepair, promptDirectorInput);
-      finalDirectorStep = repairDirectorStep;
-      promptSource = repairDirectorStep.validation.ok
+      finalDirectorStep.validation.ok && finalDirectorStep.label === "repair"
         ? "prompt-director-repaired"
-        : "deterministic-fallback";
+        : "prompt-director";
+
+    if (!finalDirectorStep.validation.ok) {
+      promptSource = "deterministic-fallback";
     }
 
     const promptBrief = finalDirectorStep.validation.ok ? finalDirectorStep.parsed : null;
@@ -497,9 +591,10 @@ export async function POST(request: NextRequest) {
     if (!cleanedPrompt) {
       promptSource = "deterministic-fallback";
     }
-    const imagePrompt =
+    const directorImagePrompt =
       cleanedPrompt ||
       buildFallbackImagePrompt(normalizedComments, presets || {}, userNote, musicAnalysis);
+    const imagePrompt = appendVisualPresetPrompt(directorImagePrompt, presets || {});
     const negativePrompt =
       promptBrief?.negativePrompt ||
       "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs";
@@ -529,8 +624,13 @@ export async function POST(request: NextRequest) {
         source: promptSource,
         director: {
           initial: initialDirectorStep,
+          attempts: promptDirectorLoop.attempts,
+          repairs: repairDirectorSteps,
           repair: repairDirectorStep,
+          final: finalDirectorStep,
         },
+        directorImagePrompt,
+        visualPresetPrompt: promptDirectorInput.visualPreset,
         finalImagePrompt: imagePrompt,
         negativePrompt,
       },
@@ -548,9 +648,30 @@ export async function POST(request: NextRequest) {
       timings,
     };
     const logPath = await writeGenerationRunLog(runId, runLog);
+    await insertGenerationRun({
+      id: runId,
+      sessionId,
+      createdAt: startedAt.toISOString(),
+      selectedCharacters,
+      presets,
+      userNote: typeof userNote === "string" ? userNote : "",
+      musicAnalysis,
+      musicianComments: normalizedComments,
+      promptDirector: runLog.prompt.director,
+      finalImagePrompt: imagePrompt,
+      negativePrompt,
+      imageUrl: savedImage.publicUrl,
+      remoteImageUrl: imageResult.remoteImageUrl,
+      imageProvider: imageResult.provider,
+      imageModel: imageResult.model,
+      imageRequestId: imageResult.requestId || "",
+      timings,
+      logPath,
+    });
 
     return Response.json({
       runId,
+      sessionId,
       imageUrl: savedImage.publicUrl,
       remoteImageUrl: imageResult.remoteImageUrl,
       prompt: imagePrompt,

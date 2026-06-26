@@ -1,10 +1,11 @@
 "use client";
 
-export interface Presets {
-  style: string;
-  mood: string;
-  tone: string;
-}
+import {
+  VISUAL_PRESET_OPTIONS,
+  type VisualPresets,
+} from "@/lib/prompts/visual-presets";
+
+export type Presets = VisualPresets;
 
 interface PresetSelectorProps {
   value: Presets;
@@ -12,9 +13,9 @@ interface PresetSelectorProps {
   disabled?: boolean;
 }
 
-const styleOptions = ["水墨", "工笔", "油画", "印象派", "抽象", "写实"];
-const moodOptions = ["宁静", "激昂", "忧伤", "欢快"];
-const toneOptions = ["暖色", "冷色", "淡雅", "浓烈"];
+const styleOptions = VISUAL_PRESET_OPTIONS.style.map((option) => option.label);
+const moodOptions = VISUAL_PRESET_OPTIONS.mood.map((option) => option.label);
+const toneOptions = VISUAL_PRESET_OPTIONS.tone.map((option) => option.label);
 
 function PresetGroup({
   label,
@@ -32,7 +33,7 @@ function PresetGroup({
   return (
     <div className="flex flex-col items-center gap-2">
       <span className="text-xs text-gray-500">{label}</span>
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap justify-center gap-1.5">
         {options.map((opt) => (
           <button
             key={opt}

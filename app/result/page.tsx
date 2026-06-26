@@ -4,9 +4,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getCharactersByIds } from "@/lib/characters";
 import CommentBubble from "@/components/CommentBubble";
+import { getExperimentSessionId } from "@/lib/experiment-session";
 
 interface GenerationMeta {
   runId?: string;
+  sessionId?: string;
   provider?: string;
   model?: string;
   requestId?: string;
@@ -22,6 +24,23 @@ interface DebugInfo {
   prompt: string;
   meta: GenerationMeta | null;
   remoteImageUrl: string;
+}
+
+const FEEDBACK_REASONS = [
+  "很准确",
+  "情绪对",
+  "风格不对",
+  "太抽象",
+  "不像音乐",
+  "画面好看",
+];
+
+interface FeedbackState {
+  musicMatchScore: number;
+  commentMatchScore: number;
+  aestheticScore: number;
+  selectedReasons: string[];
+  freeText: string;
 }
 
 function getInitialResultState() {
@@ -80,6 +99,14 @@ export default function ResultPage() {
   const [presets] = useState<{ style: string; mood: string; tone: string } | null>(initialState.presets);
   const [characterIds] = useState<string[]>(initialState.characterIds);
   const [debugInfo] = useState<DebugInfo | null>(initialState.debugInfo);
+  const [feedback, setFeedback] = useState<FeedbackState>({
+    musicMatchScore: 4,
+    commentMatchScore: 4,
+    aestheticScore: 4,
+    selectedReasons: [],
+    freeText: "",
+  });
+  const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
     if (!imageUrl) {
@@ -125,6 +152,51 @@ export default function ResultPage() {
   const handleRestart = () => {
     sessionStorage.clear();
     router.push("/");
+  };
+
+  const updateScore = (key: keyof Pick<FeedbackState, "musicMatchScore" | "commentMatchScore" | "aestheticScore">, score: number) => {
+    setFeedback((prev) => ({ ...prev, [key]: score }));
+  };
+
+  const toggleReason = (reason: string) => {
+    setFeedback((prev) => ({
+      ...prev,
+      selectedReasons: prev.selectedReasons.includes(reason)
+        ? prev.selectedReasons.filter((item) => item !== reason)
+        : [...prev.selectedReasons, reason],
+    }));
+  };
+
+  const submitFeedback = async () => {
+    const runId = debugInfo?.meta?.runId;
+    if (!runId || feedbackStatus === "saving" || feedbackStatus === "saved") return;
+
+    setFeedbackStatus("saving");
+
+    try {
+      const sessionId =
+        debugInfo?.meta?.sessionId ||
+        sessionStorage.getItem("experimentSessionId") ||
+        (await getExperimentSessionId());
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId,
+          sessionId,
+          ...feedback,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "反馈提交失败");
+      }
+
+      setFeedbackStatus("saved");
+    } catch {
+      setFeedbackStatus("error");
+    }
   };
 
   if (!imageUrl) return null;
@@ -210,6 +282,91 @@ export default function ResultPage() {
             ))}
           </div>
         </div>
+
+        {/* Feedback */}
+        {debugInfo?.meta?.runId && (
+          <div className="w-full border-t border-gray-200 pt-5">
+            <h3 className="text-sm font-medium text-gray-700 mb-3 text-center">
+              这张图像符合你的听感吗？
+            </h3>
+            <div className="flex flex-col gap-4">
+              {[
+                ["musicMatchScore", "像这首音乐"] as const,
+                ["commentMatchScore", "体现点评"] as const,
+                ["aestheticScore", "画面好看"] as const,
+              ].map(([key, label]) => (
+                <div key={key} className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-gray-600">{label}</span>
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((score) => (
+                      <button
+                        key={score}
+                        type="button"
+                        onClick={() => updateScore(key, score)}
+                        className={`h-8 w-8 rounded-full text-xs font-medium transition-colors ${
+                          feedback[key] >= score
+                            ? "bg-gray-900 text-white"
+                            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                        }`}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div className="flex flex-wrap gap-2">
+                {FEEDBACK_REASONS.map((reason) => {
+                  const selected = feedback.selectedReasons.includes(reason);
+                  return (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => toggleReason(reason)}
+                      className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
+                        selected
+                          ? "bg-gray-900 text-white"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <textarea
+                value={feedback.freeText}
+                onChange={(event) =>
+                  setFeedback((prev) => ({ ...prev, freeText: event.target.value }))
+                }
+                placeholder="补充一句你的感受（可选）"
+                className="w-full resize-none rounded-xl border border-gray-200 p-3 text-sm focus:border-gray-400 focus:outline-none"
+                rows={2}
+              />
+
+              <button
+                onClick={submitFeedback}
+                disabled={feedbackStatus === "saving" || feedbackStatus === "saved"}
+                className={`w-full rounded-xl py-3 text-sm font-medium transition-all ${
+                  feedbackStatus === "saved"
+                    ? "bg-green-50 text-green-700"
+                    : "bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-100 disabled:text-gray-400"
+                }`}
+              >
+                {feedbackStatus === "saving"
+                  ? "提交中..."
+                  : feedbackStatus === "saved"
+                  ? "已记录"
+                  : "提交反馈"}
+              </button>
+              {feedbackStatus === "error" && (
+                <p className="text-center text-xs text-red-500">反馈提交失败，请稍后重试</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Debug info */}
         {debugInfo && (

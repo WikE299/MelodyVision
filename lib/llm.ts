@@ -75,7 +75,7 @@ export async function callPromptDirector(systemPrompt: string): Promise<PromptDi
   const response = await client.chat.completions.create({
     model: IMAGE_PROMPT_MODEL,
     max_tokens: 5000,
-    temperature: 0.35,
+    temperature: 0.55,
     messages: [
       { role: "system", content: systemPrompt },
       {
