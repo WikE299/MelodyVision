@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import FlowHeader from "@/components/FlowHeader";
 import PresetSelector, { Presets } from "@/components/PresetSelector";
 import { getExperimentSessionId } from "@/lib/experiment-session";
 
@@ -88,8 +89,9 @@ export default function GeneratePage() {
   };
 
   return (
-    <div className="flex flex-col items-center min-h-screen px-4 py-8">
-      <div className="w-full max-w-md flex flex-col items-center gap-8">
+    <div className="min-h-screen px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
+      <FlowHeader activeStep={4} variant="light" />
+      <div className="mx-auto mt-8 w-full max-w-md flex flex-col items-center gap-8">
         {/* Header */}
         <div className="text-center">
           <h2 className="text-xl font-semibold text-gray-900">选择画面风格</h2>

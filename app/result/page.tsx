@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getCharactersByIds } from "@/lib/characters";
 import CommentBubble from "@/components/CommentBubble";
+import FlowHeader from "@/components/FlowHeader";
 import { getExperimentSessionId } from "@/lib/experiment-session";
 
 interface GenerationMeta {
@@ -202,8 +203,9 @@ export default function ResultPage() {
   if (!imageUrl) return null;
 
   return (
-    <div className="flex flex-col items-center min-h-screen px-4 py-8">
-      <div className="w-full max-w-lg flex flex-col items-center gap-6">
+    <div className="min-h-screen px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
+      <FlowHeader activeStep={5} variant="light" />
+      <div className="mx-auto mt-8 w-full max-w-lg flex flex-col items-center gap-6">
         {/* Header */}
         <div className="text-center">
           <h2 className="text-xl font-semibold text-gray-900">画作已生成</h2>
