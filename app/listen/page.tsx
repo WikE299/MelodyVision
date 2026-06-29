@@ -70,10 +70,12 @@ function GuideFigure({
       type="button"
       onClick={onClick}
       disabled={loading}
-      className={`group absolute z-40 flex w-[clamp(178px,14vw,230px)] flex-col items-center pt-[clamp(104px,12vh,132px)] text-center transition duration-500 ${stageOffset}`}
+      className={`group absolute flex w-[clamp(178px,14vw,230px)] flex-col items-center pt-[clamp(104px,12vh,132px)] text-center transition duration-500 ${
+        loading || commented ? "z-[70]" : "z-40"
+      } ${stageOffset}`}
     >
       {(loading || commented) && (
-        <div className="absolute left-1/2 top-0 z-50 w-[clamp(196px,14vw,232px)] -translate-x-1/2 rounded-[18px] border border-[#f5c184]/70 bg-[#ffe0bd]/94 px-4 py-3 text-left text-[#322534] shadow-[0_14px_34px_rgba(0,0,0,0.26)]">
+        <div className="absolute left-1/2 top-[-6px] z-50 w-[clamp(216px,15vw,260px)] -translate-x-1/2 rounded-[18px] border border-[#f5c184]/80 bg-[#ffe0bd]/96 px-4 py-3 text-left text-[#322534] shadow-[0_18px_42px_rgba(0,0,0,0.3)]">
           <div className="flex items-center gap-2">
             <p className="text-sm font-semibold">{character.name}</p>
             <span className="h-1 w-1 rounded-full bg-[#5a3e31]" />
@@ -86,12 +88,13 @@ function GuideFigure({
         </div>
       )}
       <div
-        className={`absolute bottom-[48px] h-[clamp(48px,5.6vw,76px)] w-[clamp(142px,11vw,196px)] rounded-[50%] border transition duration-300 ${
+        className={`absolute bottom-[40px] h-[clamp(40px,5vw,64px)] w-[clamp(148px,11.5vw,204px)] rounded-[50%] border transition duration-300 ${
           active
-            ? "border-[#ffd481] bg-[#ffc267]/24 shadow-[0_0_34px_rgba(255,194,103,0.85)]"
-            : "border-[#b9895d]/38 bg-black/24 shadow-[0_22px_48px_rgba(0,0,0,0.36)] group-hover:border-[#dba35f]/75"
+            ? "border-[#ffd481] bg-[#ffc267]/28 shadow-[0_0_36px_rgba(255,194,103,0.9),0_22px_38px_rgba(0,0,0,0.45)]"
+            : "border-[#b9895d]/46 bg-black/28 shadow-[0_22px_48px_rgba(0,0,0,0.42)] group-hover:border-[#dba35f]/75"
         }`}
       />
+      <div className="absolute bottom-[62px] h-[20px] w-[clamp(118px,9vw,168px)] rounded-[50%] bg-[#ffd083]/16 blur-md transition group-hover:bg-[#ffd083]/24" />
       <div
         className={`relative z-10 mb-1 flex h-[clamp(200px,24vh,280px)] items-end justify-center transition duration-300 ${
           active ? "scale-[1.06] drop-shadow-[0_0_24px_rgba(255,218,145,0.74)]" : "drop-shadow-[0_24px_24px_rgba(0,0,0,0.46)] group-hover:scale-[1.025]"
@@ -238,43 +241,43 @@ export default function ListenPage() {
   };
 
   const stageSlotsByCount: Record<number, string[]> = {
-    1: ["left-1/2 bottom-[78px] -translate-x-1/2"],
+    1: ["left-1/2 bottom-[88px] -translate-x-1/2"],
     2: [
-      "left-[24%] bottom-[74px] -translate-x-1/2 translate-y-8",
-      "right-[24%] bottom-[74px] translate-x-1/2 translate-y-8",
+      "left-[27%] bottom-[74px] -translate-x-1/2 translate-y-7",
+      "right-[27%] bottom-[74px] translate-x-1/2 translate-y-7",
     ],
     3: [
-      "left-[18%] bottom-[52px] -translate-x-1/2 translate-y-14",
-      "left-1/2 bottom-[150px] -translate-x-1/2 -translate-y-1",
-      "right-[18%] bottom-[52px] translate-x-1/2 translate-y-14",
+      "left-[20%] bottom-[54px] -translate-x-1/2 translate-y-14",
+      "left-1/2 bottom-[154px] -translate-x-1/2 -translate-y-1",
+      "right-[20%] bottom-[54px] translate-x-1/2 translate-y-14",
     ],
     4: [
-      "left-[15%] bottom-[46px] -translate-x-1/2 translate-y-16",
-      "left-[36%] bottom-[138px] -translate-x-1/2",
-      "right-[36%] bottom-[138px] translate-x-1/2",
-      "right-[15%] bottom-[46px] translate-x-1/2 translate-y-16",
+      "left-[17%] bottom-[48px] -translate-x-1/2 translate-y-16",
+      "left-[37%] bottom-[144px] -translate-x-1/2",
+      "right-[37%] bottom-[144px] translate-x-1/2",
+      "right-[17%] bottom-[48px] translate-x-1/2 translate-y-16",
     ],
   };
   const stageSlots = stageSlotsByCount[Math.min(selectedChars.length, 4)] || stageSlotsByCount[4];
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#15111c] text-[#f8dfbb]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_51%_38%,rgba(255,183,92,0.2),transparent_23%),radial-gradient(circle_at_18%_86%,rgba(255,177,84,0.16),transparent_20%),linear-gradient(135deg,#171623_0%,#2d2735_45%,#11121c_100%)]" />
-      <div className="absolute inset-0 opacity-42 [background-image:linear-gradient(115deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:180px_180px,220px_220px]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_35%,rgba(255,178,91,0.18),transparent_28%),radial-gradient(circle_at_50%_82%,rgba(255,183,92,0.14),transparent_34%),linear-gradient(135deg,#111420_0%,#2b2533_45%,#10121d_100%)]" />
+      <div className="absolute inset-0 opacity-32 [background-image:linear-gradient(115deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:180px_180px,220px_220px]" />
 
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={3} />
 
         <section className="relative mt-3 flex min-h-0 flex-1 overflow-hidden rounded-[26px] border border-[#9f6f45]/55 bg-[#251f2b]/38 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
           <div className="absolute inset-0">
-            <div className="absolute left-[-8%] right-[9%] top-[27%] flex h-28 items-end justify-center gap-1 opacity-68">
+            <div className="absolute left-[-6%] right-[-6%] top-[26%] flex h-32 items-end justify-center gap-1 opacity-70">
               {Array.from({ length: 170 }).map((_, index) => (
                 <span
                   key={index}
-                  className="w-1 rounded-full bg-[#d99b4d]"
+                  className="w-1 rounded-full bg-[#d99b4d] shadow-[0_0_10px_rgba(238,169,87,0.18)]"
                   style={{
-                    height: `${(6 + Math.abs(Math.sin(index * 0.16)) * 72).toFixed(2)}px`,
-                    opacity: (0.18 + Math.abs(Math.sin(index * 0.23)) * 0.5).toFixed(3),
+                    height: `${(8 + Math.abs(Math.sin(index * 0.14)) * 82 + Math.abs(Math.cos(index * 0.045)) * 18).toFixed(2)}px`,
+                    opacity: (0.2 + Math.abs(Math.sin(index * 0.21)) * 0.54).toFixed(3),
                   }}
                 />
               ))}
@@ -291,12 +294,60 @@ export default function ListenPage() {
                 {note}
               </span>
             ))}
-            <div className="absolute bottom-[-118px] left-1/2 h-[410px] w-[1320px] -translate-x-1/2 rounded-[50%] border border-[#b88552]/30 bg-[#76604f]/24 shadow-[0_28px_110px_rgba(0,0,0,0.45)]" />
-            <div className="absolute bottom-[-168px] left-1/2 h-[330px] w-[1140px] -translate-x-1/2 rounded-[50%] border border-[#b88552]/24 bg-[#665148]/32" />
+            <div className="absolute bottom-[-148px] left-1/2 h-[520px] w-[1480px] -translate-x-1/2 rounded-[50%] border border-[#d09a62]/34 bg-[#6f5949]/24 shadow-[0_30px_120px_rgba(0,0,0,0.52),inset_0_18px_52px_rgba(255,186,98,0.08)]" />
+            <div className="absolute bottom-[-106px] left-1/2 h-[410px] w-[1240px] -translate-x-1/2 rounded-[50%] border border-[#bd8756]/28" />
+            <div className="absolute bottom-[-64px] left-1/2 h-[300px] w-[940px] -translate-x-1/2 rounded-[50%] border border-[#d8a464]/22" />
+            <div className="absolute bottom-[58px] left-1/2 h-[120px] w-[520px] -translate-x-1/2 rounded-[50%] border border-[#f5c072]/24 bg-[#ffc267]/8 blur-[1px]" />
+            <div className="absolute bottom-[8px] left-1/2 h-[420px] w-[2px] -translate-x-1/2 bg-gradient-to-t from-[#e2a665]/28 to-transparent" />
+            <div className="absolute bottom-[18px] left-[28%] h-[360px] w-[1px] -rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
+            <div className="absolute bottom-[18px] right-[28%] h-[360px] w-[1px] rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
           </div>
 
           <div className="relative z-10 flex min-w-0 flex-1 flex-col px-6 pb-5 pt-4 2xl:px-9 2xl:pb-7">
             <div className="relative flex min-h-0 flex-1 items-end justify-center pb-[clamp(92px,11vh,124px)]">
+              <div className="pointer-events-none absolute bottom-[38px] left-1/2 z-0 h-[390px] w-[min(1180px,92vw)] -translate-x-1/2 rounded-[50%] border border-[#dba66a]/18 bg-[radial-gradient(ellipse_at_center,rgba(255,194,103,0.12)_0%,rgba(255,194,103,0.06)_32%,rgba(18,16,24,0)_70%)]" />
+              <div className="pointer-events-none absolute bottom-[90px] left-1/2 z-0 h-[210px] w-[min(760px,62vw)] -translate-x-1/2 rounded-[50%] border border-[#ffcf7d]/20" />
+
+              {showPlayerControls && (
+                <div className="absolute left-1/2 top-[86px] z-30 flex h-[58px] w-[min(620px,52vw)] -translate-x-1/2 items-center gap-4 rounded-full border border-[#ca8f53]/62 bg-[#1e1923]/86 px-4 shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_24px_rgba(255,194,103,0.1)] backdrop-blur">
+                  <button
+                    type="button"
+                    onClick={togglePlay}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ffe2bd] text-lg font-semibold text-[#382832] shadow-[0_0_24px_rgba(255,203,131,0.38)]"
+                    aria-label={isPlaying ? "暂停音乐" : "播放音乐"}
+                  >
+                    {isPlaying ? "Ⅱ" : "▶"}
+                  </button>
+                  <div className="relative flex min-w-0 flex-1 items-center">
+                    <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
+                      {Array.from({ length: 52 }).map((_, index) => (
+                        <span
+                          key={index}
+                          className="w-[3px] rounded-full bg-[#e5a45b]"
+                          style={{
+                            height: `${(6 + Math.abs(Math.sin(index * 0.58)) * 22).toFixed(1)}px`,
+                            opacity: index / 52 <= (duration ? currentTime / duration : 0) ? 0.96 : 0.24,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={duration || currentTime || 1}
+                      step={0.1}
+                      value={Math.min(currentTime, duration || currentTime)}
+                      onChange={(event) => handleSeek(event.target.value)}
+                      className="relative z-10 h-9 w-full cursor-pointer appearance-none bg-transparent accent-[#ffc267] opacity-0"
+                      aria-label="播放进度"
+                    />
+                  </div>
+                  <span className="shrink-0 text-sm font-medium text-[#ffe0bd]">
+                    {formatTime(currentTime)} / {formatTime(duration)}
+                  </span>
+                </div>
+              )}
+
               {selectedChars.map((character, index) => (
                 <GuideFigure
                   key={character.id}
@@ -310,7 +361,7 @@ export default function ListenPage() {
                 />
               ))}
 
-              <div className="absolute bottom-[84px] left-1/2 z-20 h-[clamp(250px,21vw,326px)] w-[min(560px,44vw)] -translate-x-1/2">
+              <div className="absolute bottom-[98px] left-1/2 z-20 h-[clamp(250px,21vw,326px)] w-[min(560px,44vw)] -translate-x-1/2">
                 <button
                   type="button"
                   onClick={togglePlay}
@@ -344,7 +395,7 @@ export default function ListenPage() {
                       }}
                     />
                   ))}
-                  <div className="absolute bottom-[17%] h-[78px] w-[208px] rounded-[50%] border border-[#f3bb75]/34 bg-[#72533f]/38 shadow-[0_18px_66px_rgba(0,0,0,0.42)]" />
+                  <div className="absolute bottom-[15%] h-[82px] w-[224px] rounded-[50%] border border-[#f3bb75]/42 bg-[#72533f]/42 shadow-[0_18px_66px_rgba(0,0,0,0.46),0_0_34px_rgba(255,195,97,0.16)]" />
                   <Image
                     src="/stage-gem-transparent.png"
                     alt=""
@@ -362,33 +413,16 @@ export default function ListenPage() {
                 <button
                   type="button"
                   onClick={() => setShowPlayerControls((prev) => !prev)}
-                  className="absolute bottom-[18px] left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-[#c9965d]/46 bg-[#1f1a24]/82 text-[#ffe3bd] shadow-[0_12px_30px_rgba(0,0,0,0.28)]"
+                  className="absolute bottom-[44px] left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-[#c9965d]/46 bg-[#1f1a24]/82 text-[#ffe3bd] shadow-[0_12px_30px_rgba(0,0,0,0.28)]"
                   aria-label={showPlayerControls ? "收起播放进度" : "展开播放进度"}
                 >
-                  {showPlayerControls ? "⌃" : "⌄"}
+                  {showPlayerControls ? "⌄" : "⌃"}
                 </button>
 
-                {showPlayerControls && (
-                  <div className="absolute bottom-[58px] left-1/2 z-20 w-[min(520px,42vw)] -translate-x-1/2 rounded-full border border-[#ca8f53]/58 bg-[#1e1923]/82 px-5 py-3 shadow-[0_16px_48px_rgba(0,0,0,0.3)] backdrop-blur">
-                    <div className="flex items-center gap-3 text-xs text-[#ffe0bd]">
-                      <span>{formatTime(currentTime)}</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={duration || currentTime || 1}
-                        step={0.1}
-                        value={Math.min(currentTime, duration || currentTime)}
-                        onChange={(event) => handleSeek(event.target.value)}
-                        className="h-1 flex-1 accent-[#ffc267]"
-                      />
-                      <span>{formatTime(duration)}</span>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
 
-            <div className="absolute bottom-5 left-1/2 z-50 flex w-[320px] -translate-x-1/2 flex-col items-center gap-3">
+            <div className="absolute bottom-4 left-1/2 z-[80] flex w-[320px] -translate-x-1/2 flex-col items-center gap-3">
               {!showUserInput && (
                 <button
                   type="button"
@@ -399,23 +433,21 @@ export default function ListenPage() {
                 </button>
               )}
               {showUserInput && (
-                <div className="w-full rounded-[20px] border border-[#c9965d]/46 bg-[#1f1a24]/92 p-4 shadow-[0_18px_58px_rgba(0,0,0,0.36)] backdrop-blur">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-[#ffe3bd]">我的感受</p>
-                    <button
-                      type="button"
-                      onClick={() => setShowUserInput(false)}
-                      className="text-xs text-[#d7bfa7] transition hover:text-[#ffe3bd]"
-                    >
-                      收起
-                    </button>
-                  </div>
+                <div className="flex h-[56px] w-[min(380px,88vw)] items-center gap-3 rounded-full border border-[#c9965d]/50 bg-[#1f1a24]/92 px-4 shadow-[0_18px_58px_rgba(0,0,0,0.36)] backdrop-blur">
+                  <p className="shrink-0 text-sm font-semibold text-[#ffe3bd]">我的感受</p>
                   <textarea
                     value={userNote}
                     onChange={(event) => setUserNote(event.target.value)}
                     placeholder="我也想说两句（可选）"
-                    className="h-20 w-full resize-none rounded-2xl border border-[#8f6c52]/55 bg-[#15111c]/72 p-3 text-sm text-[#ffe3bd] outline-none placeholder:text-[#bda28b]"
+                    className="h-9 min-w-0 flex-1 resize-none rounded-full border border-[#8f6c52]/48 bg-[#15111c]/72 px-3 py-2 text-sm leading-tight text-[#ffe3bd] outline-none placeholder:text-[#bda28b]"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowUserInput(false)}
+                    className="shrink-0 text-xs text-[#d7bfa7] transition hover:text-[#ffe3bd]"
+                  >
+                    收起
+                  </button>
                 </div>
               )}
               <button

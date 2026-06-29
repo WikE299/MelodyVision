@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getCharactersByIds } from "@/lib/characters";
-import CommentBubble from "@/components/CommentBubble";
 import FlowHeader from "@/components/FlowHeader";
+import { getCharactersByIds, type Character } from "@/lib/characters";
 import { getExperimentSessionId } from "@/lib/experiment-session";
 
 interface GenerationMeta {
@@ -27,15 +26,6 @@ interface DebugInfo {
   remoteImageUrl: string;
 }
 
-const FEEDBACK_REASONS = [
-  "很准确",
-  "情绪对",
-  "风格不对",
-  "太抽象",
-  "不像音乐",
-  "画面好看",
-];
-
 interface FeedbackState {
   musicMatchScore: number;
   commentMatchScore: number;
@@ -43,6 +33,21 @@ interface FeedbackState {
   selectedReasons: string[];
   freeText: string;
 }
+
+const FEEDBACK_REASONS = ["很准确", "情绪对", "风格不对", "太抽象", "不像音乐", "画面好看"];
+
+const characterLabels: Record<string, { name: string; focus: string }> = {
+  boya: { name: "伯牙", focus: "意" },
+  jikang: { name: "嵇康", focus: "和" },
+  caiwenji: { name: "蔡文姬", focus: "真" },
+  abing: { name: "阿炳", focus: "苦" },
+  tandun: { name: "谭盾", focus: "界" },
+  bach: { name: "巴赫", focus: "序" },
+  mozart: { name: "莫扎特", focus: "灵" },
+  beethoven: { name: "贝多芬", focus: "力" },
+  armstrong: { name: "阿姆斯特朗", focus: "活" },
+  lennon: { name: "列侬", focus: "众" },
+};
 
 function getInitialResultState() {
   if (typeof window === "undefined") {
@@ -54,37 +59,99 @@ function getInitialResultState() {
       presets: null as { style: string; mood: string; tone: string } | null,
       characterIds: [] as string[],
       debugInfo: null as DebugInfo | null,
+      generatedTime: "",
     };
   }
 
   const imageUrl = sessionStorage.getItem("generatedImageUrl");
-  const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
-  const presets = JSON.parse(sessionStorage.getItem("imagePresets") || "null");
-  const characterIds = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
+  const comments = JSON.parse(sessionStorage.getItem("comments") || "{}") as Record<string, string>;
+  const presets = JSON.parse(sessionStorage.getItem("imagePresets") || "null") as { style: string; mood: string; tone: string } | null;
+  const characterIds = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]") as string[];
   const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
   const prompt = sessionStorage.getItem("generatedImagePrompt") || "";
   const remoteImageUrl = sessionStorage.getItem("generatedRemoteImageUrl") || "";
-  const meta = JSON.parse(sessionStorage.getItem("imageGenerationMeta") || "null");
-  const audioUrl =
-    sessionStorage.getItem("audioSrc") ||
-    sessionStorage.getItem("audioObjectUrl") ||
-    "";
+  const meta = JSON.parse(sessionStorage.getItem("imageGenerationMeta") || "null") as GenerationMeta | null;
+  const audioUrl = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
   const audioName = (sessionStorage.getItem("audioFileName") || "音乐").replace(/\.\w+$/, "");
+  const usePreviewData = !imageUrl && window.location.search.includes("page05-gallery-result");
 
   return {
-    imageUrl,
-    audioUrl,
-    audioName,
-    comments,
-    presets,
-    characterIds,
+    imageUrl: imageUrl || (usePreviewData ? "/generated/18d3ad2f-17ae-4daf-b2d5-16096bcf0491.png" : null),
+    audioUrl: audioUrl || (usePreviewData ? "/preset-audio/music2image.mp3" : ""),
+    audioName: audioName || "音乐",
+    comments: usePreviewData
+      ? {
+          boya: "此曲有山风，竟若泉涌，弦外之音尚浅。",
+          beethoven: "这里和命运搏斗的声音在推进，节奏里有不甘的意志。",
+          abing: "这曲子急，像赶末班车。但太亮了，少了点嚼过苦的泥。",
+          armstrong: "哟，这曲子跑得欢，亮堂堂的，有劲儿，节奏踩得稳。",
+        }
+      : comments,
+    presets: presets || (usePreviewData ? { style: "水墨", mood: "激昂", tone: "暖色" } : null),
+    characterIds: characterIds.length > 0 || !usePreviewData
+      ? characterIds
+      : ["boya", "beethoven", "abing", "armstrong"],
     debugInfo: {
-      musicAnalysis,
-      prompt,
-      meta,
+      musicAnalysis: usePreviewData ? { tempo: "快速", energy: "高", brightness: "明亮", mood: "激昂" } : musicAnalysis,
+      prompt: prompt || (usePreviewData ? "预览模式示例数据，用于查看第五页版式。" : ""),
+      meta: meta || (usePreviewData ? { runId: "preview-run", sessionId: "preview-session", model: "preview" } : null),
       remoteImageUrl,
     },
+    generatedTime: new Date().toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
   };
+}
+
+function formatTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.floor(seconds % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+function getCharacterView(character: Character) {
+  return characterLabels[character.id] || { name: character.name, focus: character.focusKeyword };
+}
+
+function GuideCommentCard({
+  character,
+  comment,
+}: {
+  character: Character;
+  comment: string;
+}) {
+  const label = getCharacterView(character);
+
+  return (
+    <article className="flex min-h-0 gap-3 rounded-[18px] border border-[#a77b57]/34 bg-[#2b2530]/76 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+      <div className="relative h-[74px] w-[66px] shrink-0 overflow-hidden rounded-[14px] border border-[#c99761]/34 bg-[#201b25]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`/characters/stage/${character.id}.png`}
+          alt={label.name}
+          className="h-full w-full object-contain"
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <h3 className="text-base font-semibold text-[#ffe3bd]">{label.name}</h3>
+          <span className="rounded-full border border-[#d7a464]/38 bg-[#3a2d32] px-2 py-0.5 text-[11px] text-[#ddb27b]">
+            {label.focus}
+          </span>
+          <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-[#6bb36b] text-xs text-[#173017]">
+            ✓
+          </span>
+        </div>
+        <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[#dec3a5]">
+          {comment || "暂无点评。"}
+        </p>
+      </div>
+    </article>
+  );
 }
 
 export default function ResultPage() {
@@ -94,12 +161,17 @@ export default function ResultPage() {
   const [imageUrl] = useState<string | null>(initialState.imageUrl);
   const [audioUrl] = useState<string>(initialState.audioUrl);
   const [audioName] = useState<string>(initialState.audioName);
-  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
-  const [audioBlocked, setAudioBlocked] = useState(false);
   const [comments] = useState<Record<string, string>>(initialState.comments);
   const [presets] = useState<{ style: string; mood: string; tone: string } | null>(initialState.presets);
   const [characterIds] = useState<string[]>(initialState.characterIds);
   const [debugInfo] = useState<DebugInfo | null>(initialState.debugInfo);
+  const [generatedTime] = useState(initialState.generatedTime);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [showOverview, setShowOverview] = useState(false);
+  const [showPlayer, setShowPlayer] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState>({
     musicMatchScore: 4,
     commentMatchScore: 4,
@@ -143,19 +215,15 @@ export default function ResultPage() {
     await playResultAudio();
   };
 
-  const characters = getCharactersByIds(characterIds);
-  const commentsForDebug = characterIds.map((characterId) => ({
-    characterId,
-    characterName: characters.find((char) => char.id === characterId)?.name || characterId,
-    text: comments[characterId] || "",
-  }));
-
   const handleRestart = () => {
     sessionStorage.clear();
     router.push("/");
   };
 
-  const updateScore = (key: keyof Pick<FeedbackState, "musicMatchScore" | "commentMatchScore" | "aestheticScore">, score: number) => {
+  const updateScore = (
+    key: keyof Pick<FeedbackState, "musicMatchScore" | "commentMatchScore" | "aestheticScore">,
+    score: number
+  ) => {
     setFeedback((prev) => ({ ...prev, [key]: score }));
   };
 
@@ -202,238 +270,320 @@ export default function ResultPage() {
 
   if (!imageUrl) return null;
 
+  const characters = getCharactersByIds(characterIds);
+  const commentsForDebug = characterIds.map((characterId) => ({
+    characterId,
+    characterName: characters.find((char) => char.id === characterId)?.name || characterId,
+    text: comments[characterId] || "",
+  }));
+  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+
   return (
-    <div className="min-h-screen px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
-      <FlowHeader activeStep={5} variant="light" />
-      <div className="mx-auto mt-8 w-full max-w-lg flex flex-col items-center gap-6">
-        {/* Header */}
-        <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900">画作已生成</h2>
-          {presets && (
-            <p className="text-sm text-gray-500 mt-1">
-              {presets.style}风格 · {presets.mood}情绪 · {presets.tone}色调
-            </p>
-          )}
-        </div>
-
-        {audioUrl && (
-          <audio
-            ref={audioRef}
-            src={audioUrl}
-            preload="auto"
-            onEnded={() => setIsAudioPlaying(false)}
+    <main className="relative h-screen overflow-hidden bg-[#15111c] text-[#f8dfbb]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_36%,rgba(255,178,91,0.21),transparent_30%),radial-gradient(circle_at_78%_80%,rgba(255,179,90,0.16),transparent_28%),linear-gradient(135deg,#111420_0%,#2b2533_45%,#10121d_100%)]" />
+      <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(115deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:180px_180px,220px_220px]" />
+      <div className="pointer-events-none absolute left-[-5%] right-[-5%] top-[44%] flex h-32 items-center justify-center gap-1 opacity-55">
+        {Array.from({ length: 170 }).map((_, index) => (
+          <span
+            key={index}
+            className="w-1 rounded-full bg-[#d99b4d]"
+            style={{
+              height: `${(6 + Math.abs(Math.sin(index * 0.16)) * 68).toFixed(1)}px`,
+              opacity: (0.2 + Math.abs(Math.sin(index * 0.21)) * 0.48).toFixed(3),
+            }}
           />
-        )}
+        ))}
+      </div>
 
-        {/* Generated image */}
-        <div className="w-full aspect-square rounded-2xl overflow-hidden bg-gray-100 shadow-lg">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageUrl}
-            alt="AI 生成的画作"
-            className="w-full h-full object-cover"
-            onLoad={playResultAudio}
-          />
-        </div>
+      <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
+        <FlowHeader activeStep={5} />
 
-        {audioUrl && (
-          <button
-            onClick={toggleAudio}
-            className="w-full flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-          >
-            <span className="flex flex-col">
-              <span className="text-sm font-medium text-gray-800">{audioName}</span>
-              <span className="text-xs text-gray-400">
-                {audioBlocked
-                  ? "浏览器拦截了自动播放，点击继续声画同出"
-                  : isAudioPlaying
-                  ? "正在随画面播放"
-                  : "点击播放音频"}
-              </span>
-            </span>
-            <span className={`flex h-9 w-9 items-center justify-center rounded-full ${isAudioPlaying ? "bg-blue-500" : "bg-gray-900"} text-white`}>
-              {isAudioPlaying ? (
-                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                  <rect x="6" y="4" width="4" height="16" rx="1" />
-                  <rect x="14" y="4" width="4" height="16" rx="1" />
-                </svg>
-              ) : (
-                <svg className="h-4 w-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-            </span>
-          </button>
-        )}
-
-        {/* Comments review */}
-        <div className="w-full">
-          <h3 className="text-sm font-medium text-gray-700 mb-3 text-center">
-            音乐家点评回顾
-          </h3>
-          <div className="flex flex-col gap-3">
-            {characters.map((char) => (
-              <CommentBubble
-                key={char.id}
-                characterId={char.id}
-                characterName={char.name}
-                focusKeyword={char.focusKeyword}
-                text={comments[char.id] || ""}
-                visible={true}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Feedback */}
-        {debugInfo?.meta?.runId && (
-          <div className="w-full border-t border-gray-200 pt-5">
-            <h3 className="text-sm font-medium text-gray-700 mb-3 text-center">
-              这张图像符合你的听感吗？
-            </h3>
-            <div className="flex flex-col gap-4">
-              {[
-                ["musicMatchScore", "像这首音乐"] as const,
-                ["commentMatchScore", "体现点评"] as const,
-                ["aestheticScore", "画面好看"] as const,
-              ].map(([key, label]) => (
-                <div key={key} className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-gray-600">{label}</span>
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((score) => (
-                      <button
-                        key={score}
-                        type="button"
-                        onClick={() => updateScore(key, score)}
-                        className={`h-8 w-8 rounded-full text-xs font-medium transition-colors ${
-                          feedback[key] >= score
-                            ? "bg-gray-900 text-white"
-                            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                        }`}
-                      >
-                        {score}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-
-              <div className="flex flex-wrap gap-2">
-                {FEEDBACK_REASONS.map((reason) => {
-                  const selected = feedback.selectedReasons.includes(reason);
-                  return (
-                    <button
-                      key={reason}
-                      type="button"
-                      onClick={() => toggleReason(reason)}
-                      className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-                        selected
-                          ? "bg-gray-900 text-white"
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      }`}
-                    >
-                      {reason}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <textarea
-                value={feedback.freeText}
-                onChange={(event) =>
-                  setFeedback((prev) => ({ ...prev, freeText: event.target.value }))
-                }
-                placeholder="补充一句你的感受（可选）"
-                className="w-full resize-none rounded-xl border border-gray-200 p-3 text-sm focus:border-gray-400 focus:outline-none"
-                rows={2}
-              />
-
-              <button
-                onClick={submitFeedback}
-                disabled={feedbackStatus === "saving" || feedbackStatus === "saved"}
-                className={`w-full rounded-xl py-3 text-sm font-medium transition-all ${
-                  feedbackStatus === "saved"
-                    ? "bg-green-50 text-green-700"
-                    : "bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-100 disabled:text-gray-400"
-                }`}
-              >
-                {feedbackStatus === "saving"
-                  ? "提交中..."
-                  : feedbackStatus === "saved"
-                  ? "已记录"
-                  : "提交反馈"}
-              </button>
-              {feedbackStatus === "error" && (
-                <p className="text-center text-xs text-red-500">反馈提交失败，请稍后重试</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Debug info */}
-        {debugInfo && (
-          <details className="w-full rounded-xl border border-gray-200 bg-white p-4">
-            <summary className="cursor-pointer text-sm font-medium text-gray-700">
-              生成调试信息
-            </summary>
-            <div className="mt-4 flex flex-col gap-4 text-xs text-gray-600">
-              <div>
-                <p className="font-medium text-gray-800 mb-1">运行信息</p>
-                <pre className="overflow-auto rounded-lg bg-gray-50 p-3 whitespace-pre-wrap">
-                  {JSON.stringify(debugInfo.meta, null, 2)}
-                </pre>
-              </div>
-
-              <div>
-                <p className="font-medium text-gray-800 mb-1">音频分析</p>
-                <pre className="overflow-auto rounded-lg bg-gray-50 p-3 whitespace-pre-wrap">
-                  {JSON.stringify(debugInfo.musicAnalysis, null, 2)}
-                </pre>
-              </div>
-
-              <div>
-                <p className="font-medium text-gray-800 mb-1">角色评论</p>
-                <pre className="overflow-auto rounded-lg bg-gray-50 p-3 whitespace-pre-wrap">
-                  {JSON.stringify(commentsForDebug, null, 2)}
-                </pre>
-              </div>
-
-              <div>
-                <p className="font-medium text-gray-800 mb-1">最终生图 Prompt</p>
-                <p className="rounded-lg bg-gray-50 p-3 leading-relaxed whitespace-pre-wrap">
-                  {debugInfo.prompt || "未记录"}
-                </p>
-              </div>
-
-              {debugInfo.remoteImageUrl && (
+        <section
+          className={`relative mt-3 grid min-h-0 flex-1 gap-4 overflow-hidden rounded-[26px] border border-[#9f6f45]/55 bg-[#251f2b]/38 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5 ${
+            showOverview
+              ? "grid-cols-[220px_minmax(0,1fr)_360px] 2xl:grid-cols-[260px_minmax(0,1fr)_420px]"
+              : "grid-cols-[76px_minmax(0,1fr)_360px] 2xl:grid-cols-[76px_minmax(0,1fr)_420px]"
+          }`}
+        >
+          {showOverview ? (
+            <aside className="flex min-h-0 flex-col rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/72 p-4 shadow-[0_20px_70px_rgba(0,0,0,0.24)] backdrop-blur">
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-medium text-gray-800 mb-1">百炼临时图片 URL</p>
-                  <p className="overflow-auto rounded-lg bg-gray-50 p-3 break-all">
-                    {debugInfo.remoteImageUrl}
+                  <h2 className="text-lg font-semibold text-[#ffe3bd]">生成概览</h2>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
+                    你的音乐已经完成可视化，画作可保存，也可以回到开头重新生成。
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowOverview(false)}
+                  className="rounded-full border border-[#a77b57]/42 px-2 py-1 text-xs text-[#d7b99b] hover:border-[#ffd083]/70"
+                >
+                  收起
+                </button>
+              </div>
+              <div className="mt-4 space-y-3 border-t border-[#8f6b52]/34 pt-4 text-xs text-[#d7b99b]">
+                <p className="flex justify-between gap-3"><span>生成时间</span><span>{generatedTime}</span></p>
+                <p className="flex justify-between gap-3"><span>画面来源</span><span>音乐与点评</span></p>
+                <p className="flex justify-between gap-3"><span>导览数量</span><span>{characters.length || 0} 位</span></p>
+                <p className="flex justify-between gap-3"><span>模型状态</span><span>{debugInfo?.meta?.model || "已生成"}</span></p>
+              </div>
+              <div className="mt-4 rounded-[18px] border border-[#a77b57]/34 bg-[#2d2732]/70 p-3">
+                <p className="text-sm font-semibold text-[#ffe3bd]">生成参数</p>
+                <div className="mt-3 grid gap-2 text-xs text-[#d7b99b]">
+                  <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
+                    风格：{presets?.style || "自动"}
+                  </span>
+                  <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
+                    情绪：{presets?.mood || "自动"}
+                  </span>
+                  <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
+                    光色：{presets?.tone || "自动"}
+                  </span>
+                </div>
+              </div>
+            </aside>
+          ) : (
+            <aside className="relative z-10 flex h-full w-[76px] shrink-0 items-start justify-center rounded-[22px] border border-[#a77b57]/36 bg-[#241f2a]/46 p-3 backdrop-blur">
+              <button
+                type="button"
+                onClick={() => setShowOverview(true)}
+                className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-[16px] border border-[#a77b57]/36 bg-[#2d2732]/58 text-[#ffe3bd] transition hover:border-[#ffd083]/70 hover:bg-[#3a2d32]/70"
+              >
+                <span className="text-lg">↗</span>
+                <span className="text-xs leading-tight [writing-mode:vertical-rl]">生成概览</span>
+              </button>
+            </aside>
+          )}
+
+          <div className="relative min-w-0">
+            <div className="absolute left-0 right-0 top-0 text-center">
+              <h2 className="text-2xl font-semibold text-[#ffe3bd] 2xl:text-3xl">画作已生成</h2>
+              <p className="mt-1 text-sm text-[#d7b99b]">来自音乐、导览点评和你的画面选择</p>
+            </div>
+            <div className="absolute right-[7%] top-[38px] z-20 flex gap-3">
+              <button
+                type="button"
+                onClick={handleRestart}
+                aria-label="重新开始"
+                title="重新开始"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
+                </svg>
+              </button>
+              <a
+                href={imageUrl}
+                download={`melodyvision-${debugInfo?.meta?.runId || "artwork"}.png`}
+                aria-label="保存画作"
+                title="保存画作"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/62 bg-[#4b3444]/86 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34),0_0_20px_rgba(255,194,103,0.22)] backdrop-blur transition hover:border-[#ffd083] hover:bg-[#5a3b4d]"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" />
+                </svg>
+              </a>
+            </div>
+
+            <div className="absolute left-1/2 top-[44px] inline-block max-w-full -translate-x-1/2 pt-11">
+              <div className="relative inline-block rounded-[10px] border-[8px] border-[#8b5d32] bg-[#17131a] p-2 shadow-[0_30px_90px_rgba(0,0,0,0.5),0_0_38px_rgba(255,187,91,0.18)]">
+                <div className="absolute inset-[-13px] -z-10 rounded-[14px] border border-[#efbd77]/46" />
+                <div className="overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imageUrl}
+                    alt="AI 生成的画作"
+                    className="block max-h-[430px] max-w-[720px] object-contain 2xl:max-h-[560px] 2xl:max-w-[900px]"
+                    onLoad={playResultAudio}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {audioUrl && (
+              <>
+                <audio
+                  ref={audioRef}
+                  src={audioUrl}
+                  preload="auto"
+                  onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+                  onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
+                  onEnded={() => setIsAudioPlaying(false)}
+                />
+                <div className="absolute bottom-0 left-1/2 flex h-[74px] w-full max-w-[620px] -translate-x-1/2 items-center justify-center">
+                  {showPlayer ? (
+                    <div className="flex w-full items-center gap-4 rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/84 px-5 py-2.5 text-left shadow-[0_18px_50px_rgba(0,0,0,0.3)] backdrop-blur">
+                    <button
+                      type="button"
+                      onClick={toggleAudio}
+                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#f6d3a0] text-[#2b2230] shadow-[0_0_24px_rgba(255,203,127,0.38)]"
+                    >
+                      {isAudioPlaying ? "Ⅱ" : "▶"}
+                    </button>
+                    <span className="min-w-[120px]">
+                      <span className="block text-sm font-semibold text-[#ffe3bd]">{audioName}</span>
+                      <span className="block text-xs text-[#c8aa8e]">
+                        {audioBlocked ? "点击播放音乐" : isAudioPlaying ? "正在随画面播放" : "点击播放音频"}
+                      </span>
+                    </span>
+                    <span className="relative h-8 min-w-0 flex-1 overflow-hidden">
+                      <span className="absolute left-0 right-0 top-1/2 h-px bg-[#8f6b52]/60" />
+                      <span className="absolute left-0 top-1/2 h-px bg-[#ffd083]" style={{ width: `${progress}%` }} />
+                      <span className="absolute inset-0 flex items-center gap-1">
+                        {Array.from({ length: 52 }).map((_, index) => (
+                          <span
+                            key={index}
+                            className="w-0.5 rounded-full bg-[#d99b4d]"
+                            style={{ height: `${6 + Math.abs(Math.sin(index * 0.42)) * 24}px`, opacity: index / 52 <= progress / 100 ? 0.9 : 0.32 }}
+                          />
+                        ))}
+                      </span>
+                    </span>
+                    <span className="text-xs tabular-nums text-[#d7b99b]">
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlayer(false)}
+                      className="rounded-full border border-[#a77b57]/42 px-3 py-1.5 text-xs text-[#d7b99b] hover:border-[#ffd083]/70"
+                    >
+                      收起
+                    </button>
+                  </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowPlayer(true)}
+                      className="flex items-center gap-2 rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 px-4 py-2 text-xs text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80"
+                    >
+                      <span className="h-2 w-2 rounded-full bg-[#ffd083] shadow-[0_0_16px_rgba(255,208,131,0.8)]" />
+                      {audioBlocked ? "展开播放控制" : isAudioPlaying ? "音乐播放中" : "展开播放控制"}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <aside className="flex min-h-0 flex-col rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/72 p-4 shadow-[0_20px_70px_rgba(0,0,0,0.24)] backdrop-blur">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-[#ffe3bd]">音乐家点评回顾</h2>
+                <p className="mt-1 text-xs text-[#c7aa8d]">{characters.length} / {characters.length} 已收集</p>
+              </div>
+            </div>
+            <div className="mt-4 grid min-h-0 flex-1 content-start gap-3 overflow-hidden">
+              {characters.slice(0, 4).map((character) => (
+                <GuideCommentCard
+                  key={character.id}
+                  character={character}
+                  comment={comments[character.id] || ""}
+                />
+              ))}
+            </div>
+          </aside>
+
+          <details className="absolute bottom-4 right-4 z-30 w-[348px] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/88 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur 2xl:w-[404px]">
+            <summary className="cursor-pointer font-semibold">研究附录</summary>
+            <div className="mt-4 max-h-[420px] overflow-auto pr-1">
+              {debugInfo?.meta?.runId && (
+                <div className="rounded-[16px] border border-[#8f6b52]/34 bg-[#2d2732]/78 p-3">
+                  <p className="mb-3 text-sm font-semibold">这张图像符合你的听感吗？</p>
+                  <div className="space-y-3">
+                    {[
+                      ["musicMatchScore", "像这首音乐"] as const,
+                      ["commentMatchScore", "体现点评"] as const,
+                      ["aestheticScore", "画面好看"] as const,
+                    ].map(([key, label]) => (
+                      <div key={key} className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-[#d7b99b]">{label}</span>
+                        <div className="flex gap-1">
+                          {[1, 2, 3, 4, 5].map((score) => (
+                            <button
+                              key={score}
+                              type="button"
+                              onClick={() => updateScore(key, score)}
+                              className={`h-7 w-7 rounded-full text-xs transition ${
+                                feedback[key] >= score
+                                  ? "bg-[#ffd083] text-[#2b2230]"
+                                  : "bg-[#211b25] text-[#c8aa8e] hover:bg-[#3a2d32]"
+                              }`}
+                            >
+                              {score}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex flex-wrap gap-2">
+                      {FEEDBACK_REASONS.map((reason) => {
+                        const selected = feedback.selectedReasons.includes(reason);
+                        return (
+                          <button
+                            key={reason}
+                            type="button"
+                            onClick={() => toggleReason(reason)}
+                            className={`rounded-full px-3 py-1.5 text-xs transition ${
+                              selected
+                                ? "bg-[#ffd083] text-[#2b2230]"
+                                : "border border-[#8f6b52]/44 text-[#d7b99b] hover:border-[#ffd083]/60"
+                            }`}
+                          >
+                            {reason}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <textarea
+                      value={feedback.freeText}
+                      onChange={(event) => setFeedback((prev) => ({ ...prev, freeText: event.target.value }))}
+                      placeholder="补充一句你的感受（可选）"
+                      className="h-16 w-full resize-none rounded-[12px] border border-[#8f6b52]/44 bg-[#211b25] p-3 text-xs text-[#ffe3bd] outline-none placeholder:text-[#9f8066] focus:border-[#ffd083]/70"
+                    />
+                    <button
+                      type="button"
+                      onClick={submitFeedback}
+                      disabled={feedbackStatus === "saving" || feedbackStatus === "saved"}
+                      className="w-full rounded-[14px] bg-[#4b3444] py-3 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:opacity-55"
+                    >
+                      {feedbackStatus === "saving" ? "提交中..." : feedbackStatus === "saved" ? "已记录" : "提交反馈"}
+                    </button>
+                    {feedbackStatus === "error" && (
+                      <p className="text-center text-xs text-[#ff9f9f]">反馈提交失败，请稍后重试</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {debugInfo && (
+                <details className="mt-3 rounded-[16px] border border-[#8f6b52]/34 bg-[#2d2732]/78 p-3">
+                  <summary className="cursor-pointer text-sm font-semibold">生成调试信息</summary>
+                  <div className="mt-3 space-y-3 text-xs text-[#d7b99b]">
+                    <pre className="max-h-32 overflow-auto rounded-[10px] bg-[#17131a] p-3 whitespace-pre-wrap">
+                      {JSON.stringify(debugInfo.meta, null, 2)}
+                    </pre>
+                    <pre className="max-h-32 overflow-auto rounded-[10px] bg-[#17131a] p-3 whitespace-pre-wrap">
+                      {JSON.stringify(debugInfo.musicAnalysis, null, 2)}
+                    </pre>
+                    <pre className="max-h-32 overflow-auto rounded-[10px] bg-[#17131a] p-3 whitespace-pre-wrap">
+                      {JSON.stringify(commentsForDebug, null, 2)}
+                    </pre>
+                    <p className="max-h-32 overflow-auto rounded-[10px] bg-[#17131a] p-3 leading-relaxed whitespace-pre-wrap">
+                      {debugInfo.prompt || "未记录"}
+                    </p>
+                    {debugInfo.remoteImageUrl && (
+                      <p className="overflow-auto rounded-[10px] bg-[#17131a] p-3 break-all">
+                        {debugInfo.remoteImageUrl}
+                      </p>
+                    )}
+                  </div>
+                </details>
               )}
             </div>
           </details>
-        )}
-
-        {/* Actions */}
-        <div className="flex gap-3 w-full">
-          <button
-            onClick={handleRestart}
-            className="flex-1 py-3 rounded-xl text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-all"
-          >
-            重新开始
-          </button>
-          <a
-            href={imageUrl}
-            download={`melodyvision-${debugInfo?.meta?.runId || "artwork"}.png`}
-            className="flex-1 py-3 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all text-center"
-          >
-            保存画作
-          </a>
-        </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
