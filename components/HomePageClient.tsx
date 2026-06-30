@@ -6,15 +6,24 @@ import { useRouter } from "next/navigation";
 import AudioUploader from "@/components/AudioUploader";
 import FlowHeader from "@/components/FlowHeader";
 import { analyzeAudioFile } from "@/lib/audio/web-analyzer";
+import { useLanguage } from "@/lib/i18n";
 
 const COPY = {
-  uploadHint: "上传音乐，让音乐家评论生成图像。",
-  analyzing: "正在分析音乐...",
+  zh: {
+    uploadHint: "上传音乐，让音乐家评论生成图像。",
+    analyzing: "正在分析音乐...",
+  },
+  en: {
+    uploadHint: "Upload music, invite musicians to respond, then turn it into an image.",
+    analyzing: "Analyzing your music...",
+  },
 };
 
 export default function HomePageClient() {
   const router = useRouter();
+  const { language } = useLanguage();
   const [analyzing, setAnalyzing] = useState(false);
+  const copy = COPY[language];
 
   const handleFileSelect = async (file: File) => {
     setAnalyzing(true);
@@ -112,8 +121,8 @@ export default function HomePageClient() {
             <div className="absolute top-[388px] h-[126px] w-[820px] rounded-[50%] border border-[#e1a763]/35 bg-[#85664d]/36 shadow-[0_30px_90px_rgba(0,0,0,0.4)]" />
             <div className="absolute top-[418px] h-[68px] w-[720px] rounded-[50%] bg-[#f5b75e]/18 blur-md" />
             <div className="relative z-10 w-full max-w-[650px] pb-12">
-              <AudioUploader onFileSelect={handleFileSelect} disabled={analyzing} language="zh" />
-              <p className="mt-4 text-center text-sm text-[#ffe0ad]/74">{COPY.uploadHint}</p>
+              <AudioUploader onFileSelect={handleFileSelect} disabled={analyzing} language={language} />
+              <p className="mt-4 text-center text-sm text-[#ffe0ad]/74">{copy.uploadHint}</p>
             </div>
           </div>
         </section>
@@ -124,7 +133,7 @@ export default function HomePageClient() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            <span>{COPY.analyzing}</span>
+            <span>{copy.analyzing}</span>
           </div>
         )}
       </div>

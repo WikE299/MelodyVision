@@ -10,10 +10,46 @@ import {
   getCharactersByIds,
   westernCharacters,
 } from "@/lib/characters";
+import { characterUi, type Language, useLanguage } from "@/lib/i18n";
 
 const DEFAULT_COMBO = ["boya", "beethoven", "abing", "armstrong"];
 const COMMENT_FAILED_TEXT = "（评论生成失败，请重试）";
 const MAX_SELECTION = 4;
+
+const COPY = {
+  zh: {
+    commentFailed: "评论生成失败，请稍后重试",
+    eyebrow: "✦ 选择你的聆听导览者 ✦",
+    title: "选择你的聆听导览者",
+    subtitle: "可多选 1-4 位",
+    selected: "已选择",
+    maxSelected: "最多可选 4 位",
+    clear: "清空选择",
+    defaultCombo: "推荐组合",
+    defaultNames: "伯牙 + 贝多芬 + 阿炳 + 阿姆斯特朗",
+    empty: "请选择至少一位音乐家",
+    entering: "正在进入...",
+    enter: "进入聆听室",
+    helper: "进入后可调整角色并开始聆听",
+    generating: "音乐家正在并行点评，完成后会自动进入聆听页",
+  },
+  en: {
+    commentFailed: "Failed to generate comments. Please try again later.",
+    eyebrow: "✦ Choose Your Listening Guides ✦",
+    title: "Choose Your Listening Guides",
+    subtitle: "Select 1-4 musicians",
+    selected: "Selected",
+    maxSelected: "Up to 4 guides",
+    clear: "Clear",
+    defaultCombo: "Preset",
+    defaultNames: "Boya · Beethoven · A Bing · Armstrong",
+    empty: "Choose at least one musician",
+    entering: "Entering...",
+    enter: "Enter Listening Room",
+    helper: "You can listen and adjust the cast on the next page",
+    generating: "Musicians are commenting in parallel. The listening room will open soon.",
+  },
+};
 
 const GUIDE_ORDER = [
   "boya",
@@ -46,12 +82,20 @@ function CharacterFigure({
   selected,
   disabled,
   onClick,
+  language,
 }: {
   character: Character;
   selected: boolean;
   disabled: boolean;
   onClick: () => void;
+  language: Language;
 }) {
+  const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
+    name: character.name,
+    era: character.era,
+    focus: character.focusKeyword,
+  };
+
   return (
     <button
       type="button"
@@ -79,7 +123,7 @@ function CharacterFigure({
       >
         <Image
           src={`/characters/stage/${character.id}.png`}
-          alt={character.name}
+          alt={label.name}
           width={512}
           height={512}
           unoptimized
@@ -100,10 +144,10 @@ function CharacterFigure({
             </svg>
           </div>
         )}
-        <p className="text-[clamp(14px,1.05vw,18px)] font-semibold text-[#ffe6c3]">{character.name}</p>
-        <p className="mt-0.5 text-[clamp(11px,0.82vw,14px)] text-[#f2d0aa]/88">{character.era}</p>
+        <p className="text-[clamp(14px,1.05vw,18px)] font-semibold text-[#ffe6c3]">{label.name}</p>
+        <p className="mt-0.5 text-[clamp(11px,0.82vw,14px)] text-[#f2d0aa]/88">{label.era}</p>
         <span className="mt-[clamp(6px,1.1vh,12px)] rounded-full border border-[#d99f5f]/45 bg-[#8a5e3d]/48 px-[clamp(10px,1vw,16px)] py-0.5 text-[clamp(15px,1.2vw,20px)] font-serif text-[#ffe0ad]">
-          {character.focusKeyword}
+          {label.focus}
         </span>
       </div>
     </button>
@@ -112,6 +156,8 @@ function CharacterFigure({
 
 export default function SelectPage() {
   const router = useRouter();
+  const { language } = useLanguage();
+  const copy = COPY[language];
   const [selected, setSelected] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
@@ -196,7 +242,7 @@ export default function SelectPage() {
       sessionStorage.setItem("comments", JSON.stringify(comments));
       router.push("/listen");
     } catch {
-      setError("评论生成失败，请稍后重试");
+      setError(copy.commentFailed);
       setGenerating(false);
     }
   };
@@ -244,11 +290,11 @@ export default function SelectPage() {
 
           <div className="relative z-10 flex min-h-0 flex-1 flex-col px-4 pt-3 lg:px-5 2xl:px-8 2xl:pt-7">
             <div className="text-center">
-              <p className="text-xs tracking-[0.3em] text-[#f8c875]/78 2xl:text-sm 2xl:tracking-[0.34em]">✦ 选择你的聆听导览者 ✦</p>
+              <p className="text-xs tracking-[0.3em] text-[#f8c875]/78 2xl:text-sm 2xl:tracking-[0.34em]">{copy.eyebrow}</p>
               <h2 className="mt-1 font-serif text-[clamp(28px,2.4vw,36px)] font-semibold tracking-wide text-[#ffe5c1] drop-shadow-[0_4px_18px_rgba(0,0,0,0.45)] 2xl:mt-2">
-                选择你的聆听导览者
+                {copy.title}
               </h2>
-              <p className="mt-1 text-sm text-[#f8d8af]/88 2xl:mt-2 2xl:text-base">可多选 1-4 位</p>
+              <p className="mt-1 text-sm text-[#f8d8af]/88 2xl:mt-2 2xl:text-base">{copy.subtitle}</p>
             </div>
 
             <div className="relative -mt-2 flex min-h-0 flex-1 translate-y-[-90px] items-end justify-center 2xl:translate-y-[-98px]">
@@ -260,6 +306,7 @@ export default function SelectPage() {
                     selected={selected.includes(character.id)}
                     disabled={generating}
                     onClick={() => toggleCharacter(character.id)}
+                    language={language}
                   />
                 ))}
               </div>
@@ -270,8 +317,8 @@ export default function SelectPage() {
             <div className="grid w-full max-w-[min(1370px,calc(100vw-128px))] grid-cols-[minmax(520px,1.25fr)_minmax(170px,0.75fr)_minmax(220px,280px)] items-center gap-3 rounded-[22px] border border-[#d7b18a]/42 bg-[#d7c0aa]/72 px-5 py-3 text-[#302536] shadow-[0_18px_55px_rgba(0,0,0,0.26)] backdrop-blur 2xl:grid-cols-[1.15fr_1.18fr_320px] 2xl:gap-6 2xl:rounded-[28px] 2xl:px-8 2xl:py-4">
               <div className="flex items-center gap-3 2xl:gap-6">
                 <div>
-                  <p className="whitespace-nowrap text-xl font-semibold 2xl:text-2xl">已选择 {selected.length} / {MAX_SELECTION}</p>
-                  <p className="mt-0.5 text-xs text-[#5f5361] 2xl:mt-1 2xl:text-sm">最多可选 {MAX_SELECTION} 位</p>
+                  <p className="whitespace-nowrap text-xl font-semibold 2xl:text-2xl">{copy.selected} {selected.length} / {MAX_SELECTION}</p>
+                  <p className="mt-0.5 text-xs text-[#5f5361] 2xl:mt-1 2xl:text-sm">{copy.maxSelected}</p>
                 </div>
                 <button
                   type="button"
@@ -280,7 +327,7 @@ export default function SelectPage() {
                   className="flex items-center gap-2 whitespace-nowrap border-l border-[#9e8976]/50 pl-4 text-base transition hover:text-[#7b4c20] disabled:cursor-not-allowed disabled:opacity-45 2xl:gap-3 2xl:pl-7 2xl:text-lg"
                 >
                   <span className="text-2xl 2xl:text-3xl">↻</span>
-                  清空选择
+                  {copy.clear}
                 </button>
                 <div className="flex min-w-0 items-center gap-2 border-l border-[#9e8976]/50 pl-3 2xl:gap-3 2xl:pl-6">
                   <button
@@ -290,17 +337,17 @@ export default function SelectPage() {
                     className="flex items-center gap-2 whitespace-nowrap text-base transition hover:text-[#7b4c20] disabled:cursor-not-allowed disabled:opacity-45 2xl:gap-3 2xl:text-lg"
                   >
                     <span className="text-2xl 2xl:text-3xl">☆</span>
-                    推荐组合
+                    {copy.defaultCombo}
                   </button>
-                  <span className="whitespace-nowrap text-xs text-[#6b5b59] 2xl:text-sm">
-                    伯牙 + 贝多芬 + 阿炳 + 阿姆斯特朗
+                  <span className="max-w-[clamp(148px,16vw,240px)] truncate whitespace-nowrap text-xs text-[#6b5b59] 2xl:max-w-none 2xl:text-sm">
+                    {copy.defaultNames}
                   </span>
                 </div>
               </div>
 
               <div className="flex min-h-[62px] items-center justify-center gap-3 2xl:min-h-[88px] 2xl:gap-4">
                 {selectedCharacters.length === 0 ? (
-                  <p className="text-base text-[#6d6170]">请选择至少一位音乐家</p>
+                  <p className="text-base text-[#6d6170]">{copy.empty}</p>
                 ) : (
                   selectedCharacters.map((character) => (
                     <div key={character.id} className="relative flex w-20 flex-col items-center">
@@ -315,13 +362,15 @@ export default function SelectPage() {
                       <div className="relative h-12 w-12 overflow-hidden rounded-xl bg-[#b89576]/44 2xl:h-16 2xl:w-16 2xl:rounded-2xl">
                         <Image
                           src={`/characters/stage/${character.id}.png`}
-                          alt={character.name}
+                          alt={characterUi[language][character.id as keyof typeof characterUi.zh]?.name || character.name}
                           fill
                           unoptimized
                           className="object-contain p-1"
                         />
                       </div>
-                      <span className="mt-1 max-w-20 truncate text-xs 2xl:text-sm">{character.name}</span>
+                      <span className="mt-1 max-w-20 truncate text-xs 2xl:text-sm">
+                        {characterUi[language][character.id as keyof typeof characterUi.zh]?.name || character.name}
+                      </span>
                     </div>
                   ))
                 )}
@@ -338,17 +387,17 @@ export default function SelectPage() {
                       : "border-[#bba28b] bg-[#8c7d73]/42 text-[#756a68] cursor-not-allowed"
                   }`}
                 >
-                  <span>{generating ? "正在进入..." : "进入聆听室"}</span>
+                  <span>{generating ? copy.entering : copy.enter}</span>
                   <span className="text-2xl 2xl:text-3xl">→</span>
                 </button>
-                <p className="text-center text-xs text-[#6a5b5a]">进入后可调整角色并开始聆听</p>
+                <p className="text-center text-xs text-[#6a5b5a]">{copy.helper}</p>
               </div>
             </div>
           </div>
 
           {(generating || error) && (
             <div className="absolute bottom-28 left-1/2 z-30 -translate-x-1/2 rounded-full border border-[#f0bc72]/35 bg-[#1d1825]/88 px-5 py-3 text-sm text-[#ffe0b1] shadow-[0_14px_48px_rgba(0,0,0,0.35)] backdrop-blur">
-              {generating ? "音乐家正在并行点评，完成后会自动进入聆听页" : error}
+              {generating ? copy.generating : error}
             </div>
           )}
         </section>

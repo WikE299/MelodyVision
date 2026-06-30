@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getCharactersByIds, Character } from "@/lib/characters";
 import FlowHeader from "@/components/FlowHeader";
+import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 
 const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
 
@@ -19,6 +20,39 @@ const FIGURE_STYLE: Record<string, string> = {
   beethoven: "w-[clamp(180px,12vw,232px)]",
   armstrong: "w-[clamp(174px,11.6vw,224px)]",
   lennon: "w-[clamp(170px,11.3vw,218px)]",
+};
+
+const COPY = {
+  zh: {
+    listening: "我正在听这段音乐，稍等片刻……",
+    failed: "（评论生成失败，请重试）",
+    play: "播放音乐",
+    pause: "暂停音乐",
+    progress: "播放进度",
+    collapseProgress: "收起播放进度",
+    expandProgress: "展开播放进度",
+    addFeeling: "点击可补充你的听感",
+    myFeeling: "我的感受",
+    feelingPlaceholder: "我也想说两句（可选）",
+    collapse: "收起",
+    closeComment: "关闭评论",
+    generate: "生成画作 →",
+  },
+  en: {
+    listening: "I am listening closely. One moment...",
+    failed: "(Failed to generate this comment. Please try again.)",
+    play: "Play music",
+    pause: "Pause music",
+    progress: "Playback progress",
+    collapseProgress: "Hide playback progress",
+    expandProgress: "Show playback progress",
+    addFeeling: "Add your listening note",
+    myFeeling: "My note",
+    feelingPlaceholder: "I also want to say something (optional)",
+    collapse: "Close",
+    closeComment: "Close comment",
+    generate: "Generate Artwork →",
+  },
 };
 
 function getInitialListenState() {
@@ -53,38 +87,85 @@ function GuideFigure({
   active,
   commented,
   loading,
+  streaming,
   comment,
   stageOffset,
   onClick,
+  onClose,
+  language,
 }: {
   character: Character;
   active: boolean;
   commented: boolean;
   loading: boolean;
+  streaming: boolean;
   comment: string;
   stageOffset: string;
   onClick: () => void;
+  onClose: () => void;
+  language: Language;
 }) {
+  const copy = COPY[language];
+  const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
+    name: character.name,
+    focus: character.focusKeyword,
+  };
+
   return (
-    <button
-      type="button"
+    <div
       onClick={onClick}
-      disabled={loading}
       className={`group absolute flex w-[clamp(178px,14vw,230px)] flex-col items-center pt-[clamp(104px,12vh,132px)] text-center transition duration-500 ${
         loading || commented ? "z-[70]" : "z-40"
-      } ${stageOffset}`}
+      } ${loading ? "cursor-wait" : "cursor-pointer"} ${stageOffset}`}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
     >
       {(loading || commented) && (
-        <div className="absolute left-1/2 top-[-6px] z-50 w-[clamp(216px,15vw,260px)] -translate-x-1/2 rounded-[18px] border border-[#f5c184]/80 bg-[#ffe0bd]/96 px-4 py-3 text-left text-[#322534] shadow-[0_18px_42px_rgba(0,0,0,0.3)]">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold">{character.name}</p>
+        <div className="absolute left-1/2 top-[-6px] z-50 w-[clamp(248px,18vw,330px)] -translate-x-1/2 rounded-[18px] border border-[#f5c184]/80 bg-[#ffe0bd]/96 px-4 py-3 text-left text-[#322534] shadow-[0_18px_42px_rgba(0,0,0,0.3)]">
+          <div className="flex items-center gap-2 pr-7">
+            <p className="text-sm font-semibold">{label.name}</p>
             <span className="h-1 w-1 rounded-full bg-[#5a3e31]" />
-            <p className="text-xs text-[#765846]">{character.focusKeyword}</p>
+            <p className="text-xs text-[#765846]">{label.focus}</p>
           </div>
-          <p className="mt-2 max-h-[4.8em] overflow-hidden text-sm font-medium leading-relaxed">
-            {loading ? "我正在听这段音乐，稍等片刻……" : comment}
+          {commented && !loading && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+              className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-[#9a7458]/35 bg-[#fff0d7]/70 text-[#5b3e31] transition hover:border-[#7d573f]/60 hover:bg-white"
+              aria-label={copy.closeComment}
+              title={copy.closeComment}
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          )}
+          <p className="mt-2 max-h-[9.6em] overflow-y-auto pr-1 text-sm font-medium leading-relaxed">
+            {loading ? copy.listening : comment}
+            {streaming && <span className="ml-0.5 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-full bg-[#5b3e31]/70" />}
           </p>
           <div className="absolute -bottom-3 left-1/2 h-6 w-6 -translate-x-1/2 rotate-45 border-b border-r border-[#f5c184]/70 bg-[#ffe0bd]" />
+        </div>
+      )}
+      {!loading && !commented && (
+        <div className="absolute left-1/2 top-[40px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/92 px-3.5 py-2 opacity-95 shadow-[0_0_24px_rgba(255,208,131,0.42),0_12px_30px_rgba(0,0,0,0.26)] backdrop-blur transition duration-300 group-hover:-translate-y-1 group-hover:border-[#fff0c8] group-hover:bg-[#fff1d5] group-hover:shadow-[0_0_34px_rgba(255,218,145,0.62),0_14px_34px_rgba(0,0,0,0.28)]">
+          {[0, 1, 2].map((dot) => (
+            <span
+              key={dot}
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#5b3e31]"
+              style={{ animationDelay: `${dot * 140}ms`, animationDuration: "900ms" }}
+            />
+          ))}
+          <span className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-b border-r border-[#ffd083]/70 bg-[#ffe0bd]" />
         </div>
       )}
       <div
@@ -102,7 +183,7 @@ function GuideFigure({
       >
         <Image
           src={`/characters/stage/${character.id}.png`}
-          alt={character.name}
+          alt={label.name}
           width={512}
           height={512}
           unoptimized
@@ -117,19 +198,25 @@ function GuideFigure({
         }`}
       >
         <span className={`h-2.5 w-2.5 rounded-full ${loading || active ? "bg-[#ffbd62]" : commented ? "bg-[#8dd28b]" : "bg-[#9b908d]"}`} />
-        <p className="text-sm font-semibold">{character.name}</p>
+        <p className="text-sm font-semibold">{label.name}</p>
       </div>
-    </button>
+    </div>
   );
 }
 
 export default function ListenPage() {
   const router = useRouter();
+  const { language } = useLanguage();
+  const copy = COPY[language];
+  const mounted = useHydrated();
   const [initialState] = useState(getInitialListenState);
   const [selectedChars] = useState<Character[]>(initialState.selectedChars);
   const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
+  const [visibleComments, setVisibleComments] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
+  const [streaming, setStreaming] = useState<Set<string>>(new Set());
+  const [streamedOnce, setStreamedOnce] = useState<Set<string>>(new Set());
   const [activeCharacterId, setActiveCharacterId] = useState<string>(selectedChars[0]?.id || "");
   const [userNote, setUserNote] = useState("");
   const [showUserInput, setShowUserInput] = useState(false);
@@ -139,6 +226,7 @@ export default function ListenPage() {
   const [duration, setDuration] = useState(0);
   const [audioSrc] = useState(initialState.audioSrc);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const streamTimersRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     if (selectedChars.length === 0) {
@@ -167,6 +255,14 @@ export default function ListenPage() {
       audioRef.current = null;
     };
   }, [audioSrc]);
+
+  useEffect(() => {
+    const timers = streamTimersRef.current;
+    return () => {
+      timers.forEach((timerId) => window.clearTimeout(timerId));
+      timers.clear();
+    };
+  }, []);
 
   const togglePlay = async () => {
     if (!audioRef.current) return;
@@ -203,13 +299,63 @@ export default function ListenPage() {
     return data.comment as string;
   }, []);
 
+  const stopStreaming = useCallback((charId: string) => {
+    const timerId = streamTimersRef.current.get(charId);
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      streamTimersRef.current.delete(charId);
+    }
+    setStreaming((prev) => {
+      const next = new Set(prev);
+      next.delete(charId);
+      return next;
+    });
+  }, []);
+
+  const streamComment = useCallback((charId: string, text: string) => {
+    stopStreaming(charId);
+    setRevealed((prev) => new Set(prev).add(charId));
+    setVisibleComments((prev) => ({ ...prev, [charId]: "" }));
+    setStreaming((prev) => new Set(prev).add(charId));
+
+    let index = 0;
+    const step = () => {
+      index = Math.min(text.length, index + 1);
+      setVisibleComments((prev) => ({ ...prev, [charId]: text.slice(0, index) }));
+
+      if (index >= text.length) {
+        streamTimersRef.current.delete(charId);
+        setStreaming((prev) => {
+          const next = new Set(prev);
+          next.delete(charId);
+          return next;
+        });
+        setStreamedOnce((prev) => new Set(prev).add(charId));
+        return;
+      }
+
+      const char = text[index - 1] || "";
+      const pause = /[，。！？,.!?]/.test(char) ? 150 : 58;
+      const timerId = window.setTimeout(step, pause);
+      streamTimersRef.current.set(charId, timerId);
+    };
+
+    const timerId = window.setTimeout(step, 180);
+    streamTimersRef.current.set(charId, timerId);
+  }, [stopStreaming]);
+
   const handleReveal = async (charId: string) => {
     if (loading.has(charId)) return;
 
     setActiveCharacterId(charId);
 
     if (allComments[charId]) {
-      setRevealed((prev) => new Set(prev).add(charId));
+      if (streamedOnce.has(charId)) {
+        setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] }));
+        setRevealed((prev) => new Set(prev).add(charId));
+        return;
+      }
+      streamComment(charId, allComments[charId]);
       return;
     }
 
@@ -218,13 +364,10 @@ export default function ListenPage() {
     try {
       const comment = await fetchComment(charId);
       setAllComments((prev) => ({ ...prev, [charId]: comment }));
-      setRevealed((prev) => new Set(prev).add(charId));
+      streamComment(charId, comment);
     } catch {
-      setAllComments((prev) => ({
-        ...prev,
-        [charId]: "（评论生成失败，请重试）",
-      }));
-      setRevealed((prev) => new Set(prev).add(charId));
+      setAllComments((prev) => ({ ...prev, [charId]: copy.failed }));
+      streamComment(charId, copy.failed);
     } finally {
       setLoading((prev) => {
         const next = new Set(prev);
@@ -232,6 +375,17 @@ export default function ListenPage() {
         return next;
       });
     }
+  };
+
+  const handleCloseBubble = (charId: string) => {
+    stopStreaming(charId);
+    setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] || prev[charId] || "" }));
+    setStreamedOnce((prev) => new Set(prev).add(charId));
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      next.delete(charId);
+      return next;
+    });
   };
 
   const handleContinue = () => {
@@ -259,6 +413,8 @@ export default function ListenPage() {
     ],
   };
   const stageSlots = stageSlotsByCount[Math.min(selectedChars.length, 4)] || stageSlotsByCount[4];
+
+  if (!mounted) return null;
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#15111c] text-[#f8dfbb]">
@@ -314,7 +470,7 @@ export default function ListenPage() {
                     type="button"
                     onClick={togglePlay}
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ffe2bd] text-lg font-semibold text-[#382832] shadow-[0_0_24px_rgba(255,203,131,0.38)]"
-                    aria-label={isPlaying ? "暂停音乐" : "播放音乐"}
+                    aria-label={isPlaying ? copy.pause : copy.play}
                   >
                     {isPlaying ? "Ⅱ" : "▶"}
                   </button>
@@ -339,7 +495,7 @@ export default function ListenPage() {
                       value={Math.min(currentTime, duration || currentTime)}
                       onChange={(event) => handleSeek(event.target.value)}
                       className="relative z-10 h-9 w-full cursor-pointer appearance-none bg-transparent accent-[#ffc267] opacity-0"
-                      aria-label="播放进度"
+                      aria-label={copy.progress}
                     />
                   </div>
                   <span className="shrink-0 text-sm font-medium text-[#ffe0bd]">
@@ -355,9 +511,12 @@ export default function ListenPage() {
                   active={character.id === activeCharacterId}
                   commented={revealed.has(character.id)}
                   loading={loading.has(character.id)}
-                  comment={allComments[character.id] || ""}
+                  streaming={streaming.has(character.id)}
+                  comment={visibleComments[character.id] || ""}
                   stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
                   onClick={() => handleReveal(character.id)}
+                  onClose={() => handleCloseBubble(character.id)}
+                  language={language}
                 />
               ))}
 
@@ -366,7 +525,7 @@ export default function ListenPage() {
                   type="button"
                   onClick={togglePlay}
                   className="group/crystal absolute left-1/2 top-0 flex h-[clamp(226px,19vw,296px)] w-[clamp(226px,19vw,296px)] -translate-x-1/2 cursor-pointer items-center justify-center rounded-full outline-none"
-                  aria-label={isPlaying ? "暂停音乐" : "播放音乐"}
+                  aria-label={isPlaying ? copy.pause : copy.play}
                 >
                   <div
                     className={`absolute inset-3 rounded-full bg-[#ffc267]/18 blur-2xl transition duration-500 ${
@@ -414,7 +573,7 @@ export default function ListenPage() {
                   type="button"
                   onClick={() => setShowPlayerControls((prev) => !prev)}
                   className="absolute bottom-[44px] left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-[#c9965d]/46 bg-[#1f1a24]/82 text-[#ffe3bd] shadow-[0_12px_30px_rgba(0,0,0,0.28)]"
-                  aria-label={showPlayerControls ? "收起播放进度" : "展开播放进度"}
+                  aria-label={showPlayerControls ? copy.collapseProgress : copy.expandProgress}
                 >
                   {showPlayerControls ? "⌄" : "⌃"}
                 </button>
@@ -429,16 +588,16 @@ export default function ListenPage() {
                   onClick={() => setShowUserInput(true)}
                   className="rounded-full border border-[#c9965d]/38 bg-[#1f1a24]/70 px-5 py-2 text-center text-xs text-[#d7bfa7] shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur transition hover:border-[#d8aa70]/62 hover:text-[#ffe3bd]"
                 >
-                  点击可补充你的听感
+                  {copy.addFeeling}
                 </button>
               )}
               {showUserInput && (
                 <div className="flex h-[56px] w-[min(380px,88vw)] items-center gap-3 rounded-full border border-[#c9965d]/50 bg-[#1f1a24]/92 px-4 shadow-[0_18px_58px_rgba(0,0,0,0.36)] backdrop-blur">
-                  <p className="shrink-0 text-sm font-semibold text-[#ffe3bd]">我的感受</p>
+                  <p className="shrink-0 text-sm font-semibold text-[#ffe3bd]">{copy.myFeeling}</p>
                   <textarea
                     value={userNote}
                     onChange={(event) => setUserNote(event.target.value)}
-                    placeholder="我也想说两句（可选）"
+                    placeholder={copy.feelingPlaceholder}
                     className="h-9 min-w-0 flex-1 resize-none rounded-full border border-[#8f6c52]/48 bg-[#15111c]/72 px-3 py-2 text-sm leading-tight text-[#ffe3bd] outline-none placeholder:text-[#bda28b]"
                   />
                   <button
@@ -446,7 +605,7 @@ export default function ListenPage() {
                     onClick={() => setShowUserInput(false)}
                     className="shrink-0 text-xs text-[#d7bfa7] transition hover:text-[#ffe3bd]"
                   >
-                    收起
+                    {copy.collapse}
                   </button>
                 </div>
               )}
@@ -456,7 +615,7 @@ export default function ListenPage() {
                 disabled={revealed.size === 0}
                 className="flex h-[64px] w-full items-center justify-center rounded-[18px] border border-[#f4bd72]/62 bg-[#2d2631]/88 px-5 text-base font-semibold text-[#ffe3bd] shadow-[0_16px_44px_rgba(0,0,0,0.32)] transition hover:bg-[#3a2d37] disabled:cursor-not-allowed disabled:opacity-45"
               >
-                生成画作 →
+                {copy.generate}
               </button>
             </div>
           </div>

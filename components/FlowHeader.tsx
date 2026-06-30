@@ -1,15 +1,22 @@
+"use client";
+
+import { useLanguage } from "@/lib/i18n";
+
 type FlowStep = {
   index: string;
-  title: string;
+  title: {
+    zh: string;
+    en: string;
+  };
   icon: string;
 };
 
 const STEPS: FlowStep[] = [
-  { index: "01", title: "音乐输入", icon: "note" },
-  { index: "02", title: "选择导览", icon: "guides" },
-  { index: "03", title: "聆听与点评", icon: "ear" },
-  { index: "04", title: "策展生成", icon: "palette" },
-  { index: "05", title: "画作呈现", icon: "image" },
+  { index: "01", title: { zh: "音乐输入", en: "Music Input" }, icon: "note" },
+  { index: "02", title: { zh: "选择导览", en: "Choose Guides" }, icon: "guides" },
+  { index: "03", title: { zh: "聆听与点评", en: "Listen & Review" }, icon: "ear" },
+  { index: "04", title: { zh: "策展生成", en: "Curate Image" }, icon: "palette" },
+  { index: "05", title: { zh: "画作呈现", en: "Artwork" }, icon: "image" },
 ];
 
 function StepIcon({ type }: { type: string }) {
@@ -58,10 +65,11 @@ export default function FlowHeader({
   brandLabel?: string;
 }) {
   const isDark = variant === "dark";
+  const { language, toggleLanguage } = useLanguage();
 
   return (
     <header className="flex items-start justify-between gap-4 lg:gap-6 2xl:gap-8">
-      <div className="min-w-[230px] 2xl:min-w-[290px]">
+      <div className="min-w-[210px] 2xl:min-w-[290px]">
         <h1
           className={`font-serif text-3xl leading-none tracking-tight drop-shadow-[0_3px_18px_rgba(255,194,119,0.16)] 2xl:text-4xl ${
             isDark ? "text-[#ffe4bd]" : "text-[#2f2638]"
@@ -70,16 +78,16 @@ export default function FlowHeader({
           {brandLabel} <span className="text-2xl text-[#f3b862]">✦</span>
         </h1>
         <p className={`mt-2 text-lg font-medium 2xl:mt-3 2xl:text-xl ${isDark ? "text-[#ffe7c6]" : "text-[#6c5d68]"}`}>
-          音乐画师 · 当音乐作画
+          {language === "zh" ? "音乐画师 · 当音乐作画" : "Music Painter · When Music Paints"}
         </p>
       </div>
 
-      <nav className="hidden flex-1 items-start justify-center gap-3 xl:flex 2xl:gap-6">
+      <nav className="hidden flex-1 items-start justify-center gap-2 xl:flex 2xl:gap-6">
         {STEPS.map((step, index) => {
           const active = activeStep === index + 1;
           return (
-            <div key={step.index} className="flex items-start gap-3 2xl:gap-6">
-              <div className="flex min-w-[112px] items-start gap-2 2xl:min-w-[146px] 2xl:gap-3">
+            <div key={step.index} className="flex items-start gap-2 2xl:gap-6">
+              <div className="flex min-w-[104px] items-start gap-2 2xl:min-w-[146px] 2xl:gap-3">
                 <div
                   className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border 2xl:h-14 2xl:w-14 ${
                     active
@@ -95,18 +103,31 @@ export default function FlowHeader({
                   <p className={`text-xl 2xl:text-2xl ${active ? "text-[#ffd385]" : isDark ? "text-[#d8bf9e]" : "text-[#6b5c67]"}`}>
                     {step.index}
                   </p>
-                  <p className={`mt-1 whitespace-nowrap text-sm leading-tight ${isDark ? "text-[#f3d5ad]" : "text-[#756674]"}`}>
-                    {step.title}
+                  <p className={`mt-1 whitespace-nowrap text-[13px] leading-tight 2xl:text-sm ${isDark ? "text-[#f3d5ad]" : "text-[#756674]"}`}>
+                    {step.title[language]}
                   </p>
                 </div>
               </div>
               {index < STEPS.length - 1 && (
-                <div className={`pt-4 text-2xl 2xl:pt-5 2xl:text-3xl ${isDark ? "text-[#d5aa79]/85" : "text-[#b99a78]"}`}>→</div>
+                <div className={`pt-4 text-xl 2xl:pt-5 2xl:text-3xl ${isDark ? "text-[#d5aa79]/85" : "text-[#b99a78]"}`}>→</div>
               )}
             </div>
           );
         })}
       </nav>
+
+      <button
+        type="button"
+        onClick={toggleLanguage}
+        className={`shrink-0 rounded-full border px-3 py-2 text-sm font-semibold transition 2xl:px-4 ${
+          isDark
+            ? "border-[#b18b72]/50 bg-white/5 text-[#ffe3bd] hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
+            : "border-[#c8b7a8] bg-white text-[#5d5060] hover:border-[#9f6f45]"
+        }`}
+        aria-label={language === "zh" ? "Switch to English" : "切换到中文"}
+      >
+        {language === "zh" ? "ZH / EN" : "EN / ZH"}
+      </button>
     </header>
   );
 }

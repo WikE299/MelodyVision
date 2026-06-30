@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MelodyVision — 音乐画师",
-  description: "当音乐作画：上传一首曲子，让古代音乐家为你点评，再生成一幅画",
+  title: "MelodyVision",
+  description: "Upload music, invite listening guides to respond, and generate an artwork.",
 };
 
 export default function RootLayout({

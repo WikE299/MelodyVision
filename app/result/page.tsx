@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
 import { getExperimentSessionId } from "@/lib/experiment-session";
+import { characterUi, presetUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 
 interface GenerationMeta {
   runId?: string;
@@ -34,19 +35,112 @@ interface FeedbackState {
   freeText: string;
 }
 
-const FEEDBACK_REASONS = ["很准确", "情绪对", "风格不对", "太抽象", "不像音乐", "画面好看"];
+const FEEDBACK_REASONS = {
+  zh: ["很准确", "情绪对", "风格不对", "太抽象", "不像音乐", "画面好看"],
+  en: ["Accurate", "Right mood", "Wrong style", "Too abstract", "Not musical", "Beautiful image"],
+};
 
-const characterLabels: Record<string, { name: string; focus: string }> = {
-  boya: { name: "伯牙", focus: "意" },
-  jikang: { name: "嵇康", focus: "和" },
-  caiwenji: { name: "蔡文姬", focus: "真" },
-  abing: { name: "阿炳", focus: "苦" },
-  tandun: { name: "谭盾", focus: "界" },
-  bach: { name: "巴赫", focus: "序" },
-  mozart: { name: "莫扎特", focus: "灵" },
-  beethoven: { name: "贝多芬", focus: "力" },
-  armstrong: { name: "阿姆斯特朗", focus: "活" },
-  lennon: { name: "列侬", focus: "众" },
+const COPY = {
+  zh: {
+    audioName: "音乐",
+    emptyComment: "暂无点评。",
+    regenerateFailed: "重新生成失败",
+    feedbackFailed: "反馈提交失败",
+    overviewTitle: "生成概览",
+    overviewText: "你的音乐已经完成可视化，画作可保存，也可以回到开头重新生成。",
+    collapse: "收起",
+    generatedAt: "生成时间",
+    imageSource: "画面来源",
+    sourceValue: "音乐与点评",
+    guideCount: "导览数量",
+    modelStatus: "模型状态",
+    generated: "已生成",
+    params: "生成参数",
+    style: "风格",
+    mood: "情绪",
+    tone: "光色",
+    auto: "自动",
+    overviewRail: "生成概览",
+    title: "画作已生成",
+    subtitle: "来自音乐、导览点评和你的画面选择",
+    regenerate: "重新生成",
+    regenerateTip: "用同一提示重新生成",
+    save: "保存画作",
+    imageAlt: "AI 生成的画作",
+    clickMusic: "点击播放音乐",
+    playingWithImage: "正在随画面播放",
+    clickAudio: "点击播放音频",
+    collapsePlayerTip: "收起播放控制",
+    expandControl: "展开播放控制",
+    musicPlaying: "音乐播放中",
+    expandProgressTip: "展开音乐播放进度",
+    reviewTitle: "音乐家点评回顾",
+    collected: "已收集",
+    appendix: "研究附录",
+    feedbackTitle: "这张图像符合你的听感吗？",
+    musicMatch: "像这首音乐",
+    commentMatch: "体现点评",
+    aesthetic: "画面好看",
+    feedbackPlaceholder: "补充一句你的感受（可选）",
+    submitting: "提交中...",
+    saved: "已记录",
+    submit: "提交反馈",
+    feedbackError: "反馈提交失败，请稍后重试",
+    debug: "生成调试信息",
+    notRecorded: "未记录",
+    startOver: "重新开始",
+    startOverTip: "清空当前流程，回到首页",
+  },
+  en: {
+    audioName: "Music",
+    emptyComment: "No comment yet.",
+    regenerateFailed: "Regeneration failed",
+    feedbackFailed: "Failed to submit feedback",
+    overviewTitle: "Overview",
+    overviewText: "Your music has been visualized. Save the artwork or return to the beginning.",
+    collapse: "Close",
+    generatedAt: "Generated",
+    imageSource: "Source",
+    sourceValue: "Music & comments",
+    guideCount: "Guides",
+    modelStatus: "Model",
+    generated: "Generated",
+    params: "Generation Choices",
+    style: "Style",
+    mood: "Mood",
+    tone: "Light",
+    auto: "Auto",
+    overviewRail: "Overview",
+    title: "Artwork Generated",
+    subtitle: "Built from the music, guide comments, and your visual choices",
+    regenerate: "Regenerate",
+    regenerateTip: "Regenerate with the same prompt",
+    save: "Save artwork",
+    imageAlt: "AI-generated artwork",
+    clickMusic: "Click to play music",
+    playingWithImage: "Playing with the artwork",
+    clickAudio: "Click to play audio",
+    collapsePlayerTip: "Hide playback controls",
+    expandControl: "Show playback controls",
+    musicPlaying: "Music playing",
+    expandProgressTip: "Show music progress",
+    reviewTitle: "Musician Comment Recap",
+    collected: "Collected",
+    appendix: "Research Appendix",
+    feedbackTitle: "Does this image match what you heard?",
+    musicMatch: "Matches the music",
+    commentMatch: "Reflects comments",
+    aesthetic: "Looks good",
+    feedbackPlaceholder: "Add one more thought (optional)",
+    submitting: "Submitting...",
+    saved: "Saved",
+    submit: "Submit feedback",
+    feedbackError: "Feedback failed. Please try again later.",
+    debug: "Generation Debug Info",
+    notRecorded: "Not recorded",
+    startOver: "Start over",
+    startOverTip: "Clear this flow and return home",
+  },
 };
 
 function getInitialResultState() {
@@ -113,18 +207,26 @@ function formatTime(seconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
 }
 
-function getCharacterView(character: Character) {
-  return characterLabels[character.id] || { name: character.name, focus: character.focusKeyword };
+function getCharacterView(character: Character, language: Language) {
+  return characterUi[language][character.id as keyof typeof characterUi.zh] || { name: character.name, focus: character.focusKeyword };
+}
+
+function presetLabel(value: string | undefined, language: Language, fallback: string) {
+  if (!value) return fallback;
+  return presetUi[language].values[value as keyof typeof presetUi.zh.values]?.label || value;
 }
 
 function GuideCommentCard({
   character,
   comment,
+  language,
 }: {
   character: Character;
   comment: string;
+  language: Language;
 }) {
-  const label = getCharacterView(character);
+  const label = getCharacterView(character, language);
+  const copy = COPY[language];
 
   return (
     <article className="flex min-h-0 gap-3 rounded-[18px] border border-[#a77b57]/34 bg-[#2b2530]/76 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
@@ -147,7 +249,7 @@ function GuideCommentCard({
           </span>
         </div>
         <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[#dec3a5]">
-          {comment || "暂无点评。"}
+          {comment || copy.emptyComment}
         </p>
       </div>
     </article>
@@ -156,7 +258,10 @@ function GuideCommentCard({
 
 export default function ResultPage() {
   const router = useRouter();
+  const { language } = useLanguage();
+  const copy = COPY[language];
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mounted = useHydrated();
   const [initialState] = useState(getInitialResultState);
   const [imageUrl, setImageUrl] = useState<string | null>(initialState.imageUrl);
   const [audioUrl] = useState<string>(initialState.audioUrl);
@@ -256,7 +361,7 @@ export default function ResultPage() {
       const data = await response.json();
 
       if (!response.ok || !data.imageUrl) {
-        throw new Error(data.detail || data.error || "重新生成失败");
+        throw new Error(data.detail || data.error || copy.regenerateFailed);
       }
 
       setImageUrl(data.imageUrl);
@@ -284,7 +389,7 @@ export default function ResultPage() {
       sessionStorage.setItem("experimentSessionId", data.sessionId || sessionId);
       sessionStorage.setItem("imageGenerationMeta", JSON.stringify(nextDebugInfo.meta));
     } catch (error) {
-      setRegenerateError(error instanceof Error ? error.message : "重新生成失败");
+      setRegenerateError(error instanceof Error ? error.message : copy.regenerateFailed);
     } finally {
       setRegenerating(false);
     }
@@ -329,7 +434,7 @@ export default function ResultPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "反馈提交失败");
+        throw new Error(data.error || copy.feedbackFailed);
       }
 
       setFeedbackStatus("saved");
@@ -338,7 +443,7 @@ export default function ResultPage() {
     }
   };
 
-  if (!imageUrl) return null;
+  if (!mounted || !imageUrl) return null;
 
   const characters = getCharactersByIds(characterIds);
   const commentsForDebug = characterIds.map((characterId) => ({
@@ -379,9 +484,9 @@ export default function ResultPage() {
             <aside className="flex min-h-0 flex-col rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/72 p-4 shadow-[0_20px_70px_rgba(0,0,0,0.24)] backdrop-blur">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-[#ffe3bd]">生成概览</h2>
+                  <h2 className="text-lg font-semibold text-[#ffe3bd]">{copy.overviewTitle}</h2>
                   <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
-                    你的音乐已经完成可视化，画作可保存，也可以回到开头重新生成。
+                    {copy.overviewText}
                   </p>
                 </div>
                 <button
@@ -389,26 +494,26 @@ export default function ResultPage() {
                   onClick={() => setShowOverview(false)}
                   className="rounded-full border border-[#a77b57]/42 px-2 py-1 text-xs text-[#d7b99b] hover:border-[#ffd083]/70"
                 >
-                  收起
+                  {copy.collapse}
                 </button>
               </div>
               <div className="mt-4 space-y-3 border-t border-[#8f6b52]/34 pt-4 text-xs text-[#d7b99b]">
-                <p className="flex justify-between gap-3"><span>生成时间</span><span>{generatedTime}</span></p>
-                <p className="flex justify-between gap-3"><span>画面来源</span><span>音乐与点评</span></p>
-                <p className="flex justify-between gap-3"><span>导览数量</span><span>{characters.length || 0} 位</span></p>
-                <p className="flex justify-between gap-3"><span>模型状态</span><span>{debugInfo?.meta?.model || "已生成"}</span></p>
+                <p className="flex justify-between gap-3"><span>{copy.generatedAt}</span><span>{generatedTime}</span></p>
+                <p className="flex justify-between gap-3"><span>{copy.imageSource}</span><span>{copy.sourceValue}</span></p>
+                <p className="flex justify-between gap-3"><span>{copy.guideCount}</span><span>{characters.length || 0}</span></p>
+                <p className="flex justify-between gap-3"><span>{copy.modelStatus}</span><span>{debugInfo?.meta?.model || copy.generated}</span></p>
               </div>
               <div className="mt-4 rounded-[18px] border border-[#a77b57]/34 bg-[#2d2732]/70 p-3">
-                <p className="text-sm font-semibold text-[#ffe3bd]">生成参数</p>
+                <p className="text-sm font-semibold text-[#ffe3bd]">{copy.params}</p>
                 <div className="mt-3 grid gap-2 text-xs text-[#d7b99b]">
                   <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
-                    风格：{presets?.style || "自动"}
+                    {copy.style}: {presetLabel(presets?.style, language, copy.auto)}
                   </span>
                   <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
-                    情绪：{presets?.mood || "自动"}
+                    {copy.mood}: {presetLabel(presets?.mood, language, copy.auto)}
                   </span>
                   <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
-                    光色：{presets?.tone || "自动"}
+                    {copy.tone}: {presetLabel(presets?.tone, language, copy.auto)}
                   </span>
                 </div>
               </div>
@@ -421,40 +526,50 @@ export default function ResultPage() {
                 className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-[16px] border border-[#a77b57]/36 bg-[#2d2732]/58 text-[#ffe3bd] transition hover:border-[#ffd083]/70 hover:bg-[#3a2d32]/70"
               >
                 <span className="text-lg">↗</span>
-                <span className="text-xs leading-tight [writing-mode:vertical-rl]">生成概览</span>
+                <span className="text-xs leading-tight [writing-mode:vertical-rl]">{copy.overviewRail}</span>
               </button>
             </aside>
           )}
 
           <div className="relative min-w-0">
             <div className="absolute left-0 right-0 top-0 text-center">
-              <h2 className="text-2xl font-semibold text-[#ffe3bd] 2xl:text-3xl">画作已生成</h2>
-              <p className="mt-1 text-sm text-[#d7b99b]">来自音乐、导览点评和你的画面选择</p>
+              <h2 className="text-2xl font-semibold text-[#ffe3bd] 2xl:text-3xl">{copy.title}</h2>
+              <p className="mt-1 text-sm text-[#d7b99b]">{copy.subtitle}</p>
             </div>
             <div className="absolute right-[7%] top-[38px] z-20 flex gap-3">
-              <button
-                type="button"
-                onClick={handleRegenerateArtwork}
-                disabled={regenerating || !debugInfo?.prompt}
-                aria-label="重新生成"
-                title="用同一提示重新生成"
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80 hover:bg-[#3a2d32] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <svg className={`h-5 w-5 ${regenerating ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
-                </svg>
-              </button>
-              <a
-                href={imageUrl}
-                download={`melodyvision-${debugInfo?.meta?.runId || "artwork"}.png`}
-                aria-label="保存画作"
-                title="保存画作"
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/62 bg-[#4b3444]/86 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34),0_0_20px_rgba(255,194,103,0.22)] backdrop-blur transition hover:border-[#ffd083] hover:bg-[#5a3b4d]"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" />
-                </svg>
-              </a>
+              <div className="group relative">
+                <button
+                  type="button"
+                  onClick={handleRegenerateArtwork}
+                  disabled={regenerating || !debugInfo?.prompt}
+                  aria-label={copy.regenerate}
+                  title={copy.regenerateTip}
+                  className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80 hover:bg-[#3a2d32] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <svg className={`h-5 w-5 ${regenerating ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
+                  </svg>
+                </button>
+                <span className="pointer-events-none absolute left-1/2 top-[52px] z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
+                  {copy.regenerateTip}
+                </span>
+              </div>
+              <div className="group relative">
+                <a
+                  href={imageUrl}
+                  download={`melodyvision-${debugInfo?.meta?.runId || "artwork"}.png`}
+                  aria-label={copy.save}
+                  title={copy.save}
+                  className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/62 bg-[#4b3444]/86 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34),0_0_20px_rgba(255,194,103,0.22)] backdrop-blur transition hover:border-[#ffd083] hover:bg-[#5a3b4d]"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" />
+                  </svg>
+                </a>
+                <span className="pointer-events-none absolute left-1/2 top-[52px] z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
+                  {copy.save}
+                </span>
+              </div>
             </div>
             {regenerateError && (
               <p className="absolute left-0 right-0 top-[84px] text-center text-xs text-[#ff9f9f]">
@@ -469,7 +584,7 @@ export default function ResultPage() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={imageUrl}
-                    alt="AI 生成的画作"
+                    alt={copy.imageAlt}
                     className="block max-h-[430px] max-w-[720px] object-contain 2xl:max-h-[560px] 2xl:max-w-[900px]"
                     onLoad={playResultAudio}
                   />
@@ -500,7 +615,7 @@ export default function ResultPage() {
                     <span className="min-w-[120px]">
                       <span className="block text-sm font-semibold text-[#ffe3bd]">{audioName}</span>
                       <span className="block text-xs text-[#c8aa8e]">
-                        {audioBlocked ? "点击播放音乐" : isAudioPlaying ? "正在随画面播放" : "点击播放音频"}
+                        {audioBlocked ? copy.clickMusic : isAudioPlaying ? copy.playingWithImage : copy.clickAudio}
                       </span>
                     </span>
                     <span className="relative h-8 min-w-0 flex-1 overflow-hidden">
@@ -522,19 +637,25 @@ export default function ResultPage() {
                     <button
                       type="button"
                       onClick={() => setShowPlayer(false)}
-                      className="rounded-full border border-[#a77b57]/42 px-3 py-1.5 text-xs text-[#d7b99b] hover:border-[#ffd083]/70"
+                      className="group relative rounded-full border border-[#a77b57]/42 px-3 py-1.5 text-xs text-[#d7b99b] hover:border-[#ffd083]/70"
                     >
-                      收起
+                      {copy.collapse}
+                      <span className="pointer-events-none absolute bottom-[38px] left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
+                        {copy.collapsePlayerTip}
+                      </span>
                     </button>
                   </div>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setShowPlayer(true)}
-                      className="flex items-center gap-2 rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 px-4 py-2 text-xs text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80"
+                      className="group relative flex items-center gap-2 rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 px-4 py-2 text-xs text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80"
                     >
                       <span className="h-2 w-2 rounded-full bg-[#ffd083] shadow-[0_0_16px_rgba(255,208,131,0.8)]" />
-                      {audioBlocked ? "展开播放控制" : isAudioPlaying ? "音乐播放中" : "展开播放控制"}
+                      {audioBlocked ? copy.expandControl : isAudioPlaying ? copy.musicPlaying : copy.expandControl}
+                      <span className="pointer-events-none absolute bottom-[42px] left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
+                        {copy.expandProgressTip}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -545,8 +666,8 @@ export default function ResultPage() {
           <aside className="flex min-h-0 flex-col rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/72 p-4 shadow-[0_20px_70px_rgba(0,0,0,0.24)] backdrop-blur">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-[#ffe3bd]">音乐家点评回顾</h2>
-                <p className="mt-1 text-xs text-[#c7aa8d]">{characters.length} / {characters.length} 已收集</p>
+                <h2 className="text-lg font-semibold text-[#ffe3bd]">{copy.reviewTitle}</h2>
+                <p className="mt-1 text-xs text-[#c7aa8d]">{characters.length} / {characters.length} {copy.collected}</p>
               </div>
             </div>
             <div className="mt-4 grid min-h-0 flex-1 content-start gap-3 overflow-hidden">
@@ -555,22 +676,23 @@ export default function ResultPage() {
                   key={character.id}
                   character={character}
                   comment={comments[character.id] || ""}
+                  language={language}
                 />
               ))}
             </div>
           </aside>
 
-          <details className="absolute bottom-4 right-4 z-30 w-[348px] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/88 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur 2xl:w-[404px]">
-            <summary className="cursor-pointer font-semibold">研究附录</summary>
+          <details className="absolute bottom-4 right-4 z-50 w-[348px] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/88 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur 2xl:w-[404px]">
+            <summary className="cursor-pointer font-semibold">{copy.appendix}</summary>
             <div className="mt-4 max-h-[420px] overflow-auto pr-1">
               {debugInfo?.meta?.runId && (
                 <div className="rounded-[16px] border border-[#8f6b52]/34 bg-[#2d2732]/78 p-3">
-                  <p className="mb-3 text-sm font-semibold">这张图像符合你的听感吗？</p>
+                  <p className="mb-3 text-sm font-semibold">{copy.feedbackTitle}</p>
                   <div className="space-y-3">
                     {[
-                      ["musicMatchScore", "像这首音乐"] as const,
-                      ["commentMatchScore", "体现点评"] as const,
-                      ["aestheticScore", "画面好看"] as const,
+                      ["musicMatchScore", copy.musicMatch] as const,
+                      ["commentMatchScore", copy.commentMatch] as const,
+                      ["aestheticScore", copy.aesthetic] as const,
                     ].map(([key, label]) => (
                       <div key={key} className="flex items-center justify-between gap-3">
                         <span className="text-xs text-[#d7b99b]">{label}</span>
@@ -593,7 +715,7 @@ export default function ResultPage() {
                       </div>
                     ))}
                     <div className="flex flex-wrap gap-2">
-                      {FEEDBACK_REASONS.map((reason) => {
+                      {FEEDBACK_REASONS[language].map((reason) => {
                         const selected = feedback.selectedReasons.includes(reason);
                         return (
                           <button
@@ -614,7 +736,7 @@ export default function ResultPage() {
                     <textarea
                       value={feedback.freeText}
                       onChange={(event) => setFeedback((prev) => ({ ...prev, freeText: event.target.value }))}
-                      placeholder="补充一句你的感受（可选）"
+                      placeholder={copy.feedbackPlaceholder}
                       className="h-16 w-full resize-none rounded-[12px] border border-[#8f6b52]/44 bg-[#211b25] p-3 text-xs text-[#ffe3bd] outline-none placeholder:text-[#9f8066] focus:border-[#ffd083]/70"
                     />
                     <button
@@ -623,10 +745,10 @@ export default function ResultPage() {
                       disabled={feedbackStatus === "saving" || feedbackStatus === "saved"}
                       className="w-full rounded-[14px] bg-[#4b3444] py-3 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:opacity-55"
                     >
-                      {feedbackStatus === "saving" ? "提交中..." : feedbackStatus === "saved" ? "已记录" : "提交反馈"}
+                      {feedbackStatus === "saving" ? copy.submitting : feedbackStatus === "saved" ? copy.saved : copy.submit}
                     </button>
                     {feedbackStatus === "error" && (
-                      <p className="text-center text-xs text-[#ff9f9f]">反馈提交失败，请稍后重试</p>
+                      <p className="text-center text-xs text-[#ff9f9f]">{copy.feedbackError}</p>
                     )}
                   </div>
                 </div>
@@ -634,7 +756,7 @@ export default function ResultPage() {
 
               {debugInfo && (
                 <details className="mt-3 rounded-[16px] border border-[#8f6b52]/34 bg-[#2d2732]/78 p-3">
-                  <summary className="cursor-pointer text-sm font-semibold">生成调试信息</summary>
+                  <summary className="cursor-pointer text-sm font-semibold">{copy.debug}</summary>
                   <div className="mt-3 space-y-3 text-xs text-[#d7b99b]">
                     <pre className="max-h-32 overflow-auto rounded-[10px] bg-[#17131a] p-3 whitespace-pre-wrap">
                       {JSON.stringify(debugInfo.meta, null, 2)}
@@ -646,7 +768,7 @@ export default function ResultPage() {
                       {JSON.stringify(commentsForDebug, null, 2)}
                     </pre>
                     <p className="max-h-32 overflow-auto rounded-[10px] bg-[#17131a] p-3 leading-relaxed whitespace-pre-wrap">
-                      {debugInfo.prompt || "未记录"}
+                      {debugInfo.prompt || copy.notRecorded}
                     </p>
                     {debugInfo.remoteImageUrl && (
                       <p className="overflow-auto rounded-[10px] bg-[#17131a] p-3 break-all">
@@ -661,12 +783,15 @@ export default function ResultPage() {
           <button
             type="button"
             onClick={handleStartOver}
-            className="absolute bottom-[88px] right-4 z-30 flex items-center gap-2 rounded-full border border-[#a77b57]/44 bg-[#241f2a]/88 px-4 py-2.5 text-sm font-semibold text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur transition hover:border-[#ffd083]/70 hover:bg-[#302735]"
+            className="group absolute bottom-[88px] right-4 z-30 flex items-center gap-2 rounded-full border border-[#a77b57]/44 bg-[#241f2a]/88 px-4 py-2.5 text-sm font-semibold text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur transition hover:border-[#ffd083]/70 hover:bg-[#302735]"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
             </svg>
-            重新开始
+            {copy.startOver}
+            <span className="pointer-events-none absolute bottom-[46px] left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
+              {copy.startOverTip}
+            </span>
           </button>
         </section>
       </div>
