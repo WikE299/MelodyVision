@@ -545,6 +545,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { comments, presets, userNote, musicAnalysis } = body;
+    const promptOverride =
+      typeof body.promptOverride === "string" && body.promptOverride.trim()
+        ? cleanImagePrompt(body.promptOverride)
+        : "";
+    const negativePromptOverride =
+      typeof body.negativePrompt === "string" && body.negativePrompt.trim()
+        ? body.negativePrompt.trim()
+        : "";
     const sessionId =
       typeof body.sessionId === "string" && body.sessionId.trim()
         ? body.sessionId.trim()
@@ -553,6 +561,90 @@ export async function POST(request: NextRequest) {
       ? body.selectedCharacters.filter((characterId: unknown) => typeof characterId === "string")
       : [];
     const normalizedComments = normalizeComments(comments);
+
+    if (promptOverride) {
+      const imageStartedAt = Date.now();
+      const imageResult = await generateImageWithDashScope(
+        promptOverride,
+        negativePromptOverride ||
+          "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs"
+      );
+      timings.imageGenerationMs = Date.now() - imageStartedAt;
+
+      const saveStartedAt = Date.now();
+      const savedImage = await saveGeneratedImage(imageResult.remoteImageUrl, runId);
+      timings.imageDownloadMs = Date.now() - saveStartedAt;
+      timings.totalMs = Date.now() - startedAt.getTime();
+
+      const runLog = {
+        runId,
+        createdAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        status: "success",
+        input: {
+          musicAnalysis,
+          comments: normalizedComments,
+          presets,
+          userNote,
+          promptOverride: true,
+        },
+        prompt: {
+          source: "prompt-override",
+          finalImagePrompt: promptOverride,
+          negativePrompt: negativePromptOverride,
+        },
+        image: {
+          provider: imageResult.provider,
+          model: imageResult.model,
+          requestId: imageResult.requestId,
+          usage: imageResult.usage,
+          remoteUrl: imageResult.remoteImageUrl,
+          localUrl: savedImage.publicUrl,
+          localPath: savedImage.localPath,
+          bytes: savedImage.bytes,
+          contentType: savedImage.contentType,
+        },
+        timings,
+      };
+      const logPath = await writeGenerationRunLog(runId, runLog);
+      await insertGenerationRun({
+        id: runId,
+        sessionId,
+        createdAt: startedAt.toISOString(),
+        selectedCharacters,
+        presets,
+        userNote: typeof userNote === "string" ? userNote : "",
+        musicAnalysis,
+        musicianComments: normalizedComments,
+        promptDirector: null,
+        finalImagePrompt: promptOverride,
+        negativePrompt: negativePromptOverride,
+        imageUrl: savedImage.publicUrl,
+        remoteImageUrl: imageResult.remoteImageUrl,
+        imageProvider: imageResult.provider,
+        imageModel: imageResult.model,
+        imageRequestId: imageResult.requestId || "",
+        timings,
+        logPath,
+      });
+
+      return Response.json({
+        runId,
+        sessionId,
+        imageUrl: savedImage.publicUrl,
+        remoteImageUrl: imageResult.remoteImageUrl,
+        prompt: promptOverride,
+        promptSource: "prompt-override",
+        promptDirector: null,
+        presets,
+        provider: imageResult.provider,
+        model: imageResult.model,
+        requestId: imageResult.requestId,
+        usage: imageResult.usage,
+        logPath,
+        timings,
+      });
+    }
 
     if (normalizedComments.length === 0) {
       return Response.json({ error: "Comments required" }, { status: 400 });

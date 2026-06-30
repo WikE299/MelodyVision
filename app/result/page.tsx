@@ -158,13 +158,13 @@ export default function ResultPage() {
   const router = useRouter();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [initialState] = useState(getInitialResultState);
-  const [imageUrl] = useState<string | null>(initialState.imageUrl);
+  const [imageUrl, setImageUrl] = useState<string | null>(initialState.imageUrl);
   const [audioUrl] = useState<string>(initialState.audioUrl);
   const [audioName] = useState<string>(initialState.audioName);
   const [comments] = useState<Record<string, string>>(initialState.comments);
   const [presets] = useState<{ style: string; mood: string; tone: string } | null>(initialState.presets);
   const [characterIds] = useState<string[]>(initialState.characterIds);
-  const [debugInfo] = useState<DebugInfo | null>(initialState.debugInfo);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(initialState.debugInfo);
   const [generatedTime] = useState(initialState.generatedTime);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -172,6 +172,8 @@ export default function ResultPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [showOverview, setShowOverview] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({
     musicMatchScore: 4,
     commentMatchScore: 4,
@@ -215,9 +217,77 @@ export default function ResultPage() {
     await playResultAudio();
   };
 
-  const handleRestart = () => {
+  const handleStartOver = () => {
     sessionStorage.clear();
     router.push("/");
+  };
+
+  const handleRegenerateArtwork = async () => {
+    const prompt = debugInfo?.prompt?.trim();
+    if (!prompt || regenerating) return;
+
+    setRegenerating(true);
+    setRegenerateError(null);
+
+    try {
+      const sessionId =
+        debugInfo?.meta?.sessionId ||
+        sessionStorage.getItem("experimentSessionId") ||
+        (await getExperimentSessionId());
+      const commentList = characterIds
+        .filter((characterId) => comments[characterId])
+        .map((characterId) => ({
+          characterId,
+          text: comments[characterId],
+        }));
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          selectedCharacters: characterIds,
+          comments: commentList,
+          presets,
+          userNote: sessionStorage.getItem("userNote") || "",
+          musicAnalysis: debugInfo?.musicAnalysis || {},
+          promptOverride: prompt,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.imageUrl) {
+        throw new Error(data.detail || data.error || "重新生成失败");
+      }
+
+      setImageUrl(data.imageUrl);
+      const nextDebugInfo: DebugInfo = {
+        musicAnalysis: debugInfo?.musicAnalysis,
+        prompt: data.prompt || prompt,
+        remoteImageUrl: data.remoteImageUrl || "",
+        meta: {
+          runId: data.runId,
+          sessionId: data.sessionId || sessionId,
+          provider: data.provider,
+          model: data.model,
+          requestId: data.requestId,
+          promptSource: data.promptSource,
+          promptDirector: data.promptDirector,
+          logPath: data.logPath,
+          timings: data.timings,
+          usage: data.usage,
+        },
+      };
+      setDebugInfo(nextDebugInfo);
+      sessionStorage.setItem("generatedImageUrl", data.imageUrl);
+      sessionStorage.setItem("generatedRemoteImageUrl", data.remoteImageUrl || "");
+      sessionStorage.setItem("generatedImagePrompt", data.prompt || prompt);
+      sessionStorage.setItem("experimentSessionId", data.sessionId || sessionId);
+      sessionStorage.setItem("imageGenerationMeta", JSON.stringify(nextDebugInfo.meta));
+    } catch (error) {
+      setRegenerateError(error instanceof Error ? error.message : "重新生成失败");
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   const updateScore = (
@@ -364,12 +434,13 @@ export default function ResultPage() {
             <div className="absolute right-[7%] top-[38px] z-20 flex gap-3">
               <button
                 type="button"
-                onClick={handleRestart}
-                aria-label="重新开始"
-                title="重新开始"
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
+                onClick={handleRegenerateArtwork}
+                disabled={regenerating || !debugInfo?.prompt}
+                aria-label="重新生成"
+                title="用同一提示重新生成"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80 hover:bg-[#3a2d32] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className={`h-5 w-5 ${regenerating ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
                 </svg>
               </button>
@@ -385,6 +456,11 @@ export default function ResultPage() {
                 </svg>
               </a>
             </div>
+            {regenerateError && (
+              <p className="absolute left-0 right-0 top-[84px] text-center text-xs text-[#ff9f9f]">
+                {regenerateError}
+              </p>
+            )}
 
             <div className="absolute left-1/2 top-[44px] inline-block max-w-full -translate-x-1/2 pt-11">
               <div className="relative inline-block rounded-[10px] border-[8px] border-[#8b5d32] bg-[#17131a] p-2 shadow-[0_30px_90px_rgba(0,0,0,0.5),0_0_38px_rgba(255,187,91,0.18)]">
@@ -582,6 +658,16 @@ export default function ResultPage() {
               )}
             </div>
           </details>
+          <button
+            type="button"
+            onClick={handleStartOver}
+            className="absolute bottom-[88px] right-4 z-30 flex items-center gap-2 rounded-full border border-[#a77b57]/44 bg-[#241f2a]/88 px-4 py-2.5 text-sm font-semibold text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur transition hover:border-[#ffd083]/70 hover:bg-[#302735]"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
+            </svg>
+            重新开始
+          </button>
         </section>
       </div>
     </main>
