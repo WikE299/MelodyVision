@@ -5,55 +5,153 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioUploader from "@/components/AudioUploader";
 import FlowHeader from "@/components/FlowHeader";
+import { audioCatalog, searchAudioCatalog, type AudioCatalogItem } from "@/lib/audio/catalog";
 import { analyzeAudioFile } from "@/lib/audio/web-analyzer";
 import { useLanguage } from "@/lib/i18n";
 
+type InputMode = "examples" | "search" | "upload";
+
 const COPY = {
   zh: {
-    uploadHint: "上传音乐，让音乐家评论生成图像。",
+    productHint: "选一段声音，邀请音乐家聆听，再把感受变成画作。",
     analyzing: "正在分析音乐...",
+    analyzeFailed: "音频分析失败，请换一段音频再试。",
+    exampleFailed: "示例音频加载失败，请稍后再试或上传自己的音频。",
+    modes: {
+      examples: {
+        title: "试试示例",
+        desc: "没有音频文件也能立刻体验",
+      },
+      search: {
+        title: "搜索音乐",
+        desc: "从受控音源库中匹配",
+      },
+      upload: {
+        title: "上传音频",
+        desc: "已有音频文件？从这里开始",
+      },
+    },
+    examplesTitle: "推荐示例",
+    examplesDesc: "先用项目内置音频跑通完整链路，后续可继续补充更多授权曲目。",
+    startWithThis: "用这段开始",
+    preview: "试听",
+    seconds: "秒",
+    tags: "标签",
+    source: "来源",
+    license: "授权",
+    searchPlaceholder: "输入曲名、风格、情绪或场景",
+    searchEmpty: "暂时没有匹配结果，可以改用示例或上传自己的音频。",
+    uploadTitle: "已有音频文件？上传自己的音乐",
   },
   en: {
-    uploadHint: "Upload music, invite musicians to respond, then turn it into an image.",
+    productHint: "Choose a sound, invite musicians to listen, then turn the response into an artwork.",
     analyzing: "Analyzing your music...",
+    analyzeFailed: "Audio analysis failed. Please try another file.",
+    exampleFailed: "The example audio could not be loaded. Try again later or upload your own audio.",
+    modes: {
+      examples: {
+        title: "Try Example",
+        desc: "Start instantly without a file",
+      },
+      search: {
+        title: "Search Music",
+        desc: "Match from a controlled library",
+      },
+      upload: {
+        title: "Upload Audio",
+        desc: "Use your own audio file",
+      },
+    },
+    examplesTitle: "Featured Example",
+    examplesDesc: "Use a local demo track to run the full flow. More licensed tracks can be added later.",
+    startWithThis: "Start with this",
+    preview: "Preview",
+    seconds: "sec",
+    tags: "Tags",
+    source: "Source",
+    license: "License",
+    searchPlaceholder: "Search by title, style, mood, or scene",
+    searchEmpty: "No matches yet. Try the example or upload your own audio.",
+    uploadTitle: "Have an audio file? Upload your own music",
   },
 };
+
+const INPUT_MODES: InputMode[] = ["examples", "search", "upload"];
+
+function formatDuration(seconds: number, suffix: string) {
+  return `${Math.round(seconds)} ${suffix}`;
+}
 
 export default function HomePageClient() {
   const router = useRouter();
   const { language } = useLanguage();
+  const [activeInputMode, setActiveInputMode] = useState<InputMode | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const copy = COPY[language];
+  const visibleCatalog = activeInputMode === "search" ? searchAudioCatalog(searchQuery) : audioCatalog;
 
-  const handleFileSelect = async (file: File) => {
+  const handleFileSelect = async (file: File, sourceUrl?: string) => {
     setAnalyzing(true);
+    setError(null);
 
-    // Store file info in sessionStorage for the flow
-    sessionStorage.setItem("audioFileName", file.name);
-    sessionStorage.setItem("audioFileSize", String(file.size));
-    sessionStorage.removeItem("audioSrc");
+    try {
+      sessionStorage.setItem("audioFileName", file.name);
+      sessionStorage.setItem("audioFileSize", String(file.size));
+      if (sourceUrl) {
+        sessionStorage.setItem("audioSrc", sourceUrl);
+      } else {
+        sessionStorage.removeItem("audioSrc");
+      }
 
-    // Create object URL for later use
-    const url = URL.createObjectURL(file);
-    sessionStorage.setItem("audioObjectUrl", url);
+      const url = URL.createObjectURL(file);
+      sessionStorage.setItem("audioObjectUrl", url);
 
-    const features = await analyzeAudioFile(file);
-    const analysis = {
-      tempo: features.tempo,
-      mood: features.mood,
-      energy: features.energy,
-      brightness: features.brightness,
-      dynamicRange: features.dynamicRange,
-      bpm: features.bpm,
-      duration: features.durationSeconds,
-      description: features.description,
-      spectralCentroid: features.spectralCentroid,
-      spectralFlatness: features.spectralFlatness,
-      spectralRolloff: features.spectralRolloff,
-    };
-    sessionStorage.setItem("musicAnalysis", JSON.stringify(analysis));
+      const features = await analyzeAudioFile(file);
+      const analysis = {
+        tempo: features.tempo,
+        mood: features.mood,
+        energy: features.energy,
+        brightness: features.brightness,
+        dynamicRange: features.dynamicRange,
+        bpm: features.bpm,
+        duration: features.durationSeconds,
+        description: features.description,
+        segments: features.segments,
+        salientMoments: features.salientMoments,
+        curves: features.curves,
+        visualMappingHints: features.visualMappingHints,
+        spectralCentroid: features.spectralCentroid,
+        spectralFlatness: features.spectralFlatness,
+        spectralRolloff: features.spectralRolloff,
+      };
+      sessionStorage.setItem("musicAnalysis", JSON.stringify(analysis));
 
-    router.push("/select");
+      router.push("/select");
+    } catch (err) {
+      console.error("Audio analysis failed:", err);
+      setAnalyzing(false);
+      setError(copy.analyzeFailed);
+    }
+  };
+
+  const handleCatalogSelect = async (item: AudioCatalogItem) => {
+    if (analyzing) return;
+    setAnalyzing(true);
+    setError(null);
+
+    try {
+      const res = await fetch(item.file);
+      if (!res.ok) throw new Error(`Failed to load ${item.file}`);
+      const blob = await res.blob();
+      const file = new File([blob], `${item.name}.mp3`, { type: blob.type || "audio/mpeg" });
+      await handleFileSelect(file, item.file);
+    } catch (err) {
+      console.error("Preset audio failed:", err);
+      setAnalyzing(false);
+      setError(copy.exampleFailed);
+    }
   };
 
   return (
@@ -120,9 +218,94 @@ export default function HomePageClient() {
             </div>
             <div className="absolute top-[388px] h-[126px] w-[820px] rounded-[50%] border border-[#e1a763]/35 bg-[#85664d]/36 shadow-[0_30px_90px_rgba(0,0,0,0.4)]" />
             <div className="absolute top-[418px] h-[68px] w-[720px] rounded-[50%] bg-[#f5b75e]/18 blur-md" />
-            <div className="relative z-10 w-full max-w-[650px] pb-12">
-              <AudioUploader onFileSelect={handleFileSelect} disabled={analyzing} language={language} />
-              <p className="mt-4 text-center text-sm text-[#ffe0ad]/74">{copy.uploadHint}</p>
+            <div className="relative z-10 w-full max-w-[820px] pb-8">
+              <p className="mb-4 text-center text-sm text-[#ffe0ad]/78">{copy.productHint}</p>
+              <div className="grid grid-cols-3 gap-3">
+                {INPUT_MODES.map((mode) => {
+                  const active = activeInputMode === mode;
+                  const modeCopy = copy.modes[mode];
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      disabled={analyzing}
+                      onClick={() => setActiveInputMode(mode)}
+                      className={`relative min-h-[86px] rounded-[20px] border px-5 py-4 text-left transition ${
+                        active
+                          ? "border-[#ffd083] bg-[#4e382f]/92 text-[#fff1d5] shadow-[0_0_34px_rgba(255,194,103,0.38)]"
+                          : "border-[#d7a66d]/40 bg-[#211c27]/74 text-[#d6bd9f] hover:border-[#ffd083]/70 hover:bg-[#302737]"
+                      } ${analyzing ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
+                    >
+                      <span className="block text-base font-semibold leading-tight">{modeCopy.title}</span>
+                      <span className="mt-1 block text-xs leading-snug text-current/70">{modeCopy.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeInputMode && (
+                <div className="mt-4 rounded-[24px] border border-[#d0a06c]/44 bg-[#211b25]/84 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_18px_58px_rgba(0,0,0,0.28)] backdrop-blur">
+                  {activeInputMode === "examples" && (
+                    <div>
+                      <div className="mb-3 flex items-end justify-between gap-4">
+                        <div>
+                          <h2 className="text-lg font-semibold text-[#ffe7c4]">{copy.examplesTitle}</h2>
+                          <p className="mt-1 text-xs text-[#c9ad91]">{copy.examplesDesc}</p>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-1">
+                        {audioCatalog.map((item) => (
+                          <CatalogItemCard
+                            key={item.id}
+                            item={item}
+                            disabled={analyzing}
+                            onSelect={handleCatalogSelect}
+                            copy={copy}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeInputMode === "search" && (
+                    <div>
+                      <input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        disabled={analyzing}
+                        placeholder={copy.searchPlaceholder}
+                        className="h-12 w-full rounded-full border border-[#d0a06c]/45 bg-[#16121d]/86 px-5 text-sm text-[#ffe8c8] outline-none transition placeholder:text-[#b39678] focus:border-[#ffd083]"
+                      />
+                      <div className="mt-3 grid gap-3">
+                        {visibleCatalog.length > 0 ? (
+                          visibleCatalog.map((item) => (
+                            <CatalogItemCard
+                              key={item.id}
+                              item={item}
+                              disabled={analyzing}
+                              onSelect={handleCatalogSelect}
+                              copy={copy}
+                            />
+                          ))
+                        ) : (
+                          <div className="rounded-[18px] border border-[#d0a06c]/28 bg-[#18131f]/70 px-4 py-5 text-center text-sm text-[#ccb092]">
+                            {copy.searchEmpty}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeInputMode === "upload" && (
+                    <div>
+                      <p className="mb-3 text-center text-sm text-[#ffe0ad]/80">{copy.uploadTitle}</p>
+                      <AudioUploader onFileSelect={(file) => handleFileSelect(file)} disabled={analyzing} language={language} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {error && <p className="mt-3 text-center text-sm text-[#ffd2c7]">{error}</p>}
             </div>
           </div>
         </section>
@@ -138,5 +321,56 @@ export default function HomePageClient() {
         )}
       </div>
     </main>
+  );
+}
+
+function CatalogItemCard({
+  item,
+  disabled,
+  onSelect,
+  copy,
+}: {
+  item: AudioCatalogItem;
+  disabled: boolean;
+  onSelect: (item: AudioCatalogItem) => void;
+  copy: typeof COPY.zh | typeof COPY.en;
+}) {
+  return (
+    <div className="grid gap-3 rounded-[18px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-4 md:grid-cols-[1fr_190px] md:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-base font-semibold text-[#ffe7c4]">{item.name}</h3>
+          <span className="rounded-full border border-[#d0a06c]/35 px-2 py-0.5 text-[11px] text-[#d7b58f]">
+            {formatDuration(item.durationSeconds, copy.seconds)}
+          </span>
+        </div>
+        <p className="mt-1 text-sm leading-relaxed text-[#c9ad91]">{item.description}</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {item.tags.map((tag) => (
+            <span key={tag} className="rounded-full bg-[#f0bc72]/12 px-2 py-0.5 text-[11px] text-[#f3c98e]">
+              {tag}
+            </span>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] text-[#9f866c]">
+          {copy.source}: {item.source} · {copy.license}: {item.license}
+        </p>
+      </div>
+      <div className="flex flex-col gap-2">
+        <audio controls preload="metadata" src={item.file} className="h-9 w-full" aria-label={`${copy.preview} ${item.name}`} />
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onSelect(item)}
+          className={`h-11 rounded-full border text-sm font-semibold transition ${
+            disabled
+              ? "cursor-not-allowed border-[#d0a06c]/25 bg-[#2b2430]/65 text-[#b99b78]"
+              : "cursor-pointer border-[#ffd083] bg-[#ffd083] text-[#2c2028] shadow-[0_0_24px_rgba(255,194,103,0.32)] hover:bg-[#ffe0a6]"
+          }`}
+        >
+          {copy.startWithThis}
+        </button>
+      </div>
+    </div>
   );
 }

@@ -23,6 +23,10 @@ export interface PromptDirectorInput {
     spectralCentroid?: unknown;
     spectralFlatness?: unknown;
     spectralRolloff?: unknown;
+    segments?: unknown;
+    salientMoments?: unknown;
+    curves?: unknown;
+    visualMappingHints?: unknown;
   };
   visualPreset: VisualPresetPrompt;
 }
@@ -90,6 +94,7 @@ ${commentSummary}`;
       musicAnalysis.mood,
       musicAnalysis.energy,
       musicAnalysis.brightness,
+      formatCompactMusicEvidence(musicAnalysis),
     ]
       .filter(Boolean)
       .map(String)
@@ -151,6 +156,10 @@ export function buildPromptDirectorInput(
         spectralCentroid: musicAnalysis.spectralCentroid,
         spectralFlatness: musicAnalysis.spectralFlatness,
         spectralRolloff: musicAnalysis.spectralRolloff,
+        segments: sanitizeSegments(musicAnalysis.segments),
+        salientMoments: sanitizeMoments(musicAnalysis.salientMoments, musicAnalysis.duration),
+        curves: musicAnalysis.curves,
+        visualMappingHints: sanitizeHints(musicAnalysis.visualMappingHints),
       }
     : {};
 
@@ -171,7 +180,7 @@ Hard rules:
 1. User note has the highest priority for personal meaning.
 2. Every musician comment must influence the visual plan. Do not drop any speaker, and preserve each characterId exactly in sourceMappings.
 3. Convert phrases into drawable visual terms: subject, setting, objects, motion, texture, palette, lighting, atmosphere, composition. Do not simply quote or summarize the comments.
-4. Audio analysis controls motion, density, contrast, brightness, and tension.
+4. Audio analysis controls motion, density, contrast, brightness, material texture, rhythm contour, and visual tension. Use segments, salientMoments, curves, and visualMappingHints when available, but translate them into visual qualities instead of timecoded narration.
 5. Treat visualPreset.stylePrompt, moodPrompt, and tonePrompt as hard production constraints. Integrate them into finalPrompt naturally. "自动" means you must make a deliberate choice from this specific source material, not reuse a default.
 6. If inputs conflict, preserve the conflict visually, for example calm surface with hidden pressure.
 7. Do not mention music, comments, BPM, musicians, analysis, or prompt in finalPrompt.
@@ -184,7 +193,8 @@ Hard rules:
 14. The medium describes how the image is made; it must not dictate what the image depicts. An ink painting does not automatically require a landscape.
 15. Commit to one clear focal subject and one distinctive compositional idea. Avoid generic collections of poetic motifs.
 16. finalPrompt must be a true composite of music traits, musician comments, and user note. If userNote is empty, userNoteTrace must say "none".
-17. Return valid JSON only.
+17. If detailed audio evidence exists, at least one concrete visual decision must come from the strongest phase or a salient change.
+18. Return valid JSON only.
 
 Input:
 ${JSON.stringify(input, null, 2)}
@@ -260,4 +270,88 @@ export function buildImageGenUserMessage(presets: {
   tone: string;
 }): string {
   return `请根据以上分析，生成画面描述。预设：${presets.style}风格，${presets.mood}情绪，${presets.tone}色调。`;
+}
+
+export function formatCompactMusicEvidence(musicAnalysis: Record<string, unknown>): string {
+  const segments = Array.isArray(musicAnalysis.segments)
+    ? musicAnalysis.segments.slice(0, 4).map((segment, index, list) => {
+        if (!segment || typeof segment !== "object") return "";
+        const item = segment as Record<string, unknown>;
+        return `${getPhaseLabel(index, list.length)} ${item.energy || ""} ${item.brightness || ""} ${item.motion || ""} ${item.texture || ""}`.trim();
+      })
+    : [];
+  const moments = Array.isArray(musicAnalysis.salientMoments)
+    ? musicAnalysis.salientMoments.slice(0, 2).map((moment) => {
+        if (!moment || typeof moment !== "object") return "";
+        const item = moment as Record<string, unknown>;
+        return `${item.type || "change"} shapes a visual shift`;
+      })
+    : [];
+  const hints = Array.isArray(musicAnalysis.visualMappingHints)
+    ? sanitizeHints(musicAnalysis.visualMappingHints).slice(0, 3)
+    : [];
+  return [...segments, ...moments, ...hints].filter(Boolean).join("；");
+}
+
+function sanitizeSegments(value: unknown) {
+  if (!Array.isArray(value)) return value;
+  return value.slice(0, 6).map((segment, index, list) => {
+    if (!segment || typeof segment !== "object") return segment;
+    const item = segment as Record<string, unknown>;
+    return {
+      phase: getPhaseLabel(index, list.length),
+      energy: item.energy,
+      brightness: item.brightness,
+      motion: item.motion,
+      texture: item.texture,
+      dynamic: item.dynamic,
+    };
+  });
+}
+
+function sanitizeMoments(value: unknown, duration: unknown) {
+  if (!Array.isArray(value)) return value;
+  const totalDuration = typeof duration === "number" ? duration : undefined;
+  return value.slice(0, 3).map((moment) => {
+    if (!moment || typeof moment !== "object") return moment;
+    const item = moment as Record<string, unknown>;
+    return {
+      phase: getMomentPhase(item.time, totalDuration),
+      type: item.type,
+      intensity: item.intensity,
+      visualCue: `${item.type || "变化"}带来画面张力、亮度或材质的变化`,
+    };
+  });
+}
+
+function sanitizeHints(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(String).map(removeTimeMarkers);
+}
+
+function getPhaseLabel(index: number, total: number): string {
+  if (total <= 1) return "overall";
+  if (index === 0) return "opening";
+  if (index === total - 1) return "ending";
+  if (index < total / 2) return "early movement";
+  if (index > total / 2) return "late movement";
+  return "middle movement";
+}
+
+function getMomentPhase(time: unknown, duration?: number): string {
+  if (typeof time !== "number" || !duration || duration <= 0) return "a salient change";
+  const ratio = time / duration;
+  if (ratio < 0.25) return "opening";
+  if (ratio < 0.5) return "early movement";
+  if (ratio < 0.75) return "middle movement";
+  return "ending";
+}
+
+function removeTimeMarkers(text: string): string {
+  return text
+    .replace(/\d+(?:\.\d+)?-\d+(?:\.\d+)?秒/g, "某一段")
+    .replace(/\d+(?:\.\d+)?秒附近/g, "某处")
+    .replace(/\d+(?:\.\d+)?秒/g, "某处")
+    .replace(/\d+(?:\.\d+)?-\d+(?:\.\d+)?s/gi, "one phase")
+    .replace(/\d+(?:\.\d+)?s/gi, "one point");
 }

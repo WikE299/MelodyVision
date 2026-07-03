@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  formatCompactMusicEvidence,
   buildPromptDirectorInput,
   buildPromptDirectorInstruction,
   buildPromptDirectorRepairInstruction,
@@ -114,6 +115,7 @@ function buildFallbackImagePrompt(
         musicAnalysis.mood,
         musicAnalysis.energy,
         musicAnalysis.brightness,
+        formatCompactMusicEvidence(musicAnalysis),
       ]
         .filter(Boolean)
         .map(String)
