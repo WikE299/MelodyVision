@@ -226,8 +226,24 @@ $existingProcess = $pm2List | Where-Object { $_.name -eq $AppName } | Select-Obj
 if ($existingProcess) {
   pm2 delete $AppName
 }
-$nextCli = Join-Path $DeployDir "node_modules/next/dist/bin/next"
-pm2 start $nextCli --name $AppName -- start -H 0.0.0.0 -p $Port
+$ecosystemPath = Join-Path $DeployDir "ecosystem.config.cjs"
+@"
+module.exports = {
+  apps: [
+    {
+      name: "$AppName",
+      script: "node_modules/next/dist/bin/next",
+      args: "start",
+      env: {
+        NODE_ENV: "production",
+        HOSTNAME: "0.0.0.0",
+        PORT: "$Port"
+      }
+    }
+  ]
+};
+"@ | Set-Content -Encoding UTF8 -Path $ecosystemPath
+pm2 start $ecosystemPath --only $AppName --update-env
 pm2 save
 
 if ($SkipFirewall -ne "true") {
