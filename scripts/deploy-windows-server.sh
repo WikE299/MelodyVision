@@ -226,7 +226,8 @@ $existingProcess = $pm2List | Where-Object { $_.name -eq $AppName } | Select-Obj
 if ($existingProcess) {
   pm2 delete $AppName
 }
-pm2 start npm --name $AppName -- run start
+$nextCli = Join-Path $DeployDir "node_modules/next/dist/bin/next"
+pm2 start $nextCli --name $AppName -- start -H 0.0.0.0 -p $Port
 pm2 save
 
 if ($SkipFirewall -ne "true") {
