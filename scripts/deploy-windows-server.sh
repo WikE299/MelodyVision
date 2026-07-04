@@ -38,11 +38,11 @@ Options:
 What this script does:
   1. Checks SSH connectivity.
   2. Uploads a temporary PowerShell deploy helper to the server.
-  3. Prints server, Node, npm, git, PM2, and GPU information.
+  3. Prints server, Node, npm, git, and GPU information.
   4. Clones or updates the GitHub branch on the server.
   5. Uploads .env.local unless --skip-env-sync is used.
   6. Runs npm ci and npm run build.
-  7. Starts or restarts the app with PM2 on 0.0.0.0:3000.
+  7. Starts or restarts the app with Windows Task Scheduler on 0.0.0.0:3000.
   8. Opens the Windows firewall port unless --skip-firewall is used.
 
 Example:
@@ -162,7 +162,6 @@ Write-Host ("port: {0}" -f $Port)
 Print-Tool "node" "node -v"
 Print-Tool "npm" "npm -v"
 Print-Tool "git" "git --version"
-Print-Tool "pm2" "pm2 -v"
 
 if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
   Write-Host ""
@@ -181,11 +180,6 @@ if ($nodeMajor -lt 20) {
 
 if ($Phase -eq "doctor") {
   exit 0
-}
-
-if (-not (Get-Command pm2 -ErrorAction SilentlyContinue)) {
-  Write-Section "Installing PM2"
-  npm install -g pm2
 }
 
 if ($Phase -eq "prepare") {
@@ -218,33 +212,30 @@ Push-Location $DeployDir
 npm ci
 npm run build
 
-Write-Section "Starting app with PM2"
-$env:PORT = $Port
-$env:HOSTNAME = "0.0.0.0"
-$pm2List = pm2 jlist | ConvertFrom-Json
-$existingProcess = $pm2List | Where-Object { $_.name -eq $AppName } | Select-Object -First 1
-if ($existingProcess) {
-  pm2 delete $AppName
-}
-$ecosystemPath = Join-Path $DeployDir "ecosystem.config.cjs"
+Write-Section "Starting app with Windows Task Scheduler"
+$startScript = Join-Path $DeployDir "start-melodyvision.ps1"
+$serverLog = Join-Path $DeployDir "logs/server.log"
 @"
-module.exports = {
-  apps: [
-    {
-      name: "$AppName",
-      script: "node_modules/next/dist/bin/next",
-      args: "start",
-      env: {
-        NODE_ENV: "production",
-        HOSTNAME: "0.0.0.0",
-        PORT: "$Port"
-      }
-    }
-  ]
-};
-"@ | Set-Content -Encoding UTF8 -Path $ecosystemPath
-pm2 start $ecosystemPath --only $AppName --update-env
-pm2 save
+`$ErrorActionPreference = "Stop"
+Set-Location "$DeployDir"
+`$env:NODE_ENV = "production"
+`$env:HOSTNAME = "0.0.0.0"
+`$env:PORT = "$Port"
+node .\node_modules\next\dist\bin\next start *>> "$serverLog"
+"@ | Set-Content -Encoding UTF8 -Path $startScript
+
+$listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty OwningProcess -Unique
+foreach ($processId in $listeners) {
+  if ($processId -and $processId -ne $PID) {
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+  }
+}
+
+$taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+$taskTrigger = New-ScheduledTaskTrigger -AtStartup
+Register-ScheduledTask -TaskName $AppName -Action $taskAction -Trigger $taskTrigger -Description "Run MelodyVision Next.js server" -Force | Out-Null
+Start-ScheduledTask -TaskName $AppName
 
 if ($SkipFirewall -ne "true") {
   Write-Section "Ensuring Windows firewall rule"
@@ -256,9 +247,22 @@ if ($SkipFirewall -ne "true") {
 }
 
 Write-Section "Service check"
-Start-Sleep -Seconds 3
-Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/" -Method Head | Select-Object StatusCode,StatusDescription
-pm2 status $AppName
+$response = $null
+for ($attempt = 1; $attempt -le 20; $attempt++) {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/" -Method Head
+    break
+  } catch {
+    Start-Sleep -Seconds 2
+  }
+}
+if (-not $response) {
+  Get-Content $serverLog -Tail 80 -ErrorAction SilentlyContinue
+  throw "Service did not respond on http://127.0.0.1:$Port/"
+}
+$response | Select-Object StatusCode,StatusDescription
+Get-ScheduledTask -TaskName $AppName | Select-Object TaskName,State
+netstat -ano | Select-String ":$Port"
 Pop-Location
 POWERSHELL
 
@@ -302,7 +306,7 @@ Try it on the same LAN:
   http://10.194.113.235:$PORT
 
 Useful commands:
-  ssh $HOST "pm2 status $APP_NAME"
-  ssh $HOST "pm2 logs $APP_NAME"
-  ssh $HOST "pm2 restart $APP_NAME --update-env"
+  ssh $HOST "powershell -NoProfile -Command \"Get-ScheduledTask -TaskName $APP_NAME\""
+  ssh $HOST "powershell -NoProfile -Command \"Get-Content $DEPLOY_DIR/logs/server.log -Tail 80\""
+  ssh $HOST "powershell -NoProfile -Command \"Start-ScheduledTask -TaskName $APP_NAME\""
 EOF
