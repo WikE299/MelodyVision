@@ -221,7 +221,11 @@ npm run build
 Write-Section "Starting app with PM2"
 $env:PORT = $Port
 $env:HOSTNAME = "0.0.0.0"
-pm2 delete $AppName 2>$null
+$pm2List = pm2 jlist | ConvertFrom-Json
+$existingProcess = $pm2List | Where-Object { $_.name -eq $AppName } | Select-Object -First 1
+if ($existingProcess) {
+  pm2 delete $AppName
+}
 pm2 start npm --name $AppName -- run start
 pm2 save
 
