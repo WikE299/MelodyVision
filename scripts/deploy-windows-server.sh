@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 APP_NAME="melodyvision"
 BRANCH="$(git branch --show-current 2>/dev/null || echo feat/v2-global-musicians)"
-DEPLOY_DIR="C:/MelodyVision"
+DEPLOY_DIR="D:/MelodyVision"
 ENV_FILE=".env.local"
 HOST=""
 PORT="3000"
@@ -25,7 +25,7 @@ Required:
   --host USER@HOST        SSH target, for example Administrator@10.194.113.235
 
 Options:
-  --dir PATH              Remote deploy directory. Default: C:/MelodyVision
+  --dir PATH              Remote deploy directory. Default: D:/MelodyVision
   --branch NAME           Git branch to deploy. Default: current local branch
   --repo URL              Git repo URL. Default: https://github.com/WikE299/MelodyVision.git
   --env-file PATH         Local env file to upload. Default: .env.local

@@ -1,0 +1,32 @@
+name: Deploy Windows Server
+
+on:
+  push:
+    branches:
+      - feat/v2-global-musicians
+  workflow_dispatch:
+
+concurrency:
+  group: melodyvision-windows-server
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - Windows
+      - melodyvision
+
+    steps:
+      - name: Checkout workflow scripts
+        uses: actions/checkout@v4
+
+      - name: Deploy MelodyVision
+        shell: powershell
+        run: |
+          ./scripts/deploy-from-github-runner.ps1 `
+            -Branch "${{ github.ref_name }}" `
+            -RepoUrl "https://github.com/${{ github.repository }}.git" `
+            -DeployDir "D:/MelodyVision" `
+            -Port "3000" `
+            -AppName "melodyvision"
