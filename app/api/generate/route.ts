@@ -20,6 +20,8 @@ export const runtime = "nodejs";
 interface CommentInput {
   characterId: string;
   text: string;
+  weight: number;
+  userResonance: boolean;
 }
 
 interface DashScopeImageItem {
@@ -68,7 +70,32 @@ interface PromptDirectorStep {
 
 const PROMPT_DIRECTOR_MAX_REPAIRS = 2;
 
-function normalizeComments(comments: unknown): CommentInput[] {
+function normalizeCommentWeight(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.max(0.5, Math.min(2.5, Math.round(value * 10) / 10));
+}
+
+function normalizeCommentWeights(value: unknown): Record<string, { resonance: boolean; weight: number }> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).map(([characterId, raw]) => {
+      const item = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      const resonance = Boolean(item.resonance);
+      return [
+        characterId,
+        {
+          resonance,
+          weight: normalizeCommentWeight(item.weight ?? (resonance ? 1.8 : 1)),
+        },
+      ];
+    })
+  );
+}
+
+function normalizeComments(
+  comments: unknown,
+  commentWeights: Record<string, { resonance: boolean; weight: number }> = {}
+): CommentInput[] {
   if (Array.isArray(comments)) {
     return comments
       .map((comment) => {
@@ -78,9 +105,16 @@ function normalizeComments(comments: unknown): CommentInput[] {
           "characterId" in comment &&
           "text" in comment
         ) {
+          const characterId = String(comment.characterId);
+          const inlineWeight = "weight" in comment ? (comment as { weight?: unknown }).weight : undefined;
+          const inlineResonance = "userResonance" in comment ? (comment as { userResonance?: unknown }).userResonance : undefined;
+          const savedWeight = commentWeights[characterId];
+          const userResonance = Boolean(inlineResonance ?? savedWeight?.resonance);
           return {
-            characterId: String(comment.characterId),
+            characterId,
             text: String(comment.text),
+            weight: normalizeCommentWeight(inlineWeight ?? savedWeight?.weight ?? (userResonance ? 1.8 : 1)),
+            userResonance,
           };
         }
         return null;
@@ -92,6 +126,8 @@ function normalizeComments(comments: unknown): CommentInput[] {
     return Object.entries(comments).map(([characterId, text]) => ({
       characterId,
       text: String(text),
+      weight: commentWeights[characterId]?.weight || 1,
+      userResonance: Boolean(commentWeights[characterId]?.resonance),
     }));
   }
 
@@ -104,7 +140,8 @@ function buildFallbackImagePrompt(
   userNote?: string,
   musicAnalysis?: Record<string, unknown>
 ): string {
-  const sourceFragments = comments
+  const sourceFragments = [...comments]
+    .sort((a, b) => b.weight - a.weight)
     .map((comment) => comment.text.trim())
     .filter(Boolean)
     .join(" / ");
@@ -125,6 +162,9 @@ function buildFallbackImagePrompt(
   return [
     "Create one distinctive visual concept with a clear focal subject. Do not default to a generic landscape.",
     `Use the following source impressions as mandatory visual anchors: ${sourceFragments}.`,
+    comments.some((comment) => comment.userResonance)
+      ? `Give strongest visual priority to the user-resonant impressions from: ${comments.filter((comment) => comment.userResonance).map((comment) => comment.characterId).join(", ")}.`
+      : "",
     userNote ? `Preserve this personal memory as the emotional core: ${userNote}.` : "",
     musicContext ? `Reflect these audio traits through composition and lighting: ${musicContext}.` : "",
     "Compose a concrete image with a clear subject, foreground, background, color, light, texture, and emotional tension.",
@@ -200,6 +240,21 @@ function hasSourceMappings(value: unknown): value is PromptDirectorBrief["source
         hasText((item as { characterId?: unknown }).characterId) &&
         hasText((item as { speaker?: unknown }).speaker) &&
         hasText((item as { visualTranslation?: unknown }).visualTranslation)
+    )
+  );
+}
+
+function hasWeightingRationale(value: unknown): value is NonNullable<PromptDirectorBrief["weightingRationale"]> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        hasText((item as { characterId?: unknown }).characterId) &&
+        typeof (item as { weight?: unknown }).weight === "number" &&
+        hasText((item as { reason?: unknown }).reason) &&
+        hasText((item as { visualImpact?: unknown }).visualImpact)
     )
   );
 }
@@ -339,6 +394,22 @@ function validatePromptDirectorBrief(
     if (duplicateIds.length > 0) {
       errors.push(`sourceMappings contains duplicate characterIds: ${duplicateIds.join(", ")}`);
     }
+  }
+  const resonantInputIds = input.comments
+    .filter((comment) => comment.userResonance || comment.weight > 1)
+    .map((comment) => comment.characterId);
+  if (resonantInputIds.length > 0) {
+    if (!hasWeightingRationale(brief.weightingRationale)) {
+      errors.push("weightingRationale must explain resonant comment weights");
+    } else {
+      const rationaleIds = new Set(brief.weightingRationale.map((item) => item.characterId));
+      const missingRationaleIds = resonantInputIds.filter((characterId) => !rationaleIds.has(characterId));
+      if (missingRationaleIds.length > 0) {
+        errors.push(`weightingRationale missing resonant characterIds: ${missingRationaleIds.join(", ")}`);
+      }
+    }
+  } else if (!hasWeightingRationale(brief.weightingRationale)) {
+    warnings.push("weightingRationale is missing");
   }
   if (!hasStringItems(brief.mustInclude)) {
     errors.push("mustInclude must contain at least one item");
@@ -547,6 +618,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { comments, presets, userNote, musicAnalysis } = body;
+    const commentWeights = normalizeCommentWeights(body.commentWeights);
     const promptOverride =
       typeof body.promptOverride === "string" && body.promptOverride.trim()
         ? cleanImagePrompt(body.promptOverride)
@@ -562,7 +634,7 @@ export async function POST(request: NextRequest) {
     const selectedCharacters = Array.isArray(body.selectedCharacters)
       ? body.selectedCharacters.filter((characterId: unknown) => typeof characterId === "string")
       : [];
-    const normalizedComments = normalizeComments(comments);
+    const normalizedComments = normalizeComments(comments, commentWeights);
 
     if (promptOverride) {
       const imageStartedAt = Date.now();
@@ -586,6 +658,7 @@ export async function POST(request: NextRequest) {
         input: {
           musicAnalysis,
           comments: normalizedComments,
+          commentWeights,
           presets,
           userNote,
           promptOverride: true,
@@ -711,6 +784,7 @@ export async function POST(request: NextRequest) {
       input: {
         musicAnalysis,
         comments: normalizedComments,
+        commentWeights,
         presets,
         userNote,
       },

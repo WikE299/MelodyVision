@@ -36,6 +36,9 @@ const COPY = {
     feelingPlaceholder: "我也想说两句（可选）",
     collapse: "收起",
     closeComment: "关闭评论",
+    resonate: "更接近我的听感",
+    resonated: "已作为重点听法",
+    guideTip: "点击音乐家听点评，点亮共鸣或补充自己的听感。",
     generate: "生成画作 →",
   },
   en: {
@@ -51,6 +54,9 @@ const COPY = {
     feelingPlaceholder: "I also want to say something (optional)",
     collapse: "Close",
     closeComment: "Close comment",
+    resonate: "Closer to my listening",
+    resonated: "Marked as key lens",
+    guideTip: "Tap a musician to hear their take, mark resonance, or add your own note.",
     generate: "Generate Artwork →",
   },
 };
@@ -89,9 +95,11 @@ function GuideFigure({
   loading,
   streaming,
   comment,
+  resonant,
   stageOffset,
   onClick,
   onClose,
+  onToggleResonance,
   language,
 }: {
   character: Character;
@@ -100,9 +108,11 @@ function GuideFigure({
   loading: boolean;
   streaming: boolean;
   comment: string;
+  resonant: boolean;
   stageOffset: string;
   onClick: () => void;
   onClose: () => void;
+  onToggleResonance: () => void;
   language: Language;
 }) {
   const copy = COPY[language];
@@ -128,26 +138,52 @@ function GuideFigure({
     >
       {(loading || commented) && (
         <div className="absolute left-1/2 top-[-6px] z-50 w-[clamp(248px,18vw,330px)] -translate-x-1/2 rounded-[18px] border border-[#f5c184]/80 bg-[#ffe0bd]/96 px-4 py-3 text-left text-[#322534] shadow-[0_18px_42px_rgba(0,0,0,0.3)]">
-          <div className="flex items-center gap-2 pr-7">
+          <div className="flex items-center gap-2 pr-16">
             <p className="text-sm font-semibold">{label.name}</p>
             <span className="h-1 w-1 rounded-full bg-[#5a3e31]" />
             <p className="text-xs text-[#765846]">{label.focus}</p>
           </div>
           {commented && !loading && (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onClose();
-              }}
-              className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-[#9a7458]/35 bg-[#fff0d7]/70 text-[#5b3e31] transition hover:border-[#7d573f]/60 hover:bg-white"
-              aria-label={copy.closeComment}
-              title={copy.closeComment}
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 6l12 12M18 6 6 18" />
-              </svg>
-            </button>
+            <>
+              <div className="group/resonance absolute right-10 top-2.5">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleResonance();
+                  }}
+                  className={`flex h-6 w-6 items-center justify-center rounded-full border transition ${
+                    resonant
+                      ? "border-[#8b5e2f]/62 bg-[#5b3e31] text-[#ffe6c3] shadow-[0_0_18px_rgba(91,62,49,0.38),0_0_24px_rgba(255,208,131,0.22)]"
+                      : "border-[#d59a5f]/45 bg-[#fff0d7]/70 text-[#8a6042] shadow-[0_0_14px_rgba(255,208,131,0.22)] hover:border-[#a97745]/70 hover:bg-white hover:text-[#5b3e31]"
+                  }`}
+                  aria-label={resonant ? copy.resonated : copy.resonate}
+                  aria-pressed={resonant}
+                >
+                  <svg className="h-3.5 w-3.5" fill={resonant ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3.5l1.9 5.2 5.2 1.9-5.2 1.9-1.9 5.2-1.9-5.2-5.2-1.9 5.2-1.9L12 3.5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M18.5 3.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" />
+                  </svg>
+                </button>
+                <span className="pointer-events-none absolute right-1/2 top-[-34px] z-20 translate-x-1/2 whitespace-nowrap rounded-full border border-[#8b5e2f]/22 bg-[#2f2430]/94 px-3 py-1 text-[11px] font-semibold text-[#ffe6c3] opacity-0 shadow-[0_12px_28px_rgba(0,0,0,0.22)] transition duration-150 group-hover/resonance:opacity-100">
+                  {resonant ? copy.resonated : copy.resonate}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClose();
+                }}
+                className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-[#9a7458]/35 bg-[#fff0d7]/70 text-[#5b3e31] transition hover:border-[#7d573f]/60 hover:bg-white"
+                aria-label={copy.closeComment}
+                title={copy.closeComment}
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </>
           )}
           <p className="mt-2 max-h-[9.6em] overflow-y-auto pr-1 text-sm font-medium leading-relaxed">
             {loading ? copy.listening : comment}
@@ -186,7 +222,6 @@ function GuideFigure({
           alt={label.name}
           width={512}
           height={512}
-          unoptimized
           className={`h-auto max-h-[clamp(210px,25vh,292px)] object-contain ${FIGURE_STYLE[character.id] || "w-[clamp(174px,11.6vw,224px)]"}`}
         />
       </div>
@@ -217,6 +252,7 @@ export default function ListenPage() {
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [streaming, setStreaming] = useState<Set<string>>(new Set());
   const [streamedOnce, setStreamedOnce] = useState<Set<string>>(new Set());
+  const [resonantComments, setResonantComments] = useState<Set<string>>(new Set());
   const [activeCharacterId, setActiveCharacterId] = useState<string>(selectedChars[0]?.id || "");
   const [userNote, setUserNote] = useState("");
   const [showUserInput, setShowUserInput] = useState(false);
@@ -388,8 +424,30 @@ export default function ListenPage() {
     });
   };
 
+  const toggleResonance = (charId: string) => {
+    setResonantComments((prev) => {
+      const next = new Set(prev);
+      if (next.has(charId)) {
+        next.delete(charId);
+      } else {
+        next.add(charId);
+      }
+      return next;
+    });
+  };
+
   const handleContinue = () => {
+    const commentWeights = Object.fromEntries(
+      Object.keys(allComments).map((characterId) => [
+        characterId,
+        {
+          resonance: resonantComments.has(characterId),
+          weight: resonantComments.has(characterId) ? 1.8 : 1,
+        },
+      ])
+    );
     sessionStorage.setItem("comments", JSON.stringify(allComments));
+    sessionStorage.setItem("commentWeights", JSON.stringify(commentWeights));
     sessionStorage.setItem("userNote", userNote);
     router.push("/generate-page");
   };
@@ -458,6 +516,9 @@ export default function ListenPage() {
             <div className="absolute bottom-[18px] left-[28%] h-[360px] w-[1px] -rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
             <div className="absolute bottom-[18px] right-[28%] h-[360px] w-[1px] rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
           </div>
+          <p className="pointer-events-none absolute left-1/2 top-4 z-20 max-w-[min(880px,82vw)] -translate-x-1/2 text-center font-serif text-[clamp(18px,1.55vw,28px)] font-semibold text-[#ffe4ba]/90 drop-shadow-[0_0_16px_rgba(255,194,103,0.28)] 2xl:top-5">
+            {copy.guideTip}
+          </p>
 
           <div className="relative z-10 flex min-w-0 flex-1 flex-col px-6 pb-5 pt-4 2xl:px-9 2xl:pb-7">
             <div className="relative flex min-h-0 flex-1 items-end justify-center pb-[clamp(92px,11vh,124px)]">
@@ -513,9 +574,11 @@ export default function ListenPage() {
                   loading={loading.has(character.id)}
                   streaming={streaming.has(character.id)}
                   comment={visibleComments[character.id] || ""}
+                  resonant={resonantComments.has(character.id)}
                   stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
                   onClick={() => handleReveal(character.id)}
                   onClose={() => handleCloseBubble(character.id)}
+                  onToggleResonance={() => toggleResonance(character.id)}
                   language={language}
                 />
               ))}
@@ -556,7 +619,7 @@ export default function ListenPage() {
                   ))}
                   <div className="absolute bottom-[15%] h-[82px] w-[224px] rounded-[50%] border border-[#f3bb75]/42 bg-[#72533f]/42 shadow-[0_18px_66px_rgba(0,0,0,0.46),0_0_34px_rgba(255,195,97,0.16)]" />
                   <Image
-                    src="/stage-gem-transparent.png"
+                    src="/stage-gem-transparent.webp"
                     alt=""
                     width={1254}
                     height={1254}

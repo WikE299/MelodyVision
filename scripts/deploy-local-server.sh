@@ -99,7 +99,7 @@ command -v ssh >/dev/null 2>&1 || die "ssh is not installed locally"
 command -v scp >/dev/null 2>&1 || die "scp is not installed locally"
 [[ "$SKIP_ENV_SYNC" == "true" || -f "$ENV_FILE" ]] || die "Env file not found: $ENV_FILE"
 
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
+SSH_OPTS=(-o ConnectTimeout=8)
 
 log "Checking SSH connectivity to $HOST"
 ssh "${SSH_OPTS[@]}" "$HOST" "echo connected" >/dev/null ||

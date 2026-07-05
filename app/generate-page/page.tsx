@@ -21,6 +21,8 @@ type MusicAnalysisView = {
   bpm?: number;
 };
 
+type CommentWeightMap = Record<string, { resonance: boolean; weight: number }>;
+
 const initialPresets: Presets = {
   style: "自动",
   mood: "自动",
@@ -53,6 +55,8 @@ const COPY = {
     brightness: "明亮度",
     mood: "情绪",
     guideComments: "导览点评",
+    resonanceFocus: "重点听法",
+    noResonance: "未特别标记",
     collected: "已收集",
     userNote: "用户笔记",
     emptyNote: "暂未补充个人听感。",
@@ -89,6 +93,8 @@ const COPY = {
     brightness: "Brightness",
     mood: "Mood",
     guideComments: "Guide Comments",
+    resonanceFocus: "Key Lens",
+    noResonance: "None marked",
     collected: "Collected",
     userNote: "Your Note",
     emptyNote: "No personal listening note yet.",
@@ -117,6 +123,7 @@ function getInitialGenerateState() {
       selectedCharacters: [] as string[],
       selectedChars: [] as Character[],
       comments: {} as Record<string, string>,
+      commentWeights: {} as CommentWeightMap,
       userNote: "",
       musicAnalysis: {} as MusicAnalysisView,
     };
@@ -126,6 +133,7 @@ function getInitialGenerateState() {
     sessionStorage.getItem("selectedCharacters") || "[]"
   ) as string[];
   const comments = JSON.parse(sessionStorage.getItem("comments") || "{}") as Record<string, string>;
+  const commentWeights = JSON.parse(sessionStorage.getItem("commentWeights") || "{}") as CommentWeightMap;
   const userNote = sessionStorage.getItem("userNote") || "";
   const musicAnalysis = JSON.parse(
     sessionStorage.getItem("musicAnalysis") || "{}"
@@ -135,6 +143,7 @@ function getInitialGenerateState() {
     selectedCharacters,
     selectedChars: getCharactersByIds(selectedCharacters),
     comments,
+    commentWeights,
     userNote,
     musicAnalysis,
   };
@@ -279,9 +288,11 @@ export default function GeneratePage() {
   const selectedChars = initialState.selectedChars;
   const selectedCharacters = initialState.selectedCharacters;
   const comments = initialState.comments;
+  const commentWeights = initialState.commentWeights;
   const userNote = initialState.userNote;
   const musicAnalysis = initialState.musicAnalysis;
   const collectedCount = selectedCharacters.filter((id) => comments[id]).length;
+  const resonantCharacters = selectedChars.filter((character) => commentWeights[character.id]?.resonance);
 
   useEffect(() => {
     if (Object.keys(comments).length === 0) {
@@ -314,6 +325,8 @@ export default function GeneratePage() {
         .map((characterId) => ({
           characterId,
           text: comments[characterId],
+          weight: commentWeights[characterId]?.weight || 1,
+          userResonance: Boolean(commentWeights[characterId]?.resonance),
         }));
       const sessionId = await getExperimentSessionId();
 
@@ -324,6 +337,7 @@ export default function GeneratePage() {
           sessionId,
           selectedCharacters,
           comments: commentList,
+          commentWeights,
           presets,
           userNote,
           musicAnalysis,
@@ -431,6 +445,18 @@ export default function GeneratePage() {
                       {displayCharacter(character, language).name}
                     </span>
                   ))}
+                </div>
+                <p className="mt-3 text-xs font-semibold text-[#ffe3bd]">{copy.resonanceFocus}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {resonantCharacters.length > 0 ? (
+                    resonantCharacters.map((character) => (
+                      <span key={character.id} className="rounded-full border border-[#ffd083]/52 bg-[#6a4a31]/64 px-3 py-1 text-xs text-[#ffe2ad]">
+                        {displayCharacter(character, language).name} ×{commentWeights[character.id]?.weight || 1}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-[#a99078]">{copy.noResonance}</span>
+                  )}
                 </div>
               </div>
               <div className="min-h-0 flex-1 rounded-[16px] border border-[#8f6b52]/34 bg-[#2d2732]/78 p-3">
@@ -550,7 +576,7 @@ export default function GeneratePage() {
           <button
             type="button"
             onClick={() => router.push("/listen")}
-            className="absolute bottom-4 left-4 z-30 rounded-[14px] border border-[#a77b57]/48 bg-[#241f2a]/76 px-5 py-3 text-sm text-[#ffe3bd] backdrop-blur transition hover:border-[#d8a464]/70"
+            className="absolute bottom-4 left-[120px] z-30 rounded-[14px] border border-[#a77b57]/48 bg-[#241f2a]/76 px-5 py-3 text-sm text-[#ffe3bd] backdrop-blur transition hover:border-[#d8a464]/70"
           >
             {copy.back}
           </button>

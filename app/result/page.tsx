@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
@@ -231,11 +232,12 @@ function GuideCommentCard({
   return (
     <article className="flex min-h-0 gap-3 rounded-[18px] border border-[#a77b57]/34 bg-[#2b2530]/76 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
       <div className="relative h-[74px] w-[66px] shrink-0 overflow-hidden rounded-[14px] border border-[#c99761]/34 bg-[#201b25]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={`/characters/stage/${character.id}.png`}
           alt={label.name}
-          className="h-full w-full object-contain"
+          fill
+          sizes="66px"
+          className="object-contain"
         />
       </div>
       <div className="min-w-0 flex-1">
@@ -277,6 +279,7 @@ export default function ResultPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [showOverview, setShowOverview] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [showAppendix, setShowAppendix] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateError, setRegenerateError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({
@@ -682,7 +685,10 @@ export default function ResultPage() {
             </div>
           </aside>
 
-          <details className="absolute bottom-4 right-4 z-50 w-[348px] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/88 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur 2xl:w-[404px]">
+          <details
+            onToggle={(event) => setShowAppendix(event.currentTarget.open)}
+            className="absolute bottom-4 right-4 z-50 w-[348px] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/88 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur 2xl:w-[404px]"
+          >
             <summary className="cursor-pointer font-semibold">{copy.appendix}</summary>
             <div className="mt-4 max-h-[420px] overflow-auto pr-1">
               {debugInfo?.meta?.runId && (
@@ -780,19 +786,21 @@ export default function ResultPage() {
               )}
             </div>
           </details>
-          <button
-            type="button"
-            onClick={handleStartOver}
-            className="group absolute bottom-[88px] right-4 z-30 flex items-center gap-2 rounded-full border border-[#a77b57]/44 bg-[#241f2a]/88 px-4 py-2.5 text-sm font-semibold text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur transition hover:border-[#ffd083]/70 hover:bg-[#302735]"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
-            </svg>
-            {copy.startOver}
-            <span className="pointer-events-none absolute bottom-[46px] left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
-              {copy.startOverTip}
-            </span>
-          </button>
+          {!showAppendix && (
+            <button
+              type="button"
+              onClick={handleStartOver}
+              className="group absolute bottom-[88px] right-4 z-30 flex items-center gap-2 rounded-full border border-[#a77b57]/44 bg-[#241f2a]/88 px-4 py-2.5 text-sm font-semibold text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur transition hover:border-[#ffd083]/70 hover:bg-[#302735]"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
+              </svg>
+              {copy.startOver}
+              <span className="pointer-events-none absolute bottom-[46px] left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
+                {copy.startOverTip}
+              </span>
+            </button>
+          )}
         </section>
       </div>
     </main>

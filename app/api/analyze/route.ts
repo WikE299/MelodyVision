@@ -11,8 +11,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedTypes = ["audio/mpeg", "audio/wav", "audio/flac", "audio/x-wav"];
-    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|flac)$/i)) {
+    const allowedTypes = ["audio/mpeg", "audio/wav", "audio/flac", "audio/x-wav", "audio/ogg", "application/ogg"];
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|flac|ogg)$/i)) {
       return Response.json({ error: "Unsupported audio format" }, { status: 400 });
     }
 

@@ -1,11 +1,16 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioUploader from "@/components/AudioUploader";
 import FlowHeader from "@/components/FlowHeader";
-import { audioCatalog, searchAudioCatalog, type AudioCatalogItem } from "@/lib/audio/catalog";
+import { audioCatalog, type AudioCatalogItem } from "@/lib/audio/catalog";
+import {
+  MUSIC_SEARCH_TAG_GROUPS,
+  MUSIC_SEARCH_TAGS,
+  type ExternalMusicResult,
+} from "@/lib/audio/external-music";
 import { analyzeAudioFile } from "@/lib/audio/web-analyzer";
 import { useLanguage } from "@/lib/i18n";
 
@@ -17,6 +22,8 @@ const COPY = {
     analyzing: "正在分析音乐...",
     analyzeFailed: "音频分析失败，请换一段音频再试。",
     exampleFailed: "示例音频加载失败，请稍后再试或上传自己的音频。",
+    searchFailed: "音乐搜索失败，请稍后再试。",
+    downloadFailed: "音乐下载失败，请换一首或稍后再试。",
     modes: {
       examples: {
         title: "试试示例",
@@ -24,23 +31,31 @@ const COPY = {
       },
       search: {
         title: "搜索音乐",
-        desc: "从受控音源库中匹配",
+        desc: "搜索开放授权音乐库",
       },
       upload: {
         title: "上传音频",
         desc: "已有音频文件？从这里开始",
       },
     },
-    examplesTitle: "推荐示例",
-    examplesDesc: "先用项目内置音频跑通完整链路，后续可继续补充更多授权曲目。",
+    examplesTitle: "预制示例",
+    examplesDesc: "选择一段预制音频试听，或直接用它开始完整体验。",
     startWithThis: "用这段开始",
     preview: "试听",
+    play: "播放",
+    pause: "暂停",
     seconds: "秒",
     tags: "标签",
     source: "来源",
     license: "授权",
     searchPlaceholder: "输入曲名、风格、情绪或场景",
-    searchEmpty: "暂时没有匹配结果，可以改用示例或上传自己的音频。",
+    searchAction: "搜索",
+    searchIntro: "搜索 Jamendo 开放音乐库。只展示允许下载的曲目，点击后会下载并进入分析流程。",
+    searchEmpty: "暂时没有匹配结果，可以换个关键词，或改用示例/上传自己的音频。",
+    searchIdle: "输入关键词或选择标签后开始搜索。",
+    searchLoading: "正在搜索开放音乐库...",
+    searchConfigMissing: "搜索音乐需要配置 JAMENDO_CLIENT_ID。示例音乐和上传音频仍可使用。",
+    artist: "艺术家",
     uploadTitle: "已有音频文件？上传自己的音乐",
   },
   en: {
@@ -48,6 +63,8 @@ const COPY = {
     analyzing: "Analyzing your music...",
     analyzeFailed: "Audio analysis failed. Please try another file.",
     exampleFailed: "The example audio could not be loaded. Try again later or upload your own audio.",
+    searchFailed: "Music search failed. Please try again later.",
+    downloadFailed: "Music download failed. Try another track or try again later.",
     modes: {
       examples: {
         title: "Try Example",
@@ -55,31 +72,42 @@ const COPY = {
       },
       search: {
         title: "Search Music",
-        desc: "Match from a controlled library",
+        desc: "Search open licensed music",
       },
       upload: {
         title: "Upload Audio",
         desc: "Use your own audio file",
       },
     },
-    examplesTitle: "Featured Example",
-    examplesDesc: "Use a local demo track to run the full flow. More licensed tracks can be added later.",
+    examplesTitle: "Preset Examples",
+    examplesDesc: "Preview a preset audio clip, or use it to start the full experience.",
     startWithThis: "Start with this",
     preview: "Preview",
+    play: "Play",
+    pause: "Pause",
     seconds: "sec",
     tags: "Tags",
     source: "Source",
     license: "License",
     searchPlaceholder: "Search by title, style, mood, or scene",
-    searchEmpty: "No matches yet. Try the example or upload your own audio.",
+    searchAction: "Search",
+    searchIntro: "Search Jamendo's open music library. Only downloadable tracks are shown.",
+    searchEmpty: "No matches yet. Try another keyword, the example, or your own upload.",
+    searchIdle: "Enter a keyword or choose tags to search.",
+    searchLoading: "Searching the open music library...",
+    searchConfigMissing: "Music search requires JAMENDO_CLIENT_ID. Examples and uploads still work.",
+    artist: "Artist",
     uploadTitle: "Have an audio file? Upload your own music",
   },
 };
 
 const INPUT_MODES: InputMode[] = ["examples", "search", "upload"];
 
-function formatDuration(seconds: number, suffix: string) {
-  return `${Math.round(seconds)} ${suffix}`;
+function formatDuration(seconds: number) {
+  const roundedSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(roundedSeconds / 60);
+  const remainingSeconds = String(roundedSeconds % 60).padStart(2, "0");
+  return `${minutes}:${remainingSeconds}`;
 }
 
 export default function HomePageClient() {
@@ -87,10 +115,13 @@ export default function HomePageClient() {
   const { language } = useLanguage();
   const [activeInputMode, setActiveInputMode] = useState<InputMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedSearchTags, setSelectedSearchTags] = useState<string[]>([]);
+  const [externalResults, setExternalResults] = useState<ExternalMusicResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchPerformed, setSearchPerformed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const copy = COPY[language];
-  const visibleCatalog = activeInputMode === "search" ? searchAudioCatalog(searchQuery) : audioCatalog;
 
   const handleFileSelect = async (file: File, sourceUrl?: string) => {
     setAnalyzing(true);
@@ -145,12 +176,69 @@ export default function HomePageClient() {
       const res = await fetch(item.file);
       if (!res.ok) throw new Error(`Failed to load ${item.file}`);
       const blob = await res.blob();
-      const file = new File([blob], `${item.name}.mp3`, { type: blob.type || "audio/mpeg" });
+      const extension = item.file.split("?")[0].match(/\.[a-z0-9]+$/i)?.[0] ?? ".mp3";
+      const file = new File([blob], `${item.name}${extension}`, { type: blob.type || "audio/mpeg" });
       await handleFileSelect(file, item.file);
     } catch (err) {
       console.error("Preset audio failed:", err);
       setAnalyzing(false);
       setError(copy.exampleFailed);
+    }
+  };
+
+  const toggleSearchTag = (tagId: string) => {
+    setSelectedSearchTags((current) =>
+      current.includes(tagId) ? current.filter((id) => id !== tagId) : [...current, tagId]
+    );
+  };
+
+  const handleMusicSearch = async () => {
+    setSearchLoading(true);
+    setSearchPerformed(true);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams();
+      if (searchQuery.trim()) params.set("q", searchQuery.trim());
+      if (selectedSearchTags.length > 0) params.set("tags", selectedSearchTags.join(","));
+
+      const res = await fetch(`/api/music/search?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || copy.searchFailed);
+      }
+
+      setExternalResults(Array.isArray(data.results) ? data.results : []);
+    } catch (err) {
+      console.error("Music search failed:", err);
+      setExternalResults([]);
+      const message = err instanceof Error && err.message.includes("JAMENDO_CLIENT_ID")
+        ? copy.searchConfigMissing
+        : copy.searchFailed;
+      setError(message);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleExternalSelect = async (item: ExternalMusicResult) => {
+    if (analyzing) return;
+    setAnalyzing(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/music/download?id=${encodeURIComponent(item.id)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Download failed with ${res.status}`);
+      }
+      const blob = await res.blob();
+      const file = new File([blob], `${item.title}.mp3`, { type: blob.type || "audio/mpeg" });
+      await handleFileSelect(file);
+    } catch (err) {
+      console.error("External music download failed:", err);
+      setAnalyzing(false);
+      setError(copy.downloadFailed);
     }
   };
 
@@ -207,7 +295,7 @@ export default function HomePageClient() {
               <div className="absolute left-1/2 top-[14%] h-[360px] w-[360px] -translate-x-1/2 rounded-full border border-[#ffd98b]/0 bg-[#ffbf68]/0 opacity-0 blur-[1px] transition-all duration-500 group-hover/crystal:border-[#ffd98b]/55 group-hover/crystal:bg-[#ffbf68]/10 group-hover/crystal:opacity-100" />
               <div className="absolute left-1/2 top-[28%] h-[260px] w-[360px] -translate-x-1/2 rounded-[50%] bg-[#ffd27a]/0 blur-3xl transition-all duration-500 group-hover/crystal:bg-[#ffd27a]/22" />
                 <Image
-                  src="/stage-gem-transparent.png"
+                  src="/stage-gem-transparent.webp"
                   alt=""
                   width={1254}
                   height={1254}
@@ -228,8 +316,10 @@ export default function HomePageClient() {
                     <button
                       key={mode}
                       type="button"
+                      data-input-mode={mode}
                       disabled={analyzing}
-                      onClick={() => setActiveInputMode(mode)}
+                      aria-expanded={active}
+                      onClick={() => setActiveInputMode((current) => (current === mode ? null : mode))}
                       className={`relative min-h-[86px] rounded-[20px] border px-5 py-4 text-left transition ${
                         active
                           ? "border-[#ffd083] bg-[#4e382f]/92 text-[#fff1d5] shadow-[0_0_34px_rgba(255,194,103,0.38)]"
@@ -253,7 +343,7 @@ export default function HomePageClient() {
                           <p className="mt-1 text-xs text-[#c9ad91]">{copy.examplesDesc}</p>
                         </div>
                       </div>
-                      <div className="grid gap-3 md:grid-cols-1">
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         {audioCatalog.map((item) => (
                           <CatalogItemCard
                             key={item.id}
@@ -269,29 +359,81 @@ export default function HomePageClient() {
 
                   {activeInputMode === "search" && (
                     <div>
-                      <input
-                        value={searchQuery}
-                        onChange={(event) => setSearchQuery(event.target.value)}
-                        disabled={analyzing}
-                        placeholder={copy.searchPlaceholder}
-                        className="h-12 w-full rounded-full border border-[#d0a06c]/45 bg-[#16121d]/86 px-5 text-sm text-[#ffe8c8] outline-none transition placeholder:text-[#b39678] focus:border-[#ffd083]"
-                      />
-                      <div className="mt-3 grid gap-3">
-                        {visibleCatalog.length > 0 ? (
-                          visibleCatalog.map((item) => (
-                            <CatalogItemCard
-                              key={item.id}
-                              item={item}
-                              disabled={analyzing}
-                              onSelect={handleCatalogSelect}
-                              copy={copy}
-                            />
-                          ))
-                        ) : (
+                      <p className="mb-3 text-center text-sm text-[#ffe0ad]/78">{copy.searchIntro}</p>
+                      <div className="flex gap-2">
+                        <input
+                          value={searchQuery}
+                          onChange={(event) => setSearchQuery(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void handleMusicSearch();
+                          }}
+                          disabled={analyzing || searchLoading}
+                          placeholder={copy.searchPlaceholder}
+                          className="h-12 min-w-0 flex-1 rounded-full border border-[#d0a06c]/45 bg-[#16121d]/86 px-5 text-sm text-[#ffe8c8] outline-none transition placeholder:text-[#b39678] focus:border-[#ffd083]"
+                        />
+                        <button
+                          type="button"
+                          disabled={analyzing || searchLoading}
+                          onClick={() => void handleMusicSearch()}
+                          className={`h-12 shrink-0 rounded-full border px-5 text-sm font-semibold transition ${
+                            analyzing || searchLoading
+                              ? "cursor-not-allowed border-[#d0a06c]/25 bg-[#2b2430]/65 text-[#b99b78]"
+                              : "cursor-pointer border-[#ffd083] bg-[#ffd083] text-[#2c2028] hover:bg-[#ffe0a6]"
+                          }`}
+                        >
+                          {copy.searchAction}
+                        </button>
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        {MUSIC_SEARCH_TAG_GROUPS.map((group) => (
+                          <div key={group.id} className="flex flex-wrap items-center gap-2">
+                            <span className="w-16 shrink-0 text-xs text-[#b99b78]">{group.label}</span>
+                            {MUSIC_SEARCH_TAGS.filter((tag) => tag.group === group.id).map((tag) => {
+                              const selected = selectedSearchTags.includes(tag.id);
+                              return (
+                                <button
+                                  key={tag.id}
+                                  type="button"
+                                  disabled={analyzing || searchLoading}
+                                  onClick={() => toggleSearchTag(tag.id)}
+                                  className={`rounded-full border px-3 py-1 text-xs transition ${
+                                    selected
+                                      ? "border-[#ffd083] bg-[#ffd083]/18 text-[#ffe5bd]"
+                                      : "border-[#d0a06c]/28 bg-[#18131f]/70 text-[#c9ad91] hover:border-[#ffd083]/70"
+                                  }`}
+                                >
+                                  {tag.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-4 grid max-h-[360px] gap-3 overflow-y-auto pr-1">
+                        {searchLoading && (
+                          <div className="rounded-[18px] border border-[#d0a06c]/28 bg-[#18131f]/70 px-4 py-5 text-center text-sm text-[#ccb092]">
+                            {copy.searchLoading}
+                          </div>
+                        )}
+                        {!searchLoading && !searchPerformed && (
+                          <div className="rounded-[18px] border border-[#d0a06c]/28 bg-[#18131f]/70 px-4 py-5 text-center text-sm text-[#ccb092]">
+                            {copy.searchIdle}
+                          </div>
+                        )}
+                        {!searchLoading && searchPerformed && externalResults.length === 0 && (
                           <div className="rounded-[18px] border border-[#d0a06c]/28 bg-[#18131f]/70 px-4 py-5 text-center text-sm text-[#ccb092]">
                             {copy.searchEmpty}
                           </div>
                         )}
+                        {!searchLoading && externalResults.map((item) => (
+                          <ExternalMusicCard
+                            key={`${item.provider}-${item.id}`}
+                            item={item}
+                            disabled={analyzing}
+                            onSelect={handleExternalSelect}
+                            copy={copy}
+                          />
+                        ))}
                       </div>
                     </div>
                   )}
@@ -324,6 +466,66 @@ export default function HomePageClient() {
   );
 }
 
+function ExternalMusicCard({
+  item,
+  disabled,
+  onSelect,
+  copy,
+}: {
+  item: ExternalMusicResult;
+  disabled: boolean;
+  onSelect: (item: ExternalMusicResult) => void;
+  copy: typeof COPY.zh | typeof COPY.en;
+}) {
+  return (
+    <div className="grid gap-3 rounded-[18px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-4 md:grid-cols-[1fr_190px] md:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="truncate text-base font-semibold text-[#ffe7c4]">{item.title}</h3>
+          <span className="rounded-full border border-[#d0a06c]/35 px-2 py-0.5 text-[11px] text-[#d7b58f]">
+            {formatDuration(item.durationSeconds)}
+          </span>
+        </div>
+        <p className="mt-1 text-sm text-[#c9ad91]">
+          {copy.artist}: {item.artist}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {item.tags.slice(0, 6).map((tag) => (
+            <span key={tag} className="rounded-full bg-[#f0bc72]/12 px-2 py-0.5 text-[11px] text-[#f3c98e]">
+              {tag}
+            </span>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] text-[#9f866c]">
+          {copy.source}: Jamendo · {copy.license}:{" "}
+          {item.licenseUrl ? (
+            <a href={item.licenseUrl} target="_blank" rel="noreferrer" className="underline decoration-[#9f866c]/50 underline-offset-2">
+              {item.license}
+            </a>
+          ) : (
+            item.license
+          )}
+        </p>
+      </div>
+      <div className="flex flex-col gap-2">
+        <audio controls preload="none" src={item.previewUrl} className="h-9 w-full" aria-label={`${copy.preview} ${item.title}`} />
+        <button
+          type="button"
+          disabled={disabled || !item.downloadable}
+          onClick={() => onSelect(item)}
+          className={`h-11 rounded-full border text-sm font-semibold transition ${
+            disabled || !item.downloadable
+              ? "cursor-not-allowed border-[#d0a06c]/25 bg-[#2b2430]/65 text-[#b99b78]"
+              : "cursor-pointer border-[#ffd083] bg-[#ffd083] text-[#2c2028] shadow-[0_0_24px_rgba(255,194,103,0.32)] hover:bg-[#ffe0a6]"
+          }`}
+        >
+          {copy.startWithThis}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CatalogItemCard({
   item,
   disabled,
@@ -335,34 +537,36 @@ function CatalogItemCard({
   onSelect: (item: AudioCatalogItem) => void;
   copy: typeof COPY.zh | typeof COPY.en;
 }) {
+  const [primaryTag, ...secondaryTags] = item.tags;
+
   return (
-    <div className="grid gap-3 rounded-[18px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-4 md:grid-cols-[1fr_190px] md:items-center">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-base font-semibold text-[#ffe7c4]">{item.name}</h3>
-          <span className="rounded-full border border-[#d0a06c]/35 px-2 py-0.5 text-[11px] text-[#d7b58f]">
-            {formatDuration(item.durationSeconds, copy.seconds)}
+    <div className="flex min-h-[156px] flex-col rounded-[18px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+      <div className="min-w-0 flex-1">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="rounded-full border border-[#ffd083]/55 bg-[#ffd083]/16 px-2.5 py-1 text-xs font-semibold text-[#ffe1a5]">
+            {primaryTag}
+          </span>
+          <span className="whitespace-nowrap text-[11px] text-[#d7b58f]">
+            {formatDuration(item.durationSeconds)}
           </span>
         </div>
-        <p className="mt-1 text-sm leading-relaxed text-[#c9ad91]">{item.description}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {item.tags.map((tag) => (
+        <h3 className="truncate text-sm font-semibold text-[#ffe7c4]" title={item.name}>{item.name}</h3>
+        <p className="mt-1 truncate text-xs text-[#c9ad91]" title={item.artist}>{item.artist}</p>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {secondaryTags.slice(0, 3).map((tag) => (
             <span key={tag} className="rounded-full bg-[#f0bc72]/12 px-2 py-0.5 text-[11px] text-[#f3c98e]">
               {tag}
             </span>
           ))}
         </div>
-        <p className="mt-2 text-[11px] text-[#9f866c]">
-          {copy.source}: {item.source} · {copy.license}: {item.license}
-        </p>
       </div>
-      <div className="flex flex-col gap-2">
-        <audio controls preload="metadata" src={item.file} className="h-9 w-full" aria-label={`${copy.preview} ${item.name}`} />
+      <div className="mt-2 flex flex-col gap-2">
+        <MiniAudioPreview item={item} copy={copy} />
         <button
           type="button"
           disabled={disabled}
           onClick={() => onSelect(item)}
-          className={`h-11 rounded-full border text-sm font-semibold transition ${
+          className={`h-8 rounded-full border text-xs font-semibold transition ${
             disabled
               ? "cursor-not-allowed border-[#d0a06c]/25 bg-[#2b2430]/65 text-[#b99b78]"
               : "cursor-pointer border-[#ffd083] bg-[#ffd083] text-[#2c2028] shadow-[0_0_24px_rgba(255,194,103,0.32)] hover:bg-[#ffe0a6]"
@@ -370,6 +574,80 @@ function CatalogItemCard({
         >
           {copy.startWithThis}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function MiniAudioPreview({
+  item,
+  copy,
+}: {
+  item: AudioCatalogItem;
+  copy: typeof COPY.zh | typeof COPY.en;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(item.durationSeconds);
+  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+  const togglePlay = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+      return;
+    }
+
+    document.querySelectorAll("audio").forEach((element) => {
+      if (element !== audio) element.pause();
+    });
+    await audio.play();
+    setPlaying(true);
+  };
+
+  const handleSeek = (value: string) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const nextTime = (Number(value) / 100) * duration;
+    audio.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  };
+
+  return (
+    <div className="rounded-full border border-[#d0a06c]/28 bg-[#100d15]/62 px-2 py-1">
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        src={item.file}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || item.durationSeconds)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onEnded={() => setPlaying(false)}
+      />
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={togglePlay}
+          aria-label={`${playing ? copy.pause : copy.play} ${item.name}`}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#ffd083] text-[11px] font-bold text-[#2c2028] transition hover:bg-[#ffe0a6]"
+        >
+          {playing ? "Ⅱ" : "▶"}
+        </button>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={progress}
+          onChange={(event) => handleSeek(event.target.value)}
+          aria-label={`${copy.preview} ${item.name}`}
+          className="h-1.5 min-w-0 flex-1 accent-[#ffd083]"
+        />
+        <span className="w-9 shrink-0 text-right text-[10px] text-[#d7b58f]">
+          {formatDuration(currentTime)}
+        </span>
       </div>
     </div>
   );

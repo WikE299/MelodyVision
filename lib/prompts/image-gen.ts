@@ -9,6 +9,8 @@ export interface PromptDirectorInput {
     characterId: string;
     speaker: string;
     comment: string;
+    weight: number;
+    userResonance: boolean;
   }>;
   userNote: string;
   musicAnalysis: {
@@ -39,6 +41,12 @@ export interface PromptDirectorBrief {
     characterId: string;
     speaker: string;
     visualTranslation: string;
+  }>;
+  weightingRationale?: Array<{
+    characterId: string;
+    weight: number;
+    reason: string;
+    visualImpact: string;
   }>;
   visualSubject: string;
   scene: string;
@@ -126,7 +134,7 @@ ${commentSummary}`;
 
 export function buildPromptDirectorInput(
   characters: Character[],
-  comments: { characterId: string; text: string }[],
+  comments: { characterId: string; text: string; weight?: number; userResonance?: boolean }[],
   presets: {
     style?: string;
     mood?: string;
@@ -141,6 +149,8 @@ export function buildPromptDirectorInput(
       characterId: comment.characterId,
       speaker: character?.name || comment.characterId,
       comment: comment.text,
+      weight: normalizeCommentWeight(comment.weight),
+      userResonance: Boolean(comment.userResonance),
     };
   });
   const musicContext = musicAnalysis
@@ -171,6 +181,11 @@ export function buildPromptDirectorInput(
   };
 }
 
+function normalizeCommentWeight(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.max(0.5, Math.min(2.5, Math.round(value * 10) / 10));
+}
+
 export function buildPromptDirectorInstruction(input: PromptDirectorInput): string {
   return `You are Prompt Director for a music-to-image product.
 
@@ -179,22 +194,23 @@ Your job is to act as a visual creative director and reliability agent. First bu
 Hard rules:
 1. User note has the highest priority for personal meaning.
 2. Every musician comment must influence the visual plan. Do not drop any speaker, and preserve each characterId exactly in sourceMappings.
-3. Convert phrases into drawable visual terms: subject, setting, objects, motion, texture, palette, lighting, atmosphere, composition. Do not simply quote or summarize the comments.
-4. Audio analysis controls motion, density, contrast, brightness, material texture, rhythm contour, and visual tension. Use segments, salientMoments, curves, and visualMappingHints when available, but translate them into visual qualities instead of timecoded narration.
-5. Treat visualPreset.stylePrompt, moodPrompt, and tonePrompt as hard production constraints. Integrate them into finalPrompt naturally. "自动" means you must make a deliberate choice from this specific source material, not reuse a default.
-6. If inputs conflict, preserve the conflict visually, for example calm surface with hidden pressure.
-7. Do not mention music, comments, BPM, musicians, analysis, or prompt in finalPrompt.
-8. finalPrompt must be concrete and imageable, not abstract.
-9. Avoid copyrighted game character names or exact franchise names in finalPrompt; translate them into visual traits instead.
-10. Do not include any people, human figures, faces, bodies, portraits, silhouettes, crowds, or characters in the image.
-11. Do not include any visible text, letters, captions, handwriting, signs, subtitles, logos, or watermarks in the image.
-12. Choose a visualDomain before writing finalPrompt. Consider objects, interiors, architecture, natural phenomena, still life, material studies, geometric space, microscopic worlds, surreal environments, machines, weather systems, or ceremonial spaces as appropriate.
-13. Do not default to mountains, rivers, mist, bamboo, moonlight, bridges, or generic tranquil landscapes unless those motifs are directly justified by the inputs.
-14. The medium describes how the image is made; it must not dictate what the image depicts. An ink painting does not automatically require a landscape.
-15. Commit to one clear focal subject and one distinctive compositional idea. Avoid generic collections of poetic motifs.
-16. finalPrompt must be a true composite of music traits, musician comments, and user note. If userNote is empty, userNoteTrace must say "none".
-17. If detailed audio evidence exists, at least one concrete visual decision must come from the strongest phase or a salient change.
-18. Return valid JSON only.
+3. Treat comment.weight as the user's co-creation signal. Comments with userResonance=true or higher weight must have stronger influence on coreEmotion, visualSubject, composition, or the main focal tension. Lower-weight comments should still shape secondary materials, lighting, edges, atmosphere, or supporting symbols.
+4. Convert phrases into drawable visual terms: subject, setting, objects, motion, texture, palette, lighting, atmosphere, composition. Do not simply quote or summarize the comments.
+5. Audio analysis controls motion, density, contrast, brightness, material texture, rhythm contour, and visual tension. Use segments, salientMoments, curves, and visualMappingHints when available, but translate them into visual qualities instead of timecoded narration.
+6. Treat visualPreset.stylePrompt, moodPrompt, and tonePrompt as hard production constraints. Integrate them into finalPrompt naturally. "自动" means you must make a deliberate choice from this specific source material, not reuse a default.
+7. If inputs conflict, preserve the conflict visually, for example calm surface with hidden pressure.
+8. Do not mention music, comments, BPM, musicians, analysis, or prompt in finalPrompt.
+9. finalPrompt must be concrete and imageable, not abstract.
+10. Avoid copyrighted game character names or exact franchise names in finalPrompt; translate them into visual traits instead.
+11. Do not include any people, human figures, faces, bodies, portraits, silhouettes, crowds, or characters in the image.
+12. Do not include any visible text, letters, captions, handwriting, signs, subtitles, logos, or watermarks in the image.
+13. Choose a visualDomain before writing finalPrompt. Consider objects, interiors, architecture, natural phenomena, still life, material studies, geometric space, microscopic worlds, surreal environments, machines, weather systems, or ceremonial spaces as appropriate.
+14. Do not default to mountains, rivers, mist, bamboo, moonlight, bridges, or generic tranquil landscapes unless those motifs are directly justified by the inputs.
+15. The medium describes how the image is made; it must not dictate what the image depicts. An ink painting does not automatically require a landscape.
+16. Commit to one clear focal subject and one distinctive compositional idea. Avoid generic collections of poetic motifs.
+17. finalPrompt must be a true composite of music traits, musician comments, user note, and user resonance weights. If userNote is empty, userNoteTrace must say "none".
+18. If detailed audio evidence exists, at least one concrete visual decision must come from the strongest phase or a salient change.
+19. Return valid JSON only.
 
 Input:
 ${JSON.stringify(input, null, 2)}
@@ -209,6 +225,14 @@ Return this exact JSON shape:
       "characterId": "exact characterId from input",
       "speaker": "speaker name from input",
       "visualTranslation": "specific drawable contribution from this comment"
+    }
+  ],
+  "weightingRationale": [
+    {
+      "characterId": "exact characterId from input",
+      "weight": 1.8,
+      "reason": "why this input has this influence, including whether userResonance is true",
+      "visualImpact": "how the weight changes subject, composition, lighting, material, or atmosphere"
     }
   ],
   "visualSubject": "short English phrase",
@@ -257,6 +281,7 @@ Do not explain.
 Keep every input characterId exactly once in sourceMappings.
 Make userNoteTrace concrete when userNote is present.
 Do not remove any musician's influence.
+Preserve the weighting hierarchy from comment.weight and userResonance.
 Do not include forbidden meta words in finalPrompt.
 Do not include any people or visible text in finalPrompt.`;
 }

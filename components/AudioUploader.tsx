@@ -10,16 +10,16 @@ interface AudioUploaderProps {
 
 const COPY = {
   zh: {
-    formatError: "支持格式：MP3 / WAV / FLAC",
+    formatError: "支持格式：MP3 / WAV / FLAC / OGG",
     sizeError: "文件大小不能超过 20MB",
     title: "拖拽音频到这里",
-    meta: "MP3 · WAV · FLAC · 最大 20MB",
+    meta: "MP3 · WAV · FLAC · OGG · 最大 20MB",
   },
   en: {
-    formatError: "Supported formats: MP3 / WAV / FLAC",
+    formatError: "Supported formats: MP3 / WAV / FLAC / OGG",
     sizeError: "File size must be under 20MB",
     title: "Drop audio here",
-    meta: "MP3 · WAV · FLAC · Max 20MB",
+    meta: "MP3 · WAV · FLAC · OGG · Max 20MB",
   },
 };
 
@@ -32,7 +32,7 @@ export default function AudioUploader({ onFileSelect, disabled, language = "zh" 
   const validateFile = useCallback((file: File): boolean => {
     setError(null);
 
-    const allowedExts = [".mp3", ".wav", ".flac"];
+    const allowedExts = [".mp3", ".wav", ".flac", ".ogg"];
     const ext = "." + file.name.split(".").pop()?.toLowerCase();
     if (!allowedExts.includes(ext)) {
       setError(copy.formatError);
@@ -104,7 +104,7 @@ export default function AudioUploader({ onFileSelect, disabled, language = "zh" 
         <input
           ref={inputRef}
           type="file"
-          accept=".mp3,.wav,.flac,audio/mpeg,audio/wav,audio/flac"
+          accept=".mp3,.wav,.flac,.ogg,audio/mpeg,audio/wav,audio/flac,audio/ogg,application/ogg"
           onChange={handleChange}
           className="hidden"
           disabled={disabled}

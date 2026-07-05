@@ -126,7 +126,6 @@ function CharacterFigure({
           alt={label.name}
           width={512}
           height={512}
-          unoptimized
           className={`h-auto max-h-[clamp(178px,24vh,230px)] object-contain [filter:drop-shadow(0_0_1px_rgba(62,38,22,0.55))_drop-shadow(0_8px_13px_rgba(0,0,0,0.34))_drop-shadow(0_0_11px_rgba(239,171,91,0.2))] ${FIGURE_STYLE[character.id] || "w-[clamp(132px,9.9vw,166px)]"}`}
         />
       </div>
@@ -364,7 +363,6 @@ export default function SelectPage() {
                           src={`/characters/stage/${character.id}.png`}
                           alt={characterUi[language][character.id as keyof typeof characterUi.zh]?.name || character.name}
                           fill
-                          unoptimized
                           className="object-contain p-1"
                         />
                       </div>
