@@ -144,6 +144,16 @@ function Require-Command([string]$Name, [string]$InstallHint) {
   }
 }
 
+function Stop-PortListeners([string]$TargetPort) {
+  $listeners = Get-NetTCPConnection -LocalPort $TargetPort -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique
+  foreach ($processId in $listeners) {
+    if ($processId -and $processId -ne $PID) {
+      Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 function Print-Tool([string]$Name, [string]$Command) {
   try {
     $value = Invoke-Expression $Command
@@ -209,8 +219,15 @@ if ($Phase -eq "prepare") {
 
 Write-Section "Installing dependencies and building"
 Push-Location $DeployDir
+Stop-PortListeners $Port
 npm ci
+if ($LASTEXITCODE -ne 0) {
+  throw "npm ci failed with exit code $LASTEXITCODE"
+}
 npm run build
+if ($LASTEXITCODE -ne 0) {
+  throw "npm run build failed with exit code $LASTEXITCODE"
+}
 
 Write-Section "Starting app with Windows Task Scheduler"
 $startScript = Join-Path $DeployDir "start-melodyvision.ps1"
@@ -224,13 +241,7 @@ Set-Location "$DeployDir"
 node .\node_modules\next\dist\bin\next start *>> "$serverLog"
 "@ | Set-Content -Encoding UTF8 -Path $startScript
 
-$listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-  Select-Object -ExpandProperty OwningProcess -Unique
-foreach ($processId in $listeners) {
-  if ($processId -and $processId -ne $PID) {
-    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-  }
-}
+Stop-PortListeners $Port
 
 $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
 $taskTrigger = New-ScheduledTaskTrigger -AtStartup
