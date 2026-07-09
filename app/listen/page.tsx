@@ -453,15 +453,15 @@ export default function ListenPage() {
   };
 
   const stageSlotsByCount: Record<number, string[]> = {
-    1: ["left-1/2 bottom-[88px] -translate-x-1/2"],
+    1: ["left-[24%] bottom-[54px] -translate-x-1/2 translate-y-14"],
     2: [
       "left-[27%] bottom-[74px] -translate-x-1/2 translate-y-7",
       "right-[27%] bottom-[74px] translate-x-1/2 translate-y-7",
     ],
     3: [
-      "left-[20%] bottom-[54px] -translate-x-1/2 translate-y-14",
-      "left-1/2 bottom-[154px] -translate-x-1/2 -translate-y-1",
-      "right-[20%] bottom-[54px] translate-x-1/2 translate-y-14",
+      "left-[17%] bottom-[48px] -translate-x-1/2 translate-y-16",
+      "left-[34%] bottom-[136px] -translate-x-1/2",
+      "right-[17%] bottom-[48px] translate-x-1/2 translate-y-16",
     ],
     4: [
       "left-[17%] bottom-[48px] -translate-x-1/2 translate-y-16",
