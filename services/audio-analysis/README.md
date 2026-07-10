@@ -57,6 +57,24 @@ cd services/audio-analysis
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
+## V2-03 comparison
+
+Run the production Meyda calculation against all preset clips from the repository root:
+
+```bash
+npm run audio:evaluate:meyda -- --output /tmp/v2-03-meyda.json
+```
+
+Then run the rich analyzer and generate the combined comparison from this directory:
+
+```bash
+HF_HOME=.cache/huggingface .venv/bin/python -m evaluation.compare \
+  --meyda /tmp/v2-03-meyda.json \
+  --output ../../docs/evaluations/version2-audio-analysis-comparison.json
+```
+
+The Node evaluation command requires Node.js 22.6 or later for type stripping. Reference labels under `evaluation/reference-labels.json` are an internal engineering aid, not publication-grade ground truth.
+
 ## Prototype limits
 
 - Analysis is capped at 60 seconds. Longer files return an `audio_truncated` warning.

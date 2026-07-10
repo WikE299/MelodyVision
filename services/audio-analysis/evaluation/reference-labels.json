@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "v2-03-reference-1",
+  "status": "internal-desk-reference",
+  "notes": "These labels are a provisional engineering reference derived from the known works, instrumentation, catalog metadata, and a listening-oriented desk review. They are not publication-grade ground truth and must be independently reviewed before research reporting.",
+  "items": [
+    {
+      "id": "molihua-piano",
+      "file": "molihua-piano-clip.mp3",
+      "semantics": {
+        "moods": ["serene", "warm", "nostalgic"],
+        "genres": ["folk", "traditional-chinese", "classical"],
+        "instruments": ["piano"],
+        "textures": ["smooth", "sparse"],
+        "motions": ["flowing", "swaying"],
+        "spaces": ["intimate"]
+      }
+    },
+    {
+      "id": "yangguan-sandie-guqin",
+      "file": "yangguan-sandie-guqin-clip.mp3",
+      "semantics": {
+        "moods": ["melancholic", "solemn", "nostalgic", "serene"],
+        "genres": ["folk", "traditional-chinese"],
+        "instruments": ["plucked-strings"],
+        "textures": ["sparse", "airy", "smooth"],
+        "motions": ["flowing", "falling", "still"],
+        "spaces": ["intimate", "spacious"]
+      }
+    },
+    {
+      "id": "erquan-yingyue",
+      "file": "erquan-yingyue-clip.mp3",
+      "semantics": {
+        "moods": ["melancholic", "solemn", "tense"],
+        "genres": ["folk", "traditional-chinese"],
+        "instruments": ["bowed-strings"],
+        "textures": ["sustained", "rough", "smooth"],
+        "motions": ["flowing", "swaying"],
+        "spaces": ["intimate"]
+      }
+    },
+    {
+      "id": "bach-cello-prelude",
+      "file": "bach-cello-prelude-clip.mp3",
+      "tonality": { "key": "G", "mode": "major" },
+      "semantics": {
+        "moods": ["serene", "hopeful", "solemn"],
+        "genres": ["baroque", "classical"],
+        "instruments": ["cello", "bowed-strings"],
+        "textures": ["smooth", "sustained"],
+        "motions": ["flowing", "driving"],
+        "spaces": ["intimate", "reverberant"]
+      }
+    },
+    {
+      "id": "beethoven-symphony-5",
+      "file": "beethoven-symphony-5-clip.mp3",
+      "tonality": { "key": "C", "mode": "minor" },
+      "semantics": {
+        "moods": ["tense", "aggressive", "solemn"],
+        "genres": ["classical", "romantic"],
+        "instruments": ["strings", "brass", "woodwind"],
+        "textures": ["dense", "percussive"],
+        "motions": ["driving", "explosive", "rising"],
+        "spaces": ["reverberant", "spacious"]
+      }
+    },
+    {
+      "id": "mozart-eine-kleine-nachtmusik",
+      "file": "mozart-eine-kleine-nachtmusik-clip.mp3",
+      "tonality": { "key": "G", "mode": "major" },
+      "semantics": {
+        "moods": ["joyful", "hopeful"],
+        "genres": ["classical"],
+        "instruments": ["strings", "violin"],
+        "textures": ["smooth", "dense"],
+        "motions": ["driving", "flowing"],
+        "spaces": ["reverberant", "spacious"]
+      }
+    },
+    {
+      "id": "westend-blues",
+      "file": "westend-blues-clip.mp3",
+      "tonality": { "key": "D#", "mode": "major" },
+      "semantics": {
+        "moods": ["joyful", "warm", "nostalgic"],
+        "genres": ["jazz", "blues"],
+        "instruments": ["trumpet", "brass"],
+        "textures": ["percussive", "dense"],
+        "motions": ["swaying", "flowing", "pulsing"],
+        "spaces": ["intimate", "reverberant"]
+      }
+    },
+    {
+      "id": "amoeba-someday",
+      "file": "amoeba-someday-clip.mp3",
+      "semantics": {
+        "moods": ["mysterious", "tense"],
+        "genres": ["electronic", "ambient", "experimental"],
+        "instruments": ["synthesizer"],
+        "textures": ["granular", "sustained", "dense"],
+        "motions": ["flowing", "pulsing", "still"],
+        "spaces": ["spacious", "distant"]
+      }
+    }
+  ]
+}

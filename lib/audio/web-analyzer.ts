@@ -50,11 +50,23 @@ const BUFFER_SIZE = 2048;
 export async function analyzeAudioFile(file: File): Promise<AudioFeatures> {
   const arrayBuffer = await file.arrayBuffer();
   const audioCtx = new AudioContext();
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  try {
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    return analyzeDecodedAudio(
+      audioBuffer.getChannelData(0),
+      audioBuffer.sampleRate,
+      audioBuffer.duration
+    );
+  } finally {
+    await audioCtx.close();
+  }
+}
 
-  const channelData = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-  const duration = audioBuffer.duration;
+export function analyzeDecodedAudio(
+  channelData: Float32Array,
+  sampleRate: number,
+  duration: number
+): AudioFeatures {
 
   const frameFeatures = extractFrameFeatures(channelData, sampleRate);
   const bpm = estimateBPM(channelData, sampleRate);
@@ -76,8 +88,6 @@ export async function analyzeAudioFile(file: File): Promise<AudioFeatures> {
   const curves = buildCurves(frameFeatures);
   const visualMappingHints = buildVisualMappingHints(segments, salientMoments, energy, brightness, dynamicRange);
   const description = buildDescription(energy, brightness, tempo, bpm, dynamicRange, duration, avgFlatness, segments);
-
-  audioCtx.close();
 
   return {
     bpm: Math.round(bpm),
