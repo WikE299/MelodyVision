@@ -209,7 +209,7 @@ function formatTime(seconds: number) {
 }
 
 function getCharacterView(character: Character, language: Language) {
-  return characterUi[language][character.id as keyof typeof characterUi.zh] || { name: character.name, focus: character.focusKeyword };
+  return characterUi[language][character.id as keyof typeof characterUi.zh] || { name: character.name, focus: character.focusDescription };
 }
 
 function presetLabel(value: string | undefined, language: Language, fallback: string) {

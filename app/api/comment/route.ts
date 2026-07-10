@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
-import { getCharacterById } from "@/lib/characters";
-import { buildCommentPrompt, formatMusicContext } from "@/lib/prompts/system";
-import { callLLM } from "@/lib/llm";
+import {
+  getMusicianAgentProfile,
+  runMusicianAgent,
+} from "@/lib/agents/musicians";
+import { formatMusicContext } from "@/lib/prompts/system";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,26 +14,26 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "characterId required" }, { status: 400 });
     }
 
-    const character = getCharacterById(characterId);
-    if (!character) {
-      return Response.json({ error: "Character not found" }, { status: 404 });
+    const profile = getMusicianAgentProfile(characterId);
+    if (!profile) {
+      return Response.json({ error: "Musician agent not found" }, { status: 404 });
     }
 
-    const musicContext = formatMusicContext(musicAnalysis);
-    const systemPrompt = buildCommentPrompt(character, musicContext, userNote);
-
-    const response = await callLLM({
-      systemPrompt,
-      userMessage: "请评论这首音乐。",
-      temperature: character.temperature,
-      maxTokens: 2000,
+    const musicContext = formatMusicContext(musicAnalysis || {});
+    const response = await runMusicianAgent({
+      profile,
+      musicContext,
+      userNote: typeof userNote === "string" ? userNote.slice(0, 1000) : undefined,
     });
 
     return Response.json({
       characterId,
-      characterName: character.name,
-      comment: response.content,
+      characterName: profile.displayName,
+      comment: response.comment,
       model: response.model,
+      agentProfileVersion: response.profileVersion,
+      attempts: response.attempts,
+      usage: response.usage,
     });
   } catch (err) {
     console.error("Comment API error:", err);

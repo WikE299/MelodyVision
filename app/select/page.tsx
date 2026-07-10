@@ -93,7 +93,7 @@ function CharacterFigure({
   const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
     name: character.name,
     era: character.era,
-    focus: character.focusKeyword,
+    focus: character.focusDescription,
   };
 
   return (

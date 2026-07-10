@@ -118,7 +118,7 @@ function GuideFigure({
   const copy = COPY[language];
   const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
     name: character.name,
-    focus: character.focusKeyword,
+    focus: character.focusDescription,
   };
 
   return (
