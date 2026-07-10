@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -13,12 +14,32 @@ from .analyzer import MAX_AUDIO_SECONDS, MusicAnalyzer, SCHEMA_VERSION
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_SOURCE_KINDS = {"upload", "preset", "search"}
 
+analyzer = MusicAnalyzer()
+semantic_preload_error: str | None = None
+
+
+def _preload_enabled() -> bool:
+    return os.environ.get("CLAP_PRELOAD", "1").lower() not in {"0", "false", "no"}
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global semantic_preload_error
+    semantic_preload_error = None
+    if _preload_enabled() and analyzer.semantic_analyzer.enabled:
+        try:
+            await run_in_threadpool(analyzer.semantic_analyzer.warmup)
+        except Exception as error:
+            semantic_preload_error = str(error)
+    yield
+
+
 app = FastAPI(
     title="MelodyVision Audio Analysis",
-    version="0.1.0",
-    description="Version 2 prototype. This service is not wired into the production flow yet.",
+    version="0.2.0",
+    description="Version 2 music analysis service for the MelodyVision application.",
+    lifespan=lifespan,
 )
-analyzer = MusicAnalyzer()
 
 
 @app.get("/health")
@@ -30,6 +51,8 @@ def health() -> dict[str, object]:
         "semanticModel": analyzer.semantic_analyzer.model_name,
         "semanticModelLoaded": analyzer.semantic_analyzer.loaded,
         "semanticDevice": analyzer.semantic_analyzer.device,
+        "semanticPreloadEnabled": _preload_enabled(),
+        "semanticPreloadError": semantic_preload_error,
     }
 
 
@@ -38,6 +61,7 @@ async def analyze_audio(
     file: UploadFile = File(...),
     sessionId: str = Form("prototype"),
     sourceKind: str = Form("upload"),
+    catalogItemId: str | None = Form(None),
 ) -> dict[str, object]:
     if sourceKind not in ALLOWED_SOURCE_KINDS:
         raise HTTPException(status_code=422, detail="sourceKind must be upload, preset, or search")
@@ -62,6 +86,7 @@ async def analyze_audio(
             source_kind=sourceKind,
             original_name=file.filename,
             mime_type=file.content_type,
+            catalog_item_id=catalogItemId,
         )
     except HTTPException:
         raise

@@ -12,9 +12,24 @@ import {
   type ExternalMusicResult,
 } from "@/lib/audio/external-music";
 import { analyzeAudioFile } from "@/lib/audio/web-analyzer";
+import {
+  meydaToDegradedAnalysis,
+  profileToCompatibleAnalysis,
+  type AudioSourceMetadata,
+} from "@/lib/audio/music-profile-adapter";
+import { requestRichMusicProfile } from "@/lib/audio/rich-analysis-client";
+import type { AudioSourceKind } from "@/lib/contracts";
+import { getExperimentSessionId } from "@/lib/experiment-session";
 import { useLanguage } from "@/lib/i18n";
 
 type InputMode = "examples" | "search" | "upload";
+
+interface AudioSelectionContext {
+  sourceKind: AudioSourceKind;
+  playbackUrl?: string;
+  catalogItemId?: string;
+  sourceMetadata?: AudioSourceMetadata;
+}
 
 const COPY = {
   zh: {
@@ -119,45 +134,63 @@ export default function HomePageClient() {
   const [error, setError] = useState<string | null>(null);
   const copy = COPY[language];
 
-  const handleFileSelect = async (file: File, sourceUrl?: string) => {
+  const handleFileSelect = async (
+    file: File,
+    context: AudioSelectionContext = { sourceKind: "upload" }
+  ) => {
     setAnalyzing(true);
     setError(null);
+    let objectUrl: string | null = null;
 
     try {
       sessionStorage.setItem("audioFileName", file.name);
       sessionStorage.setItem("audioFileSize", String(file.size));
-      if (sourceUrl) {
-        sessionStorage.setItem("audioSrc", sourceUrl);
+      if (context.playbackUrl) {
+        sessionStorage.setItem("audioSrc", context.playbackUrl);
       } else {
         sessionStorage.removeItem("audioSrc");
       }
 
-      const url = URL.createObjectURL(file);
-      sessionStorage.setItem("audioObjectUrl", url);
+      objectUrl = URL.createObjectURL(file);
+      sessionStorage.setItem("audioObjectUrl", objectUrl);
 
-      const features = await analyzeAudioFile(file);
-      const analysis = {
-        tempo: features.tempo,
-        mood: features.mood,
-        energy: features.energy,
-        brightness: features.brightness,
-        dynamicRange: features.dynamicRange,
-        bpm: features.bpm,
-        duration: features.durationSeconds,
-        description: features.description,
-        segments: features.segments,
-        salientMoments: features.salientMoments,
-        curves: features.curves,
-        visualMappingHints: features.visualMappingHints,
-        spectralCentroid: features.spectralCentroid,
-        spectralFlatness: features.spectralFlatness,
-        spectralRolloff: features.spectralRolloff,
-      };
+      const sessionId = await getExperimentSessionId().catch(() => crypto.randomUUID());
+      sessionStorage.setItem("experimentSessionId", sessionId);
+      const [richResult, realtimeResult] = await Promise.allSettled([
+        requestRichMusicProfile(file, {
+          sessionId,
+          sourceKind: context.sourceKind,
+          catalogItemId: context.catalogItemId,
+        }),
+        analyzeAudioFile(file),
+      ]);
+
+      if (realtimeResult.status === "fulfilled") {
+        sessionStorage.setItem("realtimeAudioFeatures", JSON.stringify(realtimeResult.value));
+      } else {
+        sessionStorage.removeItem("realtimeAudioFeatures");
+      }
+
+      let analysis;
+      if (richResult.status === "fulfilled") {
+        sessionStorage.setItem("musicProfile", JSON.stringify(richResult.value));
+        analysis = profileToCompatibleAnalysis(richResult.value, context.sourceMetadata);
+      } else if (realtimeResult.status === "fulfilled") {
+        console.warn("Rich analysis unavailable; using explicit Meyda degraded mode.", richResult.reason);
+        sessionStorage.removeItem("musicProfile");
+        analysis = meydaToDegradedAnalysis(realtimeResult.value, context.sourceMetadata);
+      } else {
+        throw new Error("Rich and realtime audio analysis both failed");
+      }
+
       sessionStorage.setItem("musicAnalysis", JSON.stringify(analysis));
+      sessionStorage.setItem("audioAnalysisMode", analysis.analysisEngine);
 
       router.push("/select");
     } catch (err) {
       console.error("Audio analysis failed:", err);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      sessionStorage.removeItem("audioObjectUrl");
       setAnalyzing(false);
       setError(copy.analyzeFailed);
     }
@@ -174,7 +207,18 @@ export default function HomePageClient() {
       const blob = await res.blob();
       const extension = item.file.split("?")[0].match(/\.[a-z0-9]+$/i)?.[0] ?? ".mp3";
       const file = new File([blob], `${item.name}${extension}`, { type: blob.type || "audio/mpeg" });
-      await handleFileSelect(file, item.file);
+      await handleFileSelect(file, {
+        sourceKind: "preset",
+        playbackUrl: item.file,
+        catalogItemId: item.id,
+        sourceMetadata: {
+          title: item.name,
+          artist: item.artist,
+          tags: item.tags,
+          source: item.source,
+          sourceUrl: item.sourceUrl,
+        },
+      });
     } catch (err) {
       console.error("Preset audio failed:", err);
       setAnalyzing(false);
@@ -230,7 +274,16 @@ export default function HomePageClient() {
       }
       const blob = await res.blob();
       const file = new File([blob], `${item.title}.mp3`, { type: blob.type || "audio/mpeg" });
-      await handleFileSelect(file);
+      await handleFileSelect(file, {
+        sourceKind: "search",
+        sourceMetadata: {
+          title: item.title,
+          artist: item.artist,
+          tags: item.tags,
+          source: "Jamendo",
+          sourceUrl: item.sourceUrl,
+        },
+      });
     } catch (err) {
       console.error("External music download failed:", err);
       setAnalyzing(false);

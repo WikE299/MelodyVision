@@ -26,11 +26,13 @@ class MusicAnalyzerTest(unittest.TestCase):
             profile = analyzer.analyze_file(
                 path,
                 session_id="test-session",
-                source_kind="upload",
+                source_kind="preset",
+                catalog_item_id="fixture-audio",
             )
 
         self.assertEqual(profile["schemaVersion"], "2.0.0")
         self.assertEqual(profile["sessionId"], "test-session")
+        self.assertEqual(profile["audio"]["catalogItemId"], "fixture-audio")
         self.assertNotIn("visualHints", profile)
         self.assertGreaterEqual(len(profile["sections"]), 1)
         self.assertIn("rhythm", profile)

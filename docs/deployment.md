@@ -114,6 +114,31 @@ D:/MelodyVision/.env.local
 
 Do not commit API keys to GitHub.
 
+Version 2 rich audio analysis also uses:
+
+```text
+AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
+```
+
+This is a server-only value read by the Next.js `/api/analyze` proxy. Do not prefix it with `NEXT_PUBLIC_`.
+
+## Version 2 Audio Service
+
+For local Version 2 development, start the Python analyzer before Next.js:
+
+```bash
+cd services/audio-analysis
+HF_HOME=.cache/huggingface .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+Then run `npm run dev` from the repository root. Check the proxy with:
+
+```bash
+curl http://127.0.0.1:3000/api/analyze
+```
+
+The current Windows deployment script still manages only the Next.js process. Until the Python service receives its scheduled-task deployment in `V2-12`, a server without port `8001` will use the explicitly marked Meyda degraded path. The user flow remains available, but it will not receive the rich `MusicProfile`.
+
 Changing model names or API keys:
 
 - If the setting is in code, edit locally and push.

@@ -1,4 +1,4 @@
-import { Character } from "../characters";
+import type { Character } from "../characters";
 
 /**
  * Build the full system prompt for a character commenting on music.
@@ -32,6 +32,8 @@ ${musicContext}`;
  * This is the "analysis info" injected into the system prompt.
  */
 export function formatMusicContext(analysis: {
+  analysisEngine?: "rich" | "meyda-degraded";
+  degraded?: boolean;
   key?: string;
   tempo?: string;
   mood?: string;
@@ -39,7 +41,7 @@ export function formatMusicContext(analysis: {
   energy?: string;
   brightness?: string;
   dynamicRange?: string;
-  bpm?: number;
+  bpm?: number | null;
   duration?: number;
   description?: string;
   spectralCentroid?: number;
@@ -62,6 +64,24 @@ export function formatMusicContext(analysis: {
     description?: string;
   }>;
   visualMappingHints?: string[];
+  sourceMetadata?: {
+    title?: string;
+    artist?: string;
+    tags?: string[];
+    source?: string;
+  };
+  tonalityCandidate?: {
+    key?: string | null;
+    mode?: string;
+    confidence?: number;
+  };
+  semanticCandidates?: {
+    moods?: Array<{ label?: string; score?: number }>;
+    textures?: Array<{ label?: string; score?: number }>;
+    motions?: Array<{ label?: string; score?: number }>;
+    spaces?: Array<{ label?: string; score?: number }>;
+  };
+  analysisWarnings?: string[];
   curves?: {
     energy?: number[];
     brightness?: number[];
@@ -69,8 +89,23 @@ export function formatMusicContext(analysis: {
   };
 }): string {
   const parts: string[] = [];
+  if (analysis.sourceMetadata) {
+    const identity = [analysis.sourceMetadata.title, analysis.sourceMetadata.artist]
+      .filter(Boolean)
+      .join("，");
+    const tags = analysis.sourceMetadata.tags?.slice(0, 6).join("、");
+    if (identity) parts.push(`已知曲目信息：${identity}`);
+    if (tags) parts.push(`来源标签：${tags}`);
+  }
+  if (analysis.degraded) {
+    parts.push("分析状态：新版音乐分析服务暂不可用，以下为 Meyda 降级结果，只能作为粗略听感参考。不可把情绪、段落或乐器判断当作事实。");
+  }
   if (analysis.tempo) parts.push(`节奏：${analysis.tempo}`);
-  if (analysis.mood) parts.push(`情绪特征：${analysis.mood}`);
+  if (analysis.mood) {
+    parts.push(analysis.analysisEngine === "rich"
+      ? `候选情绪（低权重）：${analysis.mood}`
+      : `粗略情绪参考：${analysis.mood}`);
+  }
   if (analysis.energy) parts.push(`能量：${analysis.energy}`);
   if (analysis.brightness) parts.push(`音色明暗：${analysis.brightness}`);
   if (analysis.dynamicRange) parts.push(`动态变化：${analysis.dynamicRange}`);
@@ -80,7 +115,21 @@ export function formatMusicContext(analysis: {
   }
   if (analysis.spectralRolloff) parts.push(`高频截止：${analysis.spectralRolloff} Hz`);
   if (analysis.key) parts.push(`调性：${analysis.key}`);
-  if (analysis.instruments?.length) parts.push(`乐器：${analysis.instruments.join("、")}`);
+  if (analysis.tonalityCandidate?.key) {
+    const confidence = analysis.tonalityCandidate.confidence == null
+      ? ""
+      : `，相对置信度 ${Math.round(analysis.tonalityCandidate.confidence * 100)}%`;
+    parts.push(`调性假设（不可当作确定乐理事实）：${analysis.tonalityCandidate.key} ${analysis.tonalityCandidate.mode || ""}${confidence}`);
+  }
+  if (analysis.instruments?.length) parts.push(`已知来源乐器标签：${analysis.instruments.join("、")}`);
+  if (analysis.semanticCandidates) {
+    const candidateParts = [
+      formatCandidateGroup("质感", analysis.semanticCandidates.textures),
+      formatCandidateGroup("动势", analysis.semanticCandidates.motions),
+      formatCandidateGroup("空间", analysis.semanticCandidates.spaces),
+    ].filter(Boolean);
+    if (candidateParts.length) parts.push(`模型候选（低权重、允许忽略）：${candidateParts.join("；")}`);
+  }
   if (analysis.segments?.length) {
     parts.push(
       `听感走势：${analysis.segments
@@ -111,8 +160,19 @@ export function formatMusicContext(analysis: {
   if (analysis.visualMappingHints?.length) parts.push(`听感转译参考：${analysis.visualMappingHints.slice(0, 4).map(removeTimeMarkers).join("；")}`);
   if (analysis.duration) parts.push(`时长：约${analysis.duration}秒`);
   if (analysis.description) parts.push(`综合描述：${analysis.description}`);
-  parts.push("评论要求：用音乐家的自然口吻评论听感和画面感；不要提到具体秒数、参数、曲线、分段、显著时刻等分析术语。评论要能给后续画面生成提供情绪、材质、空间或动势线索。");
+  parts.push("评论要求：先依据音乐的节奏、动态和结构证据形成自己的听法；候选语义如果与音乐证据冲突就忽略。用音乐家的自然口吻评论听感和画面感，不要提到具体秒数、参数、置信度、曲线、分段或分析术语。评论要能给后续画面生成提供情绪、材质、空间或动势线索。");
   return parts.join("\n");
+}
+
+function formatCandidateGroup(
+  name: string,
+  labels?: Array<{ label?: string; score?: number }>
+): string {
+  const values = labels
+    ?.slice(0, 3)
+    .map((item) => item.label)
+    .filter((label): label is string => Boolean(label));
+  return values?.length ? `${name} ${values.join("、")}` : "";
 }
 
 function getPhaseLabel(index: number, total: number): string {

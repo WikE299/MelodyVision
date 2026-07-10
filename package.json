@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "audio:clips": "node scripts/create-audio-clips.mjs",
-    "audio:evaluate:meyda": "node --experimental-strip-types scripts/evaluate-meyda.mjs"
+    "audio:evaluate:meyda": "node --experimental-strip-types scripts/evaluate-meyda.mjs",
+    "test:audio-adapter": "node --experimental-strip-types --test tests/music-profile-adapter.test.ts"
   },
   "dependencies": {
     "meyda": "^5.6.3",

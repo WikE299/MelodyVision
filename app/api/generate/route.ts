@@ -146,17 +146,28 @@ function buildFallbackImagePrompt(
     .filter(Boolean)
     .join(" / ");
   const musicContext = musicAnalysis
-    ? [
-        musicAnalysis.description,
-        musicAnalysis.tempo,
-        musicAnalysis.mood,
-        musicAnalysis.energy,
-        musicAnalysis.brightness,
-        formatCompactMusicEvidence(musicAnalysis),
-      ]
-        .filter(Boolean)
-        .map(String)
-        .join(" / ")
+    ? musicAnalysis.degraded === true
+      ? [
+          "approximate degraded signal",
+          musicAnalysis.tempo,
+          musicAnalysis.energy,
+          musicAnalysis.brightness,
+        ]
+          .filter(Boolean)
+          .map(String)
+          .join(" / ")
+      : [
+          "rich analysis with low-weight semantic candidates",
+          musicAnalysis.description,
+          musicAnalysis.tempo,
+          musicAnalysis.mood,
+          musicAnalysis.energy,
+          musicAnalysis.brightness,
+          formatCompactMusicEvidence(musicAnalysis),
+        ]
+          .filter(Boolean)
+          .map(String)
+          .join(" / ")
     : "";
 
   return [

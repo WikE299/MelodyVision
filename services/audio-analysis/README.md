@@ -1,6 +1,6 @@
-# MelodyVision Audio Analysis Prototype
+# MelodyVision Audio Analysis Service
 
-This service implements `V2-02`. It produces the Version 2 `MusicProfile` contract without changing the current Next.js flow.
+This service implements the Version 2 `MusicProfile` analyzer introduced in `V2-02` and connected to the application in `V2-04`.
 
 ## What it analyzes
 
@@ -29,15 +29,26 @@ cd services/audio-analysis
 HF_HOME=.cache/huggingface .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-The first semantic request downloads and loads `laion/clap-htsat-fused`. Later requests reuse the loaded model.
+By default, startup downloads if necessary and preloads `laion/clap-htsat-fused`. Set `CLAP_PRELOAD=0` to defer loading or `CLAP_DISABLED=1` to run only the deterministic signal path.
 
 ```bash
 curl http://127.0.0.1:8001/health
 curl -X POST http://127.0.0.1:8001/analyze \
   -F "sessionId=prototype" \
   -F "sourceKind=preset" \
+  -F "catalogItemId=bach-cello-prelude" \
   -F "file=@../../public/preset-audio/clips/bach-cello-prelude-clip.mp3"
 ```
+
+## Application integration
+
+The Next.js `/api/analyze` route proxies uploads to this service. Configure the server-only environment variable:
+
+```text
+AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
+```
+
+The browser runs Meyda in parallel for realtime animation features. If this service is unavailable, the application continues with an explicitly marked `meyda-degraded` result. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
 
 ## Run from the command line
 
@@ -84,4 +95,4 @@ The Node evaluation command requires Node.js 22.6 or later for type stripping. R
 - A section is labeled `climax` only when it contains a strong local energy peak; otherwise the strongest interior change remains a `turning-point`.
 - Energy, loudness, timbre, and non-tempo curves are normalized to `0-1`; `tempoCurve` retains BPM values.
 - The roughness field is currently a spectral-flux proxy and carries a warning.
-- V2-03 will compare these results with Meyda before this service can replace the production analyzer.
+- V2-03 approved the signal, structure, evidence, and warning layers. CLAP genre and instrument predictions remain suppressed from downstream factual context.

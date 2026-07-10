@@ -114,6 +114,11 @@ class ClapSemanticAnalyzer:
     def device(self) -> str:
         return self._device
 
+    def warmup(self) -> None:
+        if not self.enabled:
+            raise SemanticAnalysisUnavailable("CLAP semantic analysis is disabled")
+        self._ensure_loaded()
+
     def analyze(
         self,
         audio: np.ndarray,

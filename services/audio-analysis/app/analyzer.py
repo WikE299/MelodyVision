@@ -87,6 +87,7 @@ class MusicAnalyzer:
         source_kind: str,
         original_name: str | None = None,
         mime_type: str | None = None,
+        catalog_item_id: str | None = None,
     ) -> dict[str, object]:
         audio_path = Path(path)
         content_hash = hashlib.sha256(audio_path.read_bytes()).hexdigest()
@@ -185,6 +186,8 @@ class MusicAnalyzer:
         }
         if mime_type:
             audio_reference["mimeType"] = mime_type
+        if catalog_item_id:
+            audio_reference["catalogItemId"] = catalog_item_id
 
         profile = {
             "schemaVersion": SCHEMA_VERSION,

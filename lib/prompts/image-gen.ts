@@ -1,4 +1,4 @@
-import { Character } from "../characters";
+import type { Character } from "../characters";
 import {
   buildVisualPresetPrompt,
   type VisualPresetPrompt,
@@ -14,6 +14,8 @@ export interface PromptDirectorInput {
   }>;
   userNote: string;
   musicAnalysis: {
+    analysisEngine?: unknown;
+    degraded?: unknown;
     description?: unknown;
     tempo?: unknown;
     mood?: unknown;
@@ -29,6 +31,10 @@ export interface PromptDirectorInput {
     salientMoments?: unknown;
     curves?: unknown;
     visualMappingHints?: unknown;
+    sourceMetadata?: unknown;
+    tonalityCandidate?: unknown;
+    semanticCandidates?: unknown;
+    analysisWarnings?: unknown;
   };
   visualPreset: VisualPresetPrompt;
 }
@@ -96,17 +102,7 @@ ${commentSummary}`;
   }
 
   if (musicAnalysis) {
-    const musicContext = [
-      musicAnalysis.description,
-      musicAnalysis.tempo,
-      musicAnalysis.mood,
-      musicAnalysis.energy,
-      musicAnalysis.brightness,
-      formatCompactMusicEvidence(musicAnalysis),
-    ]
-      .filter(Boolean)
-      .map(String)
-      .join("；");
+    const musicContext = formatPromptMusicContext(musicAnalysis);
 
     if (musicContext) {
       prompt += `\n\n音频分析：${musicContext}`;
@@ -155,6 +151,8 @@ export function buildPromptDirectorInput(
   });
   const musicContext = musicAnalysis
     ? {
+        analysisEngine: musicAnalysis.analysisEngine,
+        degraded: musicAnalysis.degraded,
         description: musicAnalysis.description,
         tempo: musicAnalysis.tempo,
         mood: musicAnalysis.mood,
@@ -170,6 +168,10 @@ export function buildPromptDirectorInput(
         salientMoments: sanitizeMoments(musicAnalysis.salientMoments, musicAnalysis.duration),
         curves: musicAnalysis.curves,
         visualMappingHints: sanitizeHints(musicAnalysis.visualMappingHints),
+        sourceMetadata: musicAnalysis.sourceMetadata,
+        tonalityCandidate: musicAnalysis.tonalityCandidate,
+        semanticCandidates: musicAnalysis.semanticCandidates,
+        analysisWarnings: musicAnalysis.analysisWarnings,
       }
     : {};
 
@@ -196,7 +198,7 @@ Hard rules:
 2. Every musician comment must influence the visual plan. Do not drop any speaker, and preserve each characterId exactly in sourceMappings.
 3. Treat comment.weight as the user's co-creation signal. Comments with userResonance=true or higher weight must have stronger influence on coreEmotion, visualSubject, composition, or the main focal tension. Lower-weight comments should still shape secondary materials, lighting, edges, atmosphere, or supporting symbols.
 4. Convert phrases into drawable visual terms: subject, setting, objects, motion, texture, palette, lighting, atmosphere, composition. Do not simply quote or summarize the comments.
-5. Audio analysis controls motion, density, contrast, brightness, material texture, rhythm contour, and visual tension. Use segments, salientMoments, curves, and visualMappingHints when available, but translate them into visual qualities instead of timecoded narration.
+5. Audio analysis may guide motion, density, contrast, brightness, material texture, rhythm contour, and visual tension. If musicAnalysis.degraded=true, treat it only as an approximate low-level signal and rely primarily on musician comments and the user note. If it is rich, semanticCandidates are still low-weight hypotheses and may be ignored when they conflict with signal evidence. Never treat a tonalityCandidate as a verified musical fact.
 6. Treat visualPreset.stylePrompt, moodPrompt, and tonePrompt as hard production constraints. Integrate them into finalPrompt naturally. "自动" means you must make a deliberate choice from this specific source material, not reuse a default.
 7. If inputs conflict, preserve the conflict visually, for example calm surface with hidden pressure.
 8. Do not mention music, comments, BPM, musicians, analysis, or prompt in finalPrompt.
@@ -316,6 +318,27 @@ export function formatCompactMusicEvidence(musicAnalysis: Record<string, unknown
     ? sanitizeHints(musicAnalysis.visualMappingHints).slice(0, 3)
     : [];
   return [...segments, ...moments, ...hints].filter(Boolean).join("；");
+}
+
+function formatPromptMusicContext(musicAnalysis: Record<string, unknown>): string {
+  const degraded = musicAnalysis.degraded === true;
+  const values = degraded
+    ? [
+        "approximate degraded signal",
+        musicAnalysis.tempo,
+        musicAnalysis.energy,
+        musicAnalysis.brightness,
+      ]
+    : [
+        "rich analysis with low-weight semantic candidates",
+        musicAnalysis.description,
+        musicAnalysis.tempo,
+        musicAnalysis.mood,
+        musicAnalysis.energy,
+        musicAnalysis.brightness,
+        formatCompactMusicEvidence(musicAnalysis),
+      ];
+  return values.filter(Boolean).map(String).join("；");
 }
 
 function sanitizeSegments(value: unknown) {
