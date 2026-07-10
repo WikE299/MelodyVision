@@ -145,9 +145,6 @@ function CharacterFigure({
         )}
         <p className="text-[clamp(14px,1.05vw,18px)] font-semibold text-[#ffe6c3]">{label.name}</p>
         <p className="mt-0.5 text-[clamp(11px,0.82vw,14px)] text-[#f2d0aa]/88">{label.era}</p>
-        <span className="mt-[clamp(6px,1.1vh,12px)] rounded-full border border-[#d99f5f]/45 bg-[#8a5e3d]/48 px-[clamp(10px,1vw,16px)] py-0.5 text-[clamp(15px,1.2vw,20px)] font-serif text-[#ffe0ad]">
-          {label.focus}
-        </span>
       </div>
     </button>
   );

@@ -83,16 +83,6 @@ export default function CharacterCard({
       <span className="text-sm font-medium text-gray-800">{character.name}</span>
       <span className="text-xs text-gray-400">{character.era}</span>
 
-      {/* Focus keyword badge */}
-      <span
-        className={`
-          mt-2 px-2 py-0.5 rounded-full text-xs
-          ${selected ? "bg-blue-200 text-blue-700" : "bg-gray-100 text-gray-500"}
-        `}
-      >
-        关注「{character.focusKeyword}」
-      </span>
-
       {/* Commented indicator */}
       {commented && (
         <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">

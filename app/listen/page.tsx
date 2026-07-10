@@ -140,8 +140,6 @@ function GuideFigure({
         <div className="absolute left-1/2 top-[-6px] z-50 w-[clamp(248px,18vw,330px)] -translate-x-1/2 rounded-[18px] border border-[#f5c184]/80 bg-[#ffe0bd]/96 px-4 py-3 text-left text-[#322534] shadow-[0_18px_42px_rgba(0,0,0,0.3)]">
           <div className="flex items-center gap-2 pr-16">
             <p className="text-sm font-semibold">{label.name}</p>
-            <span className="h-1 w-1 rounded-full bg-[#5a3e31]" />
-            <p className="text-xs text-[#765846]">{label.focus}</p>
           </div>
           {commented && !loading && (
             <>

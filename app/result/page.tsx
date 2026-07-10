@@ -243,9 +243,6 @@ function GuideCommentCard({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <h3 className="text-base font-semibold text-[#ffe3bd]">{label.name}</h3>
-          <span className="rounded-full border border-[#d7a464]/38 bg-[#3a2d32] px-2 py-0.5 text-[11px] text-[#ddb27b]">
-            {label.focus}
-          </span>
           <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-[#6bb36b] text-xs text-[#173017]">
             ✓
           </span>

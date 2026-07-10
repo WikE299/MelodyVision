@@ -39,11 +39,9 @@ const COPY = {
       },
     },
     examplesTitle: "预制示例",
-    examplesDesc: "选择一段预制音频试听，或直接用它开始完整体验。",
+    examplesDesc: "鼠标移到卡片即可试听，喜欢的话直接用它开始完整体验。",
     startWithThis: "用这段开始",
     preview: "试听",
-    play: "播放",
-    pause: "暂停",
     seconds: "秒",
     tags: "标签",
     source: "来源",
@@ -80,11 +78,9 @@ const COPY = {
       },
     },
     examplesTitle: "Preset Examples",
-    examplesDesc: "Preview a preset audio clip, or use it to start the full experience.",
+    examplesDesc: "Hover over a card to preview it, then start with the one you like.",
     startWithThis: "Start with this",
     preview: "Preview",
-    play: "Play",
-    pause: "Pause",
     seconds: "sec",
     tags: "Tags",
     source: "Source",
@@ -539,8 +535,37 @@ function CatalogItemCard({
 }) {
   const [primaryTag, ...secondaryTags] = item.tags;
 
+  const playCardPreview = async (card: HTMLDivElement) => {
+    const audio = card.querySelector("audio");
+    if (!audio) return;
+    if (!audio.paused) return;
+
+    document.querySelectorAll("audio").forEach((element) => {
+      if (element !== audio) element.pause();
+    });
+    try {
+      await audio.play();
+    } catch {
+      audio.pause();
+    }
+  };
+
+  const pauseCardPreview = (card: HTMLDivElement) => {
+    const audio = card.querySelector("audio");
+    if (!audio) return;
+    audio.pause();
+  };
+
   return (
-    <div className="flex min-h-[156px] flex-col rounded-[18px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+    <div
+      className="flex min-h-[156px] flex-col rounded-[18px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition hover:border-[#ffd083]/62 hover:bg-[#211925]/86"
+      onMouseEnter={(event) => void playCardPreview(event.currentTarget)}
+      onMouseMove={(event) => void playCardPreview(event.currentTarget)}
+      onMouseLeave={(event) => pauseCardPreview(event.currentTarget)}
+      onPointerEnter={(event) => void playCardPreview(event.currentTarget)}
+      onFocus={(event) => void playCardPreview(event.currentTarget)}
+      onBlur={(event) => pauseCardPreview(event.currentTarget)}
+    >
       <div className="min-w-0 flex-1">
         <div className="mb-2 flex items-center justify-between gap-2">
           <span className="rounded-full border border-[#ffd083]/55 bg-[#ffd083]/16 px-2.5 py-1 text-xs font-semibold text-[#ffe1a5]">
@@ -587,27 +612,9 @@ function MiniAudioPreview({
   copy: typeof COPY.zh | typeof COPY.en;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(item.durationSeconds);
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
-
-  const togglePlay = async () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (playing) {
-      audio.pause();
-      setPlaying(false);
-      return;
-    }
-
-    document.querySelectorAll("audio").forEach((element) => {
-      if (element !== audio) element.pause();
-    });
-    await audio.play();
-    setPlaying(true);
-  };
 
   const handleSeek = (value: string) => {
     const audio = audioRef.current;
@@ -625,17 +632,8 @@ function MiniAudioPreview({
         src={item.file}
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || item.durationSeconds)}
         onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-        onEnded={() => setPlaying(false)}
       />
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={togglePlay}
-          aria-label={`${playing ? copy.pause : copy.play} ${item.name}`}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#ffd083] text-[11px] font-bold text-[#2c2028] transition hover:bg-[#ffe0a6]"
-        >
-          {playing ? "Ⅱ" : "▶"}
-        </button>
         <input
           type="range"
           min="0"

@@ -490,7 +490,7 @@ export default function GeneratePage() {
                       key={character.id}
                       className="rounded-full border border-[#d5a36b]/38 bg-[#3a2d32]/80 px-3 py-1 text-xs text-[#ffe3bd]"
                     >
-                      {label.name} · {label.focus}
+                      {label.name}
                     </span>
                   );
                 })}
