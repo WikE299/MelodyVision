@@ -121,6 +121,9 @@ test("speaker eligibility favors musicians with fewer turns and avoids immediate
   state = recordUserMessage(state, "我的画面更贴近地面。", runtime);
 
   assert.deepEqual(getEligibleSpeakerIds(state).slice(0, 2), ["abing", "armstrong"]);
+  const nextPlan = createDeterministicFacilitatorPlan({ state, musicianNames });
+  assert.equal(nextPlan.currentGoal, "motion-composition");
+  assert.match(nextPlan.userInvitation, /动起来|靠近|散开|上升/);
 });
 
 test("the third completed user round converges and the final response becomes ready to generate", () => {
@@ -171,14 +174,18 @@ test("facilitator model plans are constrained to eligible speakers", async () =>
     async () => ({
       content: JSON.stringify({
         speakerIds: ["beethoven", "abing"],
+        transition: "刚才的画面还很开阔，接下来听听它如何开始移动。",
         userInvitation: "你更靠近哪一种，又看见了什么？",
+        sentenceStarters: ["我最先看见……", "它像是在……"],
       }),
       model: "test-model",
     })
   );
   assert.equal(valid.source, "model");
   assert.equal(valid.model, "test-model");
-  assert.equal(valid.stageSubtitle, "先听听贝多芬和阿炳看到的不同方向。");
+  assert.equal(valid.stageSubtitle, "刚才的画面还很开阔，接下来听听它如何开始移动。");
+  assert.equal(valid.currentGoal, "subject-space");
+  assert.deepEqual(valid.sentenceStarters, ["我最先看见……", "它像是在……"]);
 
   const invalid = await runFacilitatorAgent(
     { state, musicianNames },

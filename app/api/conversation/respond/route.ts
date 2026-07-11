@@ -7,6 +7,7 @@ import {
   scheduleMusicianTurn,
 } from "@/lib/conversation";
 import { insertConversationSnapshot } from "@/lib/db/research-data";
+import { parseVisualBrief } from "@/lib/visual-brief";
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
       state: afterUser,
       musicianNames,
       preparedSummaries,
+      visualBrief: parseVisualBrief(body.visualBrief),
     });
     const nextState = scheduleMusicianTurn(afterUser, plan);
     await insertConversationSnapshot(nextState, "user-message-scheduled").catch((error) => {

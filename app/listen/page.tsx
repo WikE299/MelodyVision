@@ -9,12 +9,14 @@ import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n
 import { getExperimentSessionId } from "@/lib/experiment-session";
 import { recordExperimentEvent } from "@/lib/experiment-events";
 import type {
+  ConversationMessage,
   ConversationState,
   MusicProfile,
   SourceReference,
   VisualBrief,
   VisualBriefFieldStatus,
 } from "@/lib/contracts";
+import type { FacilitatorPlan, FacilitatorGoal } from "@/lib/agents/facilitator";
 import { readConversationStream } from "@/lib/conversation";
 
 const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
@@ -38,6 +40,7 @@ const COPY = {
     failed: "（评论生成失败，请重试）",
     play: "播放音乐",
     pause: "暂停音乐",
+    playbackUnavailable: "音频暂时无法播放，请返回首页重新选择音乐",
     progress: "播放进度",
     collapseProgress: "收起播放进度",
     expandProgress: "展开播放进度",
@@ -51,6 +54,18 @@ const COPY = {
     resonate: "更接近我的听感",
     resonated: "已作为重点听法",
     guideTip: "点击音乐家听点评，点亮共鸣或补充自己的听感。",
+    roomTitle: "共同画面",
+    roomSubtitle: "和音乐家一起，把听见的音乐慢慢聊成一幅画",
+    facilitator: "共创引导",
+    waitingTurn: "先听完这一轮，马上轮到你",
+    starterLabel: "可以从这里开始",
+    generateHint: "至少说出一处你看见的画面，才会真正成为共同创作",
+    goalLabels: {
+      "subject-space": "看见什么",
+      "motion-composition": "如何运动",
+      "light-color-material": "光色触感",
+      "meaning-constraints": "留下什么",
+    },
     visualForming: "画面正在成形",
     visualReady: "画面线索已聚拢",
     visualLabels: {
@@ -73,6 +88,7 @@ const COPY = {
     failed: "(Failed to generate this comment. Please try again.)",
     play: "Play music",
     pause: "Pause music",
+    playbackUnavailable: "Audio is unavailable. Return home and choose the music again.",
     progress: "Playback progress",
     collapseProgress: "Hide playback progress",
     expandProgress: "Show playback progress",
@@ -86,6 +102,18 @@ const COPY = {
     resonate: "Closer to my listening",
     resonated: "Marked as key lens",
     guideTip: "Tap a musician to hear their take, mark resonance, or add your own note.",
+    roomTitle: "Shared Image",
+    roomSubtitle: "Talk with the musicians and gradually shape the image you hear",
+    facilitator: "Co-creation guide",
+    waitingTurn: "Listen to this round. Your turn is next.",
+    starterLabel: "You could begin here",
+    generateHint: "Add at least one image of your own so this becomes a true co-creation.",
+    goalLabels: {
+      "subject-space": "What appears",
+      "motion-composition": "How it moves",
+      "light-color-material": "Light and texture",
+      "meaning-constraints": "What remains",
+    },
     visualForming: "The image is taking shape",
     visualReady: "Visual cues have converged",
     visualLabels: {
@@ -114,6 +142,7 @@ function getInitialListenState() {
       conversationState: null as ConversationState | null,
       visualBrief: null as VisualBrief | null,
       resonantCharacterIds: [] as string[],
+      facilitatorPlan: null as FacilitatorPlan | null,
     };
   }
 
@@ -123,6 +152,7 @@ function getInitialListenState() {
   let conversationState: ConversationState | null = null;
   let visualBrief: VisualBrief | null = null;
   let resonantCharacterIds: string[] = [];
+  let facilitatorPlan: FacilitatorPlan | null = null;
   try {
     conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
   } catch {
@@ -138,6 +168,11 @@ function getInitialListenState() {
   } catch {
     resonantCharacterIds = [];
   }
+  try {
+    facilitatorPlan = JSON.parse(sessionStorage.getItem("facilitatorPlan") || "null") as FacilitatorPlan | null;
+  } catch {
+    facilitatorPlan = null;
+  }
   if (conversationState) {
     for (const message of conversationState.messages) {
       if (message.role === "musician") comments[message.speakerId] = message.content;
@@ -151,6 +186,7 @@ function getInitialListenState() {
     conversationState,
     visualBrief,
     resonantCharacterIds,
+    facilitatorPlan,
   };
 }
 
@@ -278,12 +314,8 @@ function GuideFigure({
   commented,
   loading,
   streaming,
-  comment,
-  resonant,
   stageOffset,
   onClick,
-  onClose,
-  onToggleResonance,
   language,
 }: {
   character: Character;
@@ -291,15 +323,10 @@ function GuideFigure({
   commented: boolean;
   loading: boolean;
   streaming: boolean;
-  comment: string;
-  resonant: boolean;
   stageOffset: string;
   onClick: () => void;
-  onClose: () => void;
-  onToggleResonance: () => void;
   language: Language;
 }) {
-  const copy = COPY[language];
   const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
     name: character.name,
     focus: character.focusDescription,
@@ -307,75 +334,10 @@ function GuideFigure({
 
   return (
     <div
-      onClick={onClick}
-      className={`group absolute flex w-[clamp(178px,14vw,230px)] flex-col items-center pt-[clamp(104px,12vh,132px)] text-center transition duration-500 ${
-        loading || commented ? "z-[70]" : "z-40"
-      } ${loading ? "cursor-wait" : "cursor-pointer"} ${stageOffset}`}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onClick();
-        }
-      }}
+      className={`pointer-events-none group absolute z-40 flex w-[clamp(148px,12vw,192px)] flex-col items-center text-center transition duration-500 ${stageOffset}`}
     >
-      {(loading || commented) && (
-        <div className="absolute left-1/2 top-[-6px] z-50 w-[clamp(248px,18vw,330px)] -translate-x-1/2 rounded-[18px] border border-[#f5c184]/80 bg-[#ffe0bd]/96 px-4 py-3 text-left text-[#322534] shadow-[0_18px_42px_rgba(0,0,0,0.3)]">
-          <div className="flex items-center gap-2 pr-16">
-            <p className="text-sm font-semibold">{label.name}</p>
-          </div>
-          {commented && !loading && (
-            <>
-              <div className="group/resonance absolute right-10 top-2.5">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onToggleResonance();
-                  }}
-                  className={`flex h-6 w-6 items-center justify-center rounded-full border transition ${
-                    resonant
-                      ? "border-[#8b5e2f]/62 bg-[#5b3e31] text-[#ffe6c3] shadow-[0_0_18px_rgba(91,62,49,0.38),0_0_24px_rgba(255,208,131,0.22)]"
-                      : "border-[#d59a5f]/45 bg-[#fff0d7]/70 text-[#8a6042] shadow-[0_0_14px_rgba(255,208,131,0.22)] hover:border-[#a97745]/70 hover:bg-white hover:text-[#5b3e31]"
-                  }`}
-                  aria-label={resonant ? copy.resonated : copy.resonate}
-                  aria-pressed={resonant}
-                >
-                  <svg className="h-3.5 w-3.5" fill={resonant ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3.5l1.9 5.2 5.2 1.9-5.2 1.9-1.9 5.2-1.9-5.2-5.2-1.9 5.2-1.9L12 3.5z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M18.5 3.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" />
-                  </svg>
-                </button>
-                <span className="pointer-events-none absolute right-1/2 top-[-34px] z-20 translate-x-1/2 whitespace-nowrap rounded-full border border-[#8b5e2f]/22 bg-[#2f2430]/94 px-3 py-1 text-[11px] font-semibold text-[#ffe6c3] opacity-0 shadow-[0_12px_28px_rgba(0,0,0,0.22)] transition duration-150 group-hover/resonance:opacity-100">
-                  {resonant ? copy.resonated : copy.resonate}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onClose();
-                }}
-                className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-[#9a7458]/35 bg-[#fff0d7]/70 text-[#5b3e31] transition hover:border-[#7d573f]/60 hover:bg-white"
-                aria-label={copy.closeComment}
-                title={copy.closeComment}
-              >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 6l12 12M18 6 6 18" />
-                </svg>
-              </button>
-            </>
-          )}
-          <p className="mt-2 max-h-[9.6em] overflow-y-auto pr-1 text-sm font-medium leading-relaxed">
-            {loading ? copy.listening : comment}
-            {streaming && <span className="ml-0.5 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-full bg-[#5b3e31]/70" />}
-          </p>
-          <div className="absolute -bottom-3 left-1/2 h-6 w-6 -translate-x-1/2 rotate-45 border-b border-r border-[#f5c184]/70 bg-[#ffe0bd]" />
-        </div>
-      )}
-      {!loading && !commented && (
-        <div className="absolute left-1/2 top-[40px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/92 px-3.5 py-2 opacity-95 shadow-[0_0_24px_rgba(255,208,131,0.42),0_12px_30px_rgba(0,0,0,0.26)] backdrop-blur transition duration-300 group-hover:-translate-y-1 group-hover:border-[#fff0c8] group-hover:bg-[#fff1d5] group-hover:shadow-[0_0_34px_rgba(255,218,145,0.62),0_14px_34px_rgba(0,0,0,0.28)]">
+      {(loading || streaming) && (
+        <div className="absolute left-1/2 top-[-24px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/92 px-3.5 py-2 shadow-[0_0_28px_rgba(255,208,131,0.48)]">
           {[0, 1, 2].map((dot) => (
             <span
               key={dot}
@@ -383,7 +345,6 @@ function GuideFigure({
               style={{ animationDelay: `${dot * 140}ms`, animationDuration: "900ms" }}
             />
           ))}
-          <span className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-b border-r border-[#ffd083]/70 bg-[#ffe0bd]" />
         </div>
       )}
       <div
@@ -394,21 +355,25 @@ function GuideFigure({
         }`}
       />
       <div className="absolute bottom-[62px] h-[20px] w-[clamp(118px,9vw,168px)] rounded-[50%] bg-[#ffd083]/16 blur-md transition group-hover:bg-[#ffd083]/24" />
-      <div
-        className={`relative z-10 mb-1 flex h-[clamp(200px,24vh,280px)] items-end justify-center transition duration-300 ${
+      <button
+        type="button"
+        onClick={onClick}
+        className={`pointer-events-auto relative z-10 mb-1 flex h-[clamp(186px,22vh,254px)] items-end justify-center outline-none transition duration-300 ${
           active ? "scale-[1.06] drop-shadow-[0_0_24px_rgba(255,218,145,0.74)]" : "drop-shadow-[0_24px_24px_rgba(0,0,0,0.46)] group-hover:scale-[1.025]"
         }`}
+        aria-label={label.name}
       >
         <Image
           src={`/characters/stage/${character.id}.png`}
           alt={label.name}
           width={512}
           height={512}
-          className={`h-auto max-h-[clamp(210px,25vh,292px)] object-contain ${FIGURE_STYLE[character.id] || "w-[clamp(174px,11.6vw,224px)]"}`}
+          priority
+          className={`h-auto max-h-[clamp(194px,23vh,266px)] object-contain ${FIGURE_STYLE[character.id] || "w-[clamp(164px,11vw,214px)]"}`}
         />
-      </div>
+      </button>
       <div
-        className={`relative z-20 flex items-center gap-2 rounded-full border px-4 py-2 text-[#ffe8c9] backdrop-blur transition duration-300 ${
+        className={`pointer-events-none relative z-20 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[#ffe8c9] backdrop-blur transition duration-300 ${
           active
             ? "border-[#ffc976]/80 bg-[#654531]/72 shadow-[0_0_24px_rgba(255,191,94,0.24)]"
             : "border-[#a47b5a]/38 bg-[#2f2832]/58"
@@ -416,6 +381,76 @@ function GuideFigure({
       >
         <span className={`h-2.5 w-2.5 rounded-full ${loading || active ? "bg-[#ffbd62]" : commented ? "bg-[#8dd28b]" : "bg-[#9b908d]"}`} />
         <p className="text-sm font-semibold">{label.name}</p>
+      </div>
+    </div>
+  );
+}
+
+function ConversationEntry({
+  role,
+  speakerId,
+  content,
+  streaming,
+  selectedChars,
+  resonant,
+  onToggleResonance,
+  language,
+}: {
+  role: ConversationMessage["role"];
+  speakerId: string;
+  content: string;
+  streaming?: boolean;
+  selectedChars: Character[];
+  resonant?: boolean;
+  onToggleResonance?: () => void;
+  language: Language;
+}) {
+  const copy = COPY[language];
+  if (role === "facilitator") {
+    return (
+      <div className="my-3 flex items-start gap-2 text-[#e4c49d]">
+        <span className="mt-2 h-px flex-1 bg-[#9e7657]/35" />
+        <p className="max-w-[82%] text-center text-xs leading-relaxed">
+          <span className="mr-1 font-semibold text-[#ffd18a]">{copy.facilitator}</span>
+          {content}
+        </p>
+        <span className="mt-2 h-px flex-1 bg-[#9e7657]/35" />
+      </div>
+    );
+  }
+
+  const character = selectedChars.find((item) => item.id === speakerId);
+  const label = character
+    ? characterUi[language][character.id as keyof typeof characterUi.zh]?.name || character.name
+    : language === "zh" ? "我" : "Me";
+  const isUser = role === "user";
+  return (
+    <div className={`mb-3 flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+      {!isUser && character && (
+        <div className="flex h-9 w-9 shrink-0 items-end justify-center overflow-hidden rounded-full border border-[#bd8b5d]/44 bg-[#332a35]">
+          <Image src={`/characters/stage/${character.id}.png`} alt="" width={72} height={72} className="h-12 w-12 object-contain object-bottom" />
+        </div>
+      )}
+      <div className={`relative max-w-[82%] rounded-[14px] px-3.5 py-2.5 text-sm leading-relaxed ${
+        isUser
+          ? "rounded-br-[4px] bg-[#6a4937]/88 text-[#fff0d6]"
+          : "rounded-bl-[4px] border border-[#956e52]/34 bg-[#302936]/88 text-[#ead4bc]"
+      }`}>
+        <p className={`mb-1 text-[11px] font-semibold ${isUser ? "text-[#ffd89d]" : "text-[#dcae78]"}`}>{label}</p>
+        <p>{content}{streaming && <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-[#ffd18a]" />}</p>
+        {!isUser && !streaming && onToggleResonance && (
+          <button
+            type="button"
+            onClick={onToggleResonance}
+            className={`group absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border transition ${
+              resonant ? "border-[#ffd18a]/70 bg-[#6a4937] text-[#ffe7bd]" : "border-[#9b765b]/40 bg-[#241f2a] text-[#bc9877] hover:text-[#ffe0aa]"
+            }`}
+            aria-label={resonant ? copy.resonated : copy.resonate}
+            title={resonant ? copy.resonated : copy.resonate}
+          >
+            <span className="text-xs">✦</span>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -430,6 +465,7 @@ export default function ListenPage() {
   const [selectedChars] = useState<Character[]>(initialState.selectedChars);
   const [conversationState, setConversationState] = useState<ConversationState | null>(initialState.conversationState);
   const [visualBrief, setVisualBrief] = useState<VisualBrief | null>(initialState.visualBrief);
+  const [facilitatorPlan, setFacilitatorPlan] = useState<FacilitatorPlan | null>(initialState.facilitatorPlan);
   const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
   const [visibleComments, setVisibleComments] = useState<Record<string, string>>(initialState.comments);
   const [revealed, setRevealed] = useState<Set<string>>(new Set(Object.keys(initialState.comments)));
@@ -441,7 +477,6 @@ export default function ListenPage() {
   );
   const [activeCharacterId, setActiveCharacterId] = useState<string>(selectedChars[0]?.id || "");
   const [userNote, setUserNote] = useState("");
-  const [showUserInput, setShowUserInput] = useState(false);
   const [submittingUserNote, setSubmittingUserNote] = useState(false);
   const [briefCheckNonce, setBriefCheckNonce] = useState(0);
   const [showPlayerControls, setShowPlayerControls] = useState(false);
@@ -451,8 +486,10 @@ export default function ListenPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [audioError, setAudioError] = useState(initialState.audioSrc ? "" : copy.playbackUnavailable);
   const [audioSrc] = useState(initialState.audioSrc);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const turnInFlightRef = useRef(false);
   const turnAbortRef = useRef<AbortController | null>(null);
   const streamGenerationRef = useRef(0);
@@ -469,26 +506,10 @@ export default function ListenPage() {
   }, [conversationState, router, selectedChars.length]);
 
   useEffect(() => {
-    if (!audioSrc) return;
-
-    const audio = new Audio(audioSrc);
-    audio.loop = true;
-    const handleEnded = () => setIsPlaying(false);
-    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const handleLoadedMetadata = () => setDuration(audio.duration || 0);
-    audio.addEventListener("ended", handleEnded);
-    audio.addEventListener("timeupdate", handleTimeUpdate);
-    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
-    audioRef.current = audio;
-
-    return () => {
-      audio.pause();
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeEventListener("timeupdate", handleTimeUpdate);
-      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      audioRef.current = null;
-    };
-  }, [audioSrc]);
+    const container = chatScrollRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [conversationState?.messages.length, streaming, visibleComments]);
 
   useEffect(() => () => {
     streamGenerationRef.current += 1;
@@ -511,13 +532,23 @@ export default function ListenPage() {
   }, [generating]);
 
   const togglePlay = async () => {
-    if (!audioRef.current) return;
+    if (!audioRef.current) {
+      setAudioError(copy.playbackUnavailable);
+      return;
+    }
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      await audioRef.current.play();
-      setIsPlaying(true);
+      try {
+        await audioRef.current.play();
+        setAudioError("");
+        setIsPlaying(true);
+      } catch (error) {
+        console.warn("Listening-room audio playback failed:", error);
+        setAudioError(copy.playbackUnavailable);
+        setIsPlaying(false);
+      }
     }
   };
 
@@ -703,23 +734,7 @@ export default function ListenPage() {
       void runScheduledTurn(conversationState);
       return;
     }
-    if (!allComments[charId] && !streaming.has(charId)) return;
-    setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] || prev[charId] || "" }));
-    setRevealed((prev) => {
-      const next = new Set(prev);
-      if (next.has(charId)) next.delete(charId);
-      else next.add(charId);
-      return next;
-    });
-  };
-
-  const handleCloseBubble = (charId: string) => {
-    setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] || prev[charId] || "" }));
-    setRevealed((prev) => {
-      const next = new Set(prev);
-      next.delete(charId);
-      return next;
-    });
+    if (allComments[charId]) setRevealed((prev) => new Set(prev).add(charId));
   };
 
   const cancelActiveTurn = useCallback(() => {
@@ -759,7 +774,7 @@ export default function ListenPage() {
       const response = await fetch("/api/conversation/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationState, content }),
+        body: JSON.stringify({ conversationState, content, visualBrief }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Conversation response failed");
@@ -769,10 +784,10 @@ export default function ListenPage() {
         characterCount: content.length,
       });
       if (data.facilitatorPlan) {
+        setFacilitatorPlan(data.facilitatorPlan as FacilitatorPlan);
         sessionStorage.setItem("facilitatorPlan", JSON.stringify(data.facilitatorPlan));
       }
       setUserNote("");
-      setShowUserInput(false);
       setFailedSpeakerId("");
     } catch (error) {
       console.error(error);
@@ -951,27 +966,30 @@ export default function ListenPage() {
   };
 
   const stageSlotsByCount: Record<number, string[]> = {
-    1: ["left-[24%] bottom-[54px] -translate-x-1/2 translate-y-14"],
+    1: ["left-[22%] bottom-[58px] -translate-x-1/2"],
     2: [
-      "left-[27%] bottom-[74px] -translate-x-1/2 translate-y-7",
-      "right-[27%] bottom-[74px] translate-x-1/2 translate-y-7",
+      "left-[20%] bottom-[58px] -translate-x-1/2",
+      "right-[20%] bottom-[58px] translate-x-1/2",
     ],
     3: [
-      "left-[17%] bottom-[48px] -translate-x-1/2 translate-y-16",
-      "left-[29%] bottom-[173px] -translate-x-1/2",
-      "right-[17%] bottom-[48px] translate-x-1/2 translate-y-16",
+      "left-[11%] bottom-[28px] -translate-x-1/2",
+      "left-[29%] bottom-[170px] -translate-x-1/2",
+      "right-[11%] bottom-[28px] translate-x-1/2",
     ],
     4: [
-      "left-[17%] bottom-[48px] -translate-x-1/2 translate-y-16",
-      "left-[29%] bottom-[177px] -translate-x-1/2",
-      "right-[29%] bottom-[177px] translate-x-1/2",
-      "right-[17%] bottom-[48px] translate-x-1/2 translate-y-16",
+      "left-[11%] bottom-[22px] -translate-x-1/2",
+      "left-[31%] bottom-[176px] -translate-x-1/2",
+      "right-[31%] bottom-[176px] translate-x-1/2",
+      "right-[11%] bottom-[22px] translate-x-1/2",
     ],
   };
   const stageSlots = stageSlotsByCount[Math.min(selectedChars.length, 4)] || stageSlotsByCount[4];
-  const facilitatorSubtitle = [...(conversationState?.messages || [])]
-    .reverse()
-    .find((message) => message.role === "facilitator")?.content;
+  const conversationMessages = conversationState?.messages || [];
+  const latestMessage = conversationMessages.at(-1);
+  const timelineMessages = latestMessage?.role === "facilitator" &&
+    latestMessage.content === facilitatorPlan?.userInvitation
+    ? conversationMessages.slice(0, -1)
+    : conversationMessages;
   const generationStageIndex = Math.min(
     copy.generationStages.length - 1,
     Math.floor((Math.max(generationProgress, 1) / 100) * copy.generationStages.length)
@@ -987,97 +1005,90 @@ export default function ListenPage() {
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={3} />
 
-        <section className="relative mt-3 flex min-h-0 flex-1 overflow-clip rounded-[26px] border border-[#9f6f45]/55 bg-[#251f2b]/38 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
-          <div className="absolute inset-0">
-            <div className="absolute left-[-6%] right-[-6%] top-[26%] flex h-32 items-end justify-center gap-1 opacity-70">
-              {Array.from({ length: 170 }).map((_, index) => (
+        <section className="relative mt-3 grid min-h-0 flex-1 overflow-hidden rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] lg:grid-cols-[minmax(0,1fr)_minmax(360px,32vw)] 2xl:mt-5 2xl:grid-cols-[minmax(0,1fr)_430px]">
+          <div className="relative min-h-0 overflow-hidden">
+            {audioSrc && (
+              <audio
+                ref={audioRef}
+                src={audioSrc}
+                preload="auto"
+                loop
+                onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+                onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
+                onPlay={() => {
+                  setAudioError("");
+                  setIsPlaying(true);
+                }}
+                onPause={() => setIsPlaying(false)}
+                onError={() => setAudioError(copy.playbackUnavailable)}
+              />
+            )}
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_56%,rgba(255,178,91,0.17),transparent_30%),linear-gradient(145deg,rgba(17,20,32,0.34),rgba(43,37,51,0.5))]" />
+            <div className="pointer-events-none absolute left-[-8%] right-[-8%] top-[22%] flex h-28 items-end justify-center gap-1 opacity-52">
+              {Array.from({ length: 120 }).map((_, index) => (
                 <span
                   key={index}
-                  className="w-1 rounded-full bg-[#d99b4d] shadow-[0_0_10px_rgba(238,169,87,0.18)]"
+                  className="w-1 rounded-full bg-[#d99b4d]"
                   style={{
-                    height: `${(8 + Math.abs(Math.sin(index * 0.14)) * 82 + Math.abs(Math.cos(index * 0.045)) * 18).toFixed(2)}px`,
-                    opacity: (0.2 + Math.abs(Math.sin(index * 0.21)) * 0.54).toFixed(3),
+                    height: `${(6 + Math.abs(Math.sin(index * 0.17)) * 68).toFixed(2)}px`,
+                    opacity: (0.18 + Math.abs(Math.sin(index * 0.23)) * 0.42).toFixed(3),
                   }}
                 />
               ))}
             </div>
-            {["♪", "♫", "♩", "♬", "♪", "♫"].map((note, index) => (
-              <span
-                key={`${note}-${index}`}
-                className="absolute text-4xl text-[#eaa957]/54"
-                style={{
-                  left: `${7 + index * 17}%`,
-                  top: `${17 + (index % 3) * 12}%`,
-                }}
-              >
-                {note}
-              </span>
-            ))}
-            <div className="absolute bottom-[-148px] left-1/2 h-[520px] w-[1480px] -translate-x-1/2 rounded-[50%] border border-[#d09a62]/34 bg-[#6f5949]/24 shadow-[0_30px_120px_rgba(0,0,0,0.52),inset_0_18px_52px_rgba(255,186,98,0.08)]" />
-            <div className="absolute bottom-[-106px] left-1/2 h-[410px] w-[1240px] -translate-x-1/2 rounded-[50%] border border-[#bd8756]/28" />
-            <div className="absolute bottom-[-64px] left-1/2 h-[300px] w-[940px] -translate-x-1/2 rounded-[50%] border border-[#d8a464]/22" />
-            <div className="absolute bottom-[58px] left-1/2 h-[120px] w-[520px] -translate-x-1/2 rounded-[50%] border border-[#f5c072]/24 bg-[#ffc267]/8 blur-[1px]" />
-            <div className="absolute bottom-[8px] left-1/2 h-[420px] w-[2px] -translate-x-1/2 bg-gradient-to-t from-[#e2a665]/28 to-transparent" />
-            <div className="absolute bottom-[18px] left-[28%] h-[360px] w-[1px] -rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
-            <div className="absolute bottom-[18px] right-[28%] h-[360px] w-[1px] rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
-          </div>
-          <p className="pointer-events-none absolute left-1/2 top-4 z-20 max-w-[min(880px,82vw)] -translate-x-1/2 translate-y-0 text-center font-serif text-[clamp(18px,1.55vw,28px)] font-semibold text-[#ffe4ba]/90 drop-shadow-[0_0_16px_rgba(255,194,103,0.28)] 2xl:top-5">
-            {facilitatorSubtitle || copy.guideTip}
-          </p>
-          {!showPlayerControls && (
-            <VisualBriefTrace
-              brief={visualBrief}
-              state={conversationState}
-              selectedChars={selectedChars}
-              language={language}
-            />
-          )}
+            <div className="pointer-events-none absolute bottom-[-126px] left-1/2 h-[430px] w-[1120px] -translate-x-1/2 rounded-[50%] border border-[#d09a62]/30 bg-[#6f5949]/18 shadow-[0_30px_120px_rgba(0,0,0,0.52),inset_0_18px_52px_rgba(255,186,98,0.07)]" />
+            <div className="pointer-events-none absolute bottom-[-68px] left-1/2 h-[310px] w-[850px] -translate-x-1/2 rounded-[50%] border border-[#bd8756]/24" />
 
-          <div className="relative z-10 flex h-full min-h-0 min-w-0 flex-1 self-stretch flex-col px-6 pb-5 pt-4 2xl:px-9 2xl:pb-7">
-            <div className="relative flex min-h-0 flex-1 items-end justify-center pb-[clamp(92px,11vh,124px)]">
-              <div className="pointer-events-none absolute bottom-[38px] left-1/2 z-0 h-[390px] w-[min(1180px,92vw)] -translate-x-1/2 rounded-[50%] border border-[#dba66a]/18 bg-[radial-gradient(ellipse_at_center,rgba(255,194,103,0.12)_0%,rgba(255,194,103,0.06)_32%,rgba(18,16,24,0)_70%)]" />
-              <div className="pointer-events-none absolute bottom-[90px] left-1/2 z-0 h-[210px] w-[min(760px,62vw)] -translate-x-1/2 rounded-[50%] border border-[#ffcf7d]/20" />
+            {!showPlayerControls && (
+              <VisualBriefTrace
+                brief={visualBrief}
+                state={conversationState}
+                selectedChars={selectedChars}
+                language={language}
+              />
+            )}
 
-              {showPlayerControls && (
-                <div className="absolute left-1/2 top-[100px] z-30 flex h-[50px] w-[min(240px,19vw)] -translate-x-1/2 items-center gap-2 rounded-full border border-[#ca8f53]/62 bg-[#1e1923]/90 px-2.5 shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_24px_rgba(255,194,103,0.1)] backdrop-blur 2xl:top-[114px]">
-                  <button
-                    type="button"
-                    onClick={togglePlay}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ffe2bd] text-sm font-semibold text-[#382832] shadow-[0_0_24px_rgba(255,203,131,0.38)]"
-                    aria-label={isPlaying ? copy.pause : copy.play}
-                  >
-                    {isPlaying ? "Ⅱ" : "▶"}
-                  </button>
-                  <div className="relative flex min-w-0 flex-1 items-center">
-                    <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
-                      {Array.from({ length: 26 }).map((_, index) => (
-                        <span
-                          key={index}
-                          className="w-[3px] rounded-full bg-[#e5a45b]"
-                          style={{
-                            height: `${(6 + Math.abs(Math.sin(index * 0.58)) * 22).toFixed(1)}px`,
-                            opacity: index / 26 <= (duration ? currentTime / duration : 0) ? 0.96 : 0.24,
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={duration || currentTime || 1}
-                      step={0.1}
-                      value={Math.min(currentTime, duration || currentTime)}
-                      onChange={(event) => handleSeek(event.target.value)}
-                      className="relative z-10 h-9 w-full cursor-pointer appearance-none bg-transparent accent-[#ffc267] opacity-0"
-                      aria-label={copy.progress}
-                    />
+            {showPlayerControls && (
+              <div className="absolute left-1/2 top-5 z-[70] flex h-[52px] w-[min(410px,58%)] -translate-x-1/2 items-center gap-3 rounded-full border border-[#ca8f53]/62 bg-[#1e1923]/92 px-3 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur">
+                <button
+                  type="button"
+                  onClick={togglePlay}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ffe2bd] text-sm font-semibold text-[#382832]"
+                  aria-label={isPlaying ? copy.pause : copy.play}
+                >
+                  {isPlaying ? "Ⅱ" : "▶"}
+                </button>
+                <div className="relative flex min-w-0 flex-1 items-center">
+                  <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
+                    {Array.from({ length: 34 }).map((_, index) => (
+                      <span
+                        key={index}
+                        className="w-[3px] rounded-full bg-[#e5a45b]"
+                        style={{
+                          height: `${(6 + Math.abs(Math.sin(index * 0.58)) * 22).toFixed(1)}px`,
+                          opacity: index / 34 <= (duration ? currentTime / duration : 0) ? 0.96 : 0.24,
+                        }}
+                      />
+                    ))}
                   </div>
-                  <span className="shrink-0 text-[10px] font-medium text-[#ffe0bd]">
-                    {formatTime(currentTime)} / {formatTime(duration)}
-                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || currentTime || 1}
+                    step={0.1}
+                    value={Math.min(currentTime, duration || currentTime)}
+                    onChange={(event) => handleSeek(event.target.value)}
+                    className="relative z-10 h-9 w-full cursor-pointer appearance-none bg-transparent opacity-0"
+                    aria-label={copy.progress}
+                  />
                 </div>
-              )}
+                <span className="shrink-0 text-[10px] font-medium text-[#ffe0bd]">
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </span>
+              </div>
+            )}
 
+            <div className="absolute inset-x-0 bottom-0 top-[74px]">
               {selectedChars.map((character, index) => (
                 <GuideFigure
                   key={character.id}
@@ -1086,156 +1097,181 @@ export default function ListenPage() {
                   commented={revealed.has(character.id)}
                   loading={loading.has(character.id)}
                   streaming={streaming.has(character.id)}
-                  comment={visibleComments[character.id] || ""}
-                  resonant={resonantComments.has(character.id)}
                   stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
                   onClick={() => handleReveal(character.id)}
-                  onClose={() => handleCloseBubble(character.id)}
-                  onToggleResonance={() => toggleResonance(character.id)}
                   language={language}
                 />
               ))}
 
-              <div className="absolute bottom-[98px] left-1/2 z-20 h-[clamp(250px,21vw,326px)] w-[min(560px,44vw)] -translate-x-1/2">
+              <div className="absolute bottom-[78px] left-1/2 z-30 h-[clamp(238px,19vw,300px)] w-[clamp(238px,19vw,300px)] -translate-x-1/2">
                 <button
                   type="button"
                   onClick={togglePlay}
-                  className="group/crystal absolute left-1/2 top-0 flex h-[clamp(226px,19vw,296px)] w-[clamp(226px,19vw,296px)] -translate-x-1/2 cursor-pointer items-center justify-center rounded-full outline-none"
+                  className="group/crystal absolute inset-0 flex cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#ffd083]"
                   aria-label={isPlaying ? copy.pause : copy.play}
                 >
-                  <div
-                    className={`absolute inset-3 rounded-full bg-[#ffc267]/18 blur-2xl transition duration-500 ${
-                      isPlaying ? "scale-125 opacity-100" : "scale-95 opacity-42 group-hover/crystal:scale-110 group-hover/crystal:opacity-80"
-                    }`}
-                  />
-                  <div
-                    className={`absolute inset-0 rounded-full border border-[#ffd98b]/32 transition duration-500 ${
-                      isPlaying ? "scale-110 opacity-80 shadow-[0_0_54px_rgba(255,196,99,0.48)]" : "scale-95 opacity-35 group-hover/crystal:scale-105 group-hover/crystal:opacity-65"
-                    }`}
-                  />
-                  <div
-                    className={`absolute inset-7 rounded-full border border-[#f7b968]/36 transition duration-500 ${
-                      isPlaying ? "animate-pulse bg-[#f8b65e]/12" : "bg-[#72533f]/16 group-hover/crystal:bg-[#f8b65e]/10"
-                    }`}
-                  />
+                  <div className={`absolute inset-3 rounded-full bg-[#ffc267]/18 blur-2xl transition duration-500 ${isPlaying ? "scale-125 opacity-100" : "scale-95 opacity-45 group-hover/crystal:scale-110 group-hover/crystal:opacity-85"}`} />
+                  <div className={`absolute inset-0 rounded-full border border-[#ffd98b]/32 transition duration-500 ${isPlaying ? "scale-110 opacity-80 shadow-[0_0_54px_rgba(255,196,99,0.48)]" : "scale-95 opacity-35 group-hover/crystal:scale-105 group-hover/crystal:opacity-70"}`} />
                   {CRYSTAL_RING_BARS.map((height, index) => (
                     <span
                       key={index}
-                      className="absolute left-1/2 top-1/2 w-1 origin-bottom rounded-full bg-[#ffc267]"
+                      className="pointer-events-none absolute left-1/2 top-1/2 w-1 origin-bottom rounded-full bg-[#ffc267]"
                       style={{
                         height: `${isPlaying ? height : height * 0.42}px`,
                         opacity: isPlaying ? 0.34 + Math.abs(Math.sin(index * 0.71)) * 0.48 : 0.13,
-                        transform: `translate(-50%, -50%) rotate(${index * 10}deg) translateY(-${isPlaying ? 128 : 106}px)`,
+                        transform: `translate(-50%, -50%) rotate(${index * 10}deg) translateY(-${isPlaying ? 122 : 100}px)`,
                         transition: "height 360ms ease, opacity 360ms ease, transform 360ms ease",
                       }}
                     />
                   ))}
-                  <div className="absolute bottom-[15%] h-[82px] w-[224px] rounded-[50%] border border-[#f3bb75]/42 bg-[#72533f]/42 shadow-[0_18px_66px_rgba(0,0,0,0.46),0_0_34px_rgba(255,195,97,0.16)]" />
+                  <div className="pointer-events-none absolute bottom-[15%] h-[72px] w-[200px] rounded-[50%] border border-[#f3bb75]/42 bg-[#72533f]/42 shadow-[0_18px_66px_rgba(0,0,0,0.46),0_0_34px_rgba(255,195,97,0.16)]" />
                   <Image
                     src="/stage-gem-transparent.webp"
                     alt=""
                     width={1254}
                     height={1254}
+                    priority
                     unoptimized
-                    className={`relative z-10 h-auto w-[clamp(178px,14vw,236px)] opacity-95 transition duration-500 ${
-                      isPlaying
-                        ? "scale-[1.05] brightness-110 drop-shadow-[0_0_42px_rgba(255,205,116,0.62)]"
-                        : "drop-shadow-[0_0_24px_rgba(255,195,97,0.34)] group-hover/crystal:scale-[1.03] group-hover/crystal:brightness-110 group-hover/crystal:drop-shadow-[0_0_48px_rgba(255,208,126,0.58)]"
-                    }`}
+                    className={`pointer-events-none relative z-10 h-auto w-[clamp(168px,13vw,220px)] opacity-95 transition duration-500 ${isPlaying ? "scale-[1.05] brightness-110 drop-shadow-[0_0_42px_rgba(255,205,116,0.62)]" : "drop-shadow-[0_0_24px_rgba(255,195,97,0.34)] group-hover/crystal:scale-[1.03] group-hover/crystal:brightness-110"}`}
                   />
                 </button>
-
                 <button
                   type="button"
                   onClick={() => setShowPlayerControls((prev) => !prev)}
-                  className="absolute bottom-[44px] left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-[#c9965d]/46 bg-[#1f1a24]/82 text-[#ffe3bd] shadow-[0_12px_30px_rgba(0,0,0,0.28)]"
+                  className="absolute bottom-[-14px] left-1/2 z-40 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-[#c9965d]/46 bg-[#1f1a24]/90 text-[#ffe3bd]"
                   aria-label={showPlayerControls ? copy.collapseProgress : copy.expandProgress}
                 >
                   {showPlayerControls ? "⌄" : "⌃"}
                 </button>
-
               </div>
             </div>
 
-            <div className="absolute bottom-4 left-1/2 z-[80] flex w-[320px] -translate-x-1/2 flex-col items-center gap-3">
-              {generationError && (
-                <p className="absolute -top-8 w-[min(520px,80vw)] text-center text-xs text-[#efb6a5]">
-                  {generationError}
+            {audioError && (
+              <p className="absolute bottom-5 left-1/2 z-[75] w-[min(520px,82%)] -translate-x-1/2 text-center text-xs text-[#efb6a5]">
+                {audioError}
+              </p>
+            )}
+          </div>
+
+          <aside className="relative z-[90] flex min-h-0 flex-col border-l border-[#9f6f45]/42 bg-[#1d1923]/88 backdrop-blur">
+            <header className="shrink-0 border-b border-[#9f6f45]/30 px-5 pb-3 pt-4">
+              <p className="font-serif text-xl font-semibold text-[#ffe3bd]">{copy.roomTitle}</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#c9aa8c]">{copy.roomSubtitle}</p>
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                {(Object.keys(copy.goalLabels) as FacilitatorGoal[]).map((goal, index) => {
+                  const activeGoal = facilitatorPlan?.currentGoal || "subject-space";
+                  const activeIndex = (Object.keys(copy.goalLabels) as FacilitatorGoal[]).indexOf(activeGoal);
+                  return (
+                    <div key={goal} className="min-w-0">
+                      <div className={`h-0.5 w-full ${index <= activeIndex ? "bg-[#efb96f]" : "bg-[#715744]/48"}`} />
+                      <p className={`mt-1 truncate text-[10px] ${index === activeIndex ? "text-[#ffd18a]" : "text-[#9f8874]"}`}>
+                        {copy.goalLabels[goal]}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </header>
+
+            <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {timelineMessages.map((message) => (
+                <ConversationEntry
+                  key={message.id}
+                  role={message.role}
+                  speakerId={message.speakerId}
+                  content={message.content}
+                  selectedChars={selectedChars}
+                  resonant={resonantComments.has(message.speakerId)}
+                  onToggleResonance={message.role === "musician" ? () => toggleResonance(message.speakerId) : undefined}
+                  language={language}
+                />
+              ))}
+              {[...streaming].map((speakerId) => (
+                <ConversationEntry
+                  key={`streaming-${speakerId}`}
+                  role="musician"
+                  speakerId={speakerId}
+                  content={visibleComments[speakerId] || copy.listening}
+                  streaming
+                  selectedChars={selectedChars}
+                  language={language}
+                />
+              ))}
+            </div>
+
+            <div className="shrink-0 border-t border-[#9f6f45]/32 bg-[#211c26]/96 px-4 py-3">
+              {facilitatorPlan?.userInvitation && (
+                <p className="mb-2 border-l-2 border-[#e4ad68] pl-3 text-xs font-medium leading-relaxed text-[#f1d2ad]">
+                  {facilitatorPlan.userInvitation}
                 </p>
               )}
-              {!showUserInput && (
+              {facilitatorPlan?.sentenceStarters?.length ? (
+                <div className="mb-2">
+                  <p className="mb-1.5 text-[10px] font-semibold tracking-[0.12em] text-[#b89574]">{copy.starterLabel}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {facilitatorPlan.sentenceStarters.map((starter) => (
+                      <button
+                        key={starter}
+                        type="button"
+                        onClick={() => setUserNote(starter)}
+                        className="border-b border-[#9f7655]/45 py-0.5 text-left text-[11px] text-[#dfc3a6] transition hover:border-[#ffd18a] hover:text-[#ffe3bd]"
+                      >
+                        {starter}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className={`flex items-end gap-2 border-b px-1 pb-2 transition ${conversationState?.turnOwner === "user" ? "border-[#e4ad68]" : "border-[#8c6a50]/55"}`}>
+                <textarea
+                  value={userNote}
+                  onChange={(event) => setUserNote(event.target.value)}
+                  placeholder={conversationState?.turnOwner === "user" ? copy.feelingPlaceholder : copy.waitingTurn}
+                  rows={2}
+                  className="min-h-[46px] min-w-0 flex-1 resize-none bg-transparent text-sm leading-relaxed text-[#ffe3bd] outline-none placeholder:text-[#927c69]"
+                />
                 <button
                   type="button"
-                  onClick={() => setShowUserInput(true)}
-                  className={`rounded-full border bg-[#1f1a24]/78 px-5 py-2 text-center text-xs shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur transition hover:text-[#ffe3bd] ${
-                    conversationState?.turnOwner === "user"
-                      ? "border-[#f0bd79]/78 text-[#ffe0ad] shadow-[0_0_24px_rgba(240,189,121,0.2)]"
-                      : "border-[#c9965d]/38 text-[#d7bfa7] hover:border-[#d8aa70]/62"
-                  }`}
+                  onClick={handleSubmitUserNote}
+                  disabled={!userNote.trim() || submittingUserNote}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"
+                  aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
                 >
-                  {conversationState?.turnOwner === "user" ? copy.yourTurn : copy.addFeeling}
+                  ↑
                 </button>
-              )}
-              {showUserInput && (
-                <div className="flex h-[56px] w-[min(380px,88vw)] items-center gap-3 rounded-full border border-[#c9965d]/50 bg-[#1f1a24]/92 px-4 shadow-[0_18px_58px_rgba(0,0,0,0.36)] backdrop-blur">
-                  <p className="shrink-0 text-sm font-semibold text-[#ffe3bd]">{copy.myFeeling}</p>
-                  <textarea
-                    value={userNote}
-                    onChange={(event) => setUserNote(event.target.value)}
-                    placeholder={copy.feelingPlaceholder}
-                    className="h-9 min-w-0 flex-1 resize-none rounded-full border border-[#8f6c52]/48 bg-[#15111c]/72 px-3 py-2 text-sm leading-tight text-[#ffe3bd] outline-none placeholder:text-[#bda28b]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowUserInput(false)}
-                    className="shrink-0 text-xs text-[#d7bfa7] transition hover:text-[#ffe3bd]"
-                  >
-                    {copy.collapse}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSubmitUserNote}
-                    disabled={!userNote.trim() || submittingUserNote}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#d5a160]/58 bg-[#ffe0bd] text-base font-semibold text-[#3a2b34] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
-                    aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
-                    title={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
-                  >
-                    ↑
-                  </button>
-                </div>
+              </div>
+              {generationError && <p className="mt-2 text-xs text-[#efb6a5]">{generationError}</p>}
+              {!conversationState?.messages.some((message) => message.role === "user") && (
+                <p className="mt-2 text-[10px] leading-relaxed text-[#a88e77]">{copy.generateHint}</p>
               )}
               <button
                 type="button"
                 onClick={handleContinue}
-                disabled={Object.keys(allComments).length === 0 || generating}
-                className="flex h-[64px] w-full items-center justify-center rounded-[18px] border border-[#f4bd72]/62 bg-[#2d2631]/88 px-5 text-base font-semibold text-[#ffe3bd] shadow-[0_16px_44px_rgba(0,0,0,0.32)] transition hover:bg-[#3a2d37] disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={
+                  Object.keys(allComments).length === 0 ||
+                  !conversationState?.messages.some((message) => message.role === "user") ||
+                  generating
+                }
+                className="mt-2 flex h-12 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 px-5 text-sm font-semibold text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.26)] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61]"
               >
                 {copy.generate}
               </button>
             </div>
-          </div>
+          </aside>
 
           {generating && (
-            <div className="absolute inset-0 z-[120] flex items-center justify-center bg-[#15111c]/88 backdrop-blur-sm">
+            <div className="absolute inset-0 z-[120] flex items-center justify-center bg-[#15111c]/90 backdrop-blur-sm">
               <div className="w-[min(520px,72vw)] text-center">
                 <div className="mx-auto h-16 w-16 animate-spin rounded-full border border-[#a97950]/42 border-t-[#ffd083]" />
-                <p className="mt-7 font-serif text-[clamp(20px,2vw,30px)] font-semibold text-[#ffe3bd]">
-                  {copy.generating}
-                </p>
-                <p className="mt-3 text-sm text-[#d5b895]">
-                  {copy.generationStages[generationStageIndex]}
-                </p>
-                <div className="mt-6 h-1 overflow-hidden rounded-full bg-[#7f614a]/34">
-                  <div
-                    className="h-full rounded-full bg-[#efb96f] transition-[width] duration-500"
-                    style={{ width: `${generationProgress}%` }}
-                  />
+                <p className="mt-7 font-serif text-[clamp(20px,2vw,30px)] font-semibold text-[#ffe3bd]">{copy.generating}</p>
+                <p className="mt-3 text-sm text-[#d5b895]">{copy.generationStages[generationStageIndex]}</p>
+                <div className="mt-6 h-1 overflow-hidden bg-[#7f614a]/34">
+                  <div className="h-full bg-[#efb96f] transition-[width] duration-500" style={{ width: `${generationProgress}%` }} />
                 </div>
                 <p className="mt-2 text-xs tabular-nums text-[#b99b80]">{generationProgress}%</p>
               </div>
             </div>
           )}
-
         </section>
       </div>
     </main>
