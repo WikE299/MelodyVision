@@ -8,6 +8,9 @@ export interface GenerationRunRecord {
   presets: unknown;
   userNote: string;
   musicAnalysis: unknown;
+  musicProfile: unknown;
+  conversationState: unknown;
+  visualBrief: unknown;
   musicianComments: unknown;
   promptDirector: unknown;
   finalImagePrompt: string;
@@ -33,6 +36,9 @@ export async function insertGenerationRun(record: GenerationRunRecord) {
         presets_json,
         user_note,
         music_analysis_json,
+        music_profile_json,
+        conversation_state_json,
+        visual_brief_json,
         musician_comments_json,
         prompt_director_json,
         final_image_prompt,
@@ -44,7 +50,7 @@ export async function insertGenerationRun(record: GenerationRunRecord) {
         image_request_id,
         timings_json,
         log_path
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       record.id,
@@ -54,6 +60,9 @@ export async function insertGenerationRun(record: GenerationRunRecord) {
       toJson(record.presets),
       record.userNote,
       toJson(record.musicAnalysis),
+      toJson(record.musicProfile),
+      toJson(record.conversationState),
+      toJson(record.visualBrief),
       toJson(record.musicianComments),
       toJson(record.promptDirector),
       record.finalImagePrompt,

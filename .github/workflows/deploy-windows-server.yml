@@ -29,4 +29,5 @@ jobs:
             -RepoUrl "https://github.com/${{ github.repository }}.git" `
             -DeployDir "D:/MelodyVision" `
             -Port "3000" `
+            -AudioPort "8001" `
             -AppName "melodyvision"

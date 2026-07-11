@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
 import { getExperimentSessionId } from "@/lib/experiment-session";
+import { recordExperimentEvent } from "@/lib/experiment-events";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 import type {
   ConversationState,
@@ -330,6 +331,7 @@ export default function ResultPage() {
   const { language } = useLanguage();
   const copy = COPY[language];
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const resultViewRecordedRef = useRef(false);
   const mounted = useHydrated();
   const [initialState] = useState(getInitialResultState);
   const [imageUrl, setImageUrl] = useState<string | null>(initialState.imageUrl);
@@ -365,8 +367,14 @@ export default function ResultPage() {
   useEffect(() => {
     if (!imageUrl) {
       router.push("/");
+      return;
     }
-  }, [imageUrl, router]);
+    if (resultViewRecordedRef.current) return;
+    resultViewRecordedRef.current = true;
+    recordExperimentEvent("result-viewed", "/result", {
+      runId: initialState.debugInfo?.meta?.runId || null,
+    });
+  }, [imageUrl, initialState.debugInfo?.meta?.runId, router]);
 
   const playResultAudio = useCallback(async () => {
     const audio = audioRef.current;
@@ -397,6 +405,9 @@ export default function ResultPage() {
   };
 
   const handleStartOver = () => {
+    recordExperimentEvent("flow-restarted", "/result", {
+      runId: debugInfo?.meta?.runId || null,
+    });
     sessionStorage.clear();
     router.push("/");
   };
@@ -407,6 +418,9 @@ export default function ResultPage() {
 
     setRegenerating(true);
     setRegenerateError(null);
+    recordExperimentEvent("regeneration-started", "/result", {
+      runId: debugInfo?.meta?.runId || null,
+    });
 
     try {
       const sessionId =
@@ -651,7 +665,12 @@ export default function ResultPage() {
             <aside className="relative z-10 flex h-full w-[76px] shrink-0 items-start justify-center rounded-[22px] border border-[#a77b57]/36 bg-[#241f2a]/46 p-3 backdrop-blur">
               <button
                 type="button"
-                onClick={() => setShowOverview(true)}
+                onClick={() => {
+                  setShowOverview(true);
+                  recordExperimentEvent("rationale-opened", "/result", {
+                    runId: debugInfo?.meta?.runId || null,
+                  });
+                }}
                 className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-[16px] border border-[#a77b57]/36 bg-[#2d2732]/58 text-[#ffe3bd] transition hover:border-[#ffd083]/70 hover:bg-[#3a2d32]/70"
               >
                 <span className="text-lg">↗</span>
@@ -687,6 +706,9 @@ export default function ResultPage() {
                 <a
                   href={imageUrl}
                   download={`melodyvision-${debugInfo?.meta?.runId || "artwork"}.png`}
+                  onClick={() => recordExperimentEvent("artwork-downloaded", "/result", {
+                    runId: debugInfo?.meta?.runId || null,
+                  })}
                   aria-label={copy.save}
                   title={copy.save}
                   className="flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/62 bg-[#4b3444]/86 text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34),0_0_20px_rgba(255,194,103,0.22)] backdrop-blur transition hover:border-[#ffd083] hover:bg-[#5a3b4d]"
@@ -812,7 +834,14 @@ export default function ResultPage() {
           </aside>
 
           <details
-            onToggle={(event) => setShowAppendix(event.currentTarget.open)}
+            onToggle={(event) => {
+              setShowAppendix(event.currentTarget.open);
+              if (event.currentTarget.open) {
+                recordExperimentEvent("research-appendix-opened", "/result", {
+                  runId: debugInfo?.meta?.runId || null,
+                });
+              }
+            }}
             className="absolute bottom-4 right-4 z-50 w-[348px] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/88 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur 2xl:w-[404px]"
           >
             <summary className="cursor-pointer font-semibold">{copy.appendix}</summary>

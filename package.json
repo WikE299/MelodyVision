@@ -13,7 +13,8 @@
     "test:musician-agents": "node --experimental-strip-types --test tests/musician-agents.test.ts",
     "test:conversation": "node --experimental-strip-types --test tests/conversation-state-machine.test.ts tests/conversation-stream.test.ts",
     "test:visual-scribe": "node --experimental-strip-types --test tests/visual-scribe.test.ts",
-    "test:prompt-director": "node --experimental-strip-types --test tests/prompt-director-v2.test.ts"
+    "test:prompt-director": "node --experimental-strip-types --test tests/prompt-director-v2.test.ts",
+    "test:research-data": "node --experimental-strip-types --test tests/export-auth.test.ts"
   },
   "dependencies": {
     "meyda": "^5.6.3",

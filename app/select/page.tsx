@@ -11,6 +11,7 @@ import {
   westernCharacters,
 } from "@/lib/characters";
 import { characterUi, type Language, useLanguage } from "@/lib/i18n";
+import { recordExperimentEvent } from "@/lib/experiment-events";
 
 const DEFAULT_COMBO = ["boya", "beethoven", "abing", "armstrong"];
 const MAX_SELECTION = 4;
@@ -204,6 +205,10 @@ export default function SelectPage() {
       const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as { id?: string } | null;
       const musicProfileId = musicProfile?.id || `degraded-${sessionId}`;
       sessionStorage.setItem("experimentSessionId", sessionId);
+      recordExperimentEvent("musicians-selected", "/select", {
+        musicianIds: selected,
+        count: selected.length,
+      });
 
       const conversationResponse = await fetch("/api/conversation/start", {
         method: "POST",

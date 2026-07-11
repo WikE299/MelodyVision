@@ -1,6 +1,6 @@
 # MelodyVision Deployment Notes
 
-Last updated: 2026-07-05
+Last updated: 2026-07-11
 
 ## Current Deployment
 
@@ -34,6 +34,8 @@ The server currently supports:
 - Exposing the app to the public internet through Cloudflare Tunnel.
 - Running a GitHub Actions self-hosted runner on the server.
 - Automatically deploying when code is pushed to `feat/v2-global-musicians`.
+- Running the Version 2 Python audio analyzer through a second Scheduled Task named `melodyvision-audio-analysis`.
+- Rolling back the repository and rebuilding the previous commit when a deployment health check fails.
 
 GitHub Actions runner:
 
@@ -118,11 +120,14 @@ Version 2 rich audio analysis also uses:
 
 ```text
 AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
+EXPERIMENT_EXPORT_TOKEN=<long-random-server-secret>
 ```
 
-This is a server-only value read by the Next.js `/api/analyze` proxy. Do not prefix it with `NEXT_PUBLIC_`.
+Both are server-only values. Do not prefix them with `NEXT_PUBLIC_`. Research exports require either `Authorization: Bearer <token>` or `x-export-token: <token>`.
 
 ## Version 2 Audio Service
+
+The deployment script requires Node.js 22.13 or newer and Python 3.12 through the Windows `py` launcher. Node 22.13+ is required by the built-in SQLite research store. The script creates `services/audio-analysis/.venv`, installs dependencies when `requirements.txt` changes, and starts the analyzer on `127.0.0.1:8001`.
 
 For local Version 2 development, start the Python analyzer before Next.js:
 
@@ -137,7 +142,17 @@ Then run `npm run dev` from the repository root. Check the proxy with:
 curl http://127.0.0.1:3000/api/analyze
 ```
 
-The current Windows deployment script still manages only the Next.js process. Until the Python service receives its scheduled-task deployment in `V2-12`, a server without port `8001` will use the explicitly marked Meyda degraded path. The user flow remains available, but it will not receive the rich `MusicProfile`.
+The deployment is considered healthy only when both `/health` on port `8001` and the Next.js root on port `3000` respond. The first analyzer start may download and warm the CLAP model, so its health-check window is four minutes. A failed check restores and rebuilds the pre-deployment Git commit.
+
+Uploaded audio is not retained. The analyzer deletes its temporary input after every request, including failed requests. SQLite stores only file metadata, the structured `MusicProfile`, compatibility analysis, conversation snapshots, VisualBrief versions, interaction events, generation results, and feedback.
+
+Export research data:
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:EXPERIMENT_EXPORT_TOKEN" }
+Invoke-WebRequest -Headers $headers -Uri "http://127.0.0.1:3000/api/experiment/export" -OutFile experiment.json
+Invoke-WebRequest -Headers $headers -Uri "http://127.0.0.1:3000/api/experiment/export?format=csv" -OutFile experiment.csv
+```
 
 Changing model names or API keys:
 
@@ -150,6 +165,7 @@ Check MelodyVision task:
 
 ```powershell
 Get-ScheduledTask -TaskName melodyvision
+Get-ScheduledTask -TaskName melodyvision-audio-analysis
 ```
 
 Restart MelodyVision:
@@ -162,6 +178,7 @@ View app logs:
 
 ```powershell
 Get-Content D:/MelodyVision/logs/server.log -Tail 120
+Get-Content D:/MelodyVision/logs/audio-analysis.log -Tail 120
 ```
 
 Check GitHub runner:
@@ -191,12 +208,14 @@ Select-String -Path D:/MelodyVision/logs/cloudflared.log -Pattern "trycloudflare
 - Cloudflare quick tunnels have no uptime guarantee.
 - The GitHub runner must remain online for automatic deployment.
 - Large untracked audio files are not deployed through GitHub unless committed or uploaded separately.
-- Node on the server is currently `20.18.0`; some dependencies warn that `20.19.0+` is preferred.
+- The last recorded server Node version is `20.18.0`. It must be upgraded to Node 22.13+ before deploying Version 2; the deployment script stops with an explicit error otherwise.
+- The first Python deployment can take several minutes while PyTorch/CLAP dependencies and model weights are installed.
+- The deployment script has been statically reviewed on macOS; its Scheduled Task and rollback paths must be observed on the first Windows deployment.
 - `npm audit` currently reports low/moderate dependency warnings.
 
 ## Recommended Next Steps
 
 - Keep using quick tunnel while the project is in demo/prototype stage.
 - Consider image/audio asset optimization before wider sharing.
-- Upgrade server Node.js to `20.19.0+` later.
+- Upgrade server Node.js to the current Node 22 or 24 LTS before the first Version 2 deployment.
 - If the project needs a permanent public URL, buy a domain and configure a named Cloudflare Tunnel.

@@ -88,6 +88,7 @@ The Node evaluation command requires Node.js 22.6 or later for type stripping. R
 
 ## Prototype limits
 
+- Uploaded audio is written only to an operating-system temporary file and is deleted in the request `finally` block after success or failure. MelodyVision persists structured analysis and file metadata, not the raw upload.
 - Analysis is capped at 60 seconds. Longer files return an `audio_truncated` warning.
 - CLAP values are relative scores within controlled label groups, not objective facts.
 - Successful CLAP output carries a `semantic_scores_relative` warning so downstream agents cannot silently treat hypotheses as ground truth.

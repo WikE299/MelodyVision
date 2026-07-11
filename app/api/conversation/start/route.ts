@@ -5,6 +5,7 @@ import {
   createConversationState,
   scheduleMusicianTurn,
 } from "@/lib/conversation";
+import { insertConversationSnapshot } from "@/lib/db/research-data";
 
 function readStringRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -50,8 +51,12 @@ export async function POST(request: NextRequest) {
       preparedSummaries: readStringRecord(body.preparedSummaries),
     });
 
+    const nextState = scheduleMusicianTurn(state, plan);
+    await insertConversationSnapshot(nextState, "conversation-started").catch((error) => {
+      console.error("Conversation start snapshot failed:", error);
+    });
     return Response.json({
-      state: scheduleMusicianTurn(state, plan),
+      state: nextState,
       facilitatorPlan: plan,
     });
   } catch (error) {

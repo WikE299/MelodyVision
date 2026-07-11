@@ -6,6 +6,7 @@ import {
   recordUserMessage,
   scheduleMusicianTurn,
 } from "@/lib/conversation";
+import { insertConversationSnapshot } from "@/lib/db/research-data";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,6 +22,9 @@ export async function POST(request: NextRequest) {
 
     const afterUser = recordUserMessage(state, content);
     if (afterUser.status === "ready-to-generate") {
+      await insertConversationSnapshot(afterUser, "user-message-ready").catch((error) => {
+        console.error("User message snapshot failed:", error);
+      });
       return Response.json({ state: afterUser, facilitatorPlan: null });
     }
 
@@ -37,8 +41,12 @@ export async function POST(request: NextRequest) {
       musicianNames,
       preparedSummaries,
     });
+    const nextState = scheduleMusicianTurn(afterUser, plan);
+    await insertConversationSnapshot(nextState, "user-message-scheduled").catch((error) => {
+      console.error("User message snapshot failed:", error);
+    });
     return Response.json({
-      state: scheduleMusicianTurn(afterUser, plan),
+      state: nextState,
       facilitatorPlan: plan,
     });
   } catch (error) {

@@ -53,6 +53,7 @@ def health() -> dict[str, object]:
         "semanticDevice": analyzer.semantic_analyzer.device,
         "semanticPreloadEnabled": _preload_enabled(),
         "semanticPreloadError": semantic_preload_error,
+        "rawAudioRetention": "temporary-file-deleted-after-request",
     }
 
 

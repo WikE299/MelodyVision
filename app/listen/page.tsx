@@ -7,6 +7,7 @@ import { getCharactersByIds, Character } from "@/lib/characters";
 import FlowHeader from "@/components/FlowHeader";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 import { getExperimentSessionId } from "@/lib/experiment-session";
+import { recordExperimentEvent } from "@/lib/experiment-events";
 import type {
   ConversationState,
   MusicProfile,
@@ -763,6 +764,10 @@ export default function ListenPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Conversation response failed");
       persistConversationState(data.state as ConversationState);
+      recordExperimentEvent("user-message-submitted", "/listen", {
+        conversationId: conversationState.id,
+        characterCount: content.length,
+      });
       if (data.facilitatorPlan) {
         sessionStorage.setItem("facilitatorPlan", JSON.stringify(data.facilitatorPlan));
       }
@@ -779,12 +784,17 @@ export default function ListenPage() {
   const toggleResonance = (charId: string) => {
     setResonantComments((prev) => {
       const next = new Set(prev);
+      const selected = !next.has(charId);
       if (next.has(charId)) {
         next.delete(charId);
       } else {
         next.add(charId);
       }
       sessionStorage.setItem("resonantComments", JSON.stringify([...next]));
+      recordExperimentEvent("resonance-toggled", "/listen", {
+        musicianId: charId,
+        selected,
+      });
       return next;
     });
   };
@@ -838,6 +848,11 @@ export default function ListenPage() {
     setGenerating(true);
     setGenerationProgress(6);
     setGenerationError("");
+    recordExperimentEvent("generation-started", "/listen", {
+      conversationId: conversationState.id,
+      musicianCount: conversationState.selectedMusicianIds.length,
+      resonantMusicianIds: [...resonantComments],
+    });
 
     try {
       const stateResponse = await fetch("/api/conversation/generate", {

@@ -186,6 +186,25 @@ export default function HomePageClient() {
       sessionStorage.setItem("musicAnalysis", JSON.stringify(analysis));
       sessionStorage.setItem("audioAnalysisMode", analysis.analysisEngine);
 
+      try {
+        const analysisRecord = await fetch("/api/experiment/audio-analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            mode: analysis.analysisEngine,
+            sourceKind: context.sourceKind,
+            fileName: file.name,
+            fileSize: file.size,
+            musicProfile: richResult.status === "fulfilled" ? richResult.value : null,
+            compatibilityAnalysis: analysis,
+          }),
+        });
+        if (!analysisRecord.ok) throw new Error(`HTTP ${analysisRecord.status}`);
+      } catch {
+        console.warn("Audio analysis record was not persisted.");
+      }
+
       router.push("/select");
     } catch (err) {
       console.error("Audio analysis failed:", err);

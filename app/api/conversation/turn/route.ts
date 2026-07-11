@@ -14,6 +14,7 @@ import {
   parseConversationState,
   recordMusicianMessage,
 } from "@/lib/conversation";
+import { insertConversationSnapshot } from "@/lib/db/research-data";
 
 function createInitialTextFilter(displayName: string) {
   let buffer = "";
@@ -114,6 +115,9 @@ export async function POST(request: NextRequest) {
             throw new Error("Musician returned an empty or incomplete streamed turn");
           }
           const nextState = recordMusicianMessage(state, { speakerId, content: comment });
+          await insertConversationSnapshot(nextState, "musician-turn-completed").catch((error) => {
+            console.error("Musician turn snapshot failed:", error);
+          });
           controller.enqueue(encoder({
             type: "complete",
             speakerId,

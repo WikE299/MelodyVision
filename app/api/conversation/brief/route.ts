@@ -3,6 +3,7 @@ import { runVisualScribeAgent } from "@/lib/agents/visual-scribe";
 import { parseConversationState } from "@/lib/conversation";
 import { formatMusicContext } from "@/lib/prompts/system";
 import { parseVisualBrief } from "@/lib/visual-brief";
+import { insertVisualBriefVersion } from "@/lib/db/research-data";
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,6 +37,16 @@ export async function POST(request: NextRequest) {
       previousBrief,
       musicContext: formatMusicContext(body.musicAnalysis || {}),
     });
+    const meta = {
+      model: result.model,
+      attempts: result.attempts,
+      profileVersion: result.profileVersion,
+      fallback: result.fallback,
+      validationErrors: result.validationErrors,
+    };
+    await insertVisualBriefVersion({ sessionId: state.sessionId, brief: result.brief, meta }).catch((error) => {
+      console.error("VisualBrief persistence failed:", error);
+    });
 
     return Response.json({
       visualBrief: result.brief,
@@ -43,13 +54,7 @@ export async function POST(request: NextRequest) {
         id: result.brief.id,
         version: result.brief.version,
       },
-      meta: {
-        model: result.model,
-        attempts: result.attempts,
-        profileVersion: result.profileVersion,
-        fallback: result.fallback,
-        validationErrors: result.validationErrors,
-      },
+      meta,
     });
   } catch (error) {
     return Response.json(

@@ -2,10 +2,10 @@ const SESSION_STORAGE_KEY = "melodyvisionSessionId";
 
 export async function getExperimentSessionId(): Promise<string> {
   const existing = localStorage.getItem(SESSION_STORAGE_KEY);
-  if (existing) return existing;
-
   const response = await fetch("/api/experiment/session", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(existing ? { sessionId: existing } : {}),
   });
   const data = await response.json();
 
@@ -13,6 +13,6 @@ export async function getExperimentSessionId(): Promise<string> {
     throw new Error(data.error || "实验 session 创建失败");
   }
 
-  localStorage.setItem(SESSION_STORAGE_KEY, data.sessionId);
+  if (!existing) localStorage.setItem(SESSION_STORAGE_KEY, data.sessionId);
   return data.sessionId;
 }
