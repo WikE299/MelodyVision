@@ -1,8 +1,15 @@
-import type { Character } from "../characters";
+import type { Character } from "../characters/index.ts";
+import type {
+  ConversationState,
+  MusicProfile,
+  VisualBrief,
+  VisualBriefFieldKey,
+  VisualBriefFieldStatus,
+} from "../contracts/index.ts";
 import {
   buildVisualPresetPrompt,
   type VisualPresetPrompt,
-} from "./visual-presets";
+} from "./visual-presets.ts";
 
 export interface PromptDirectorInput {
   comments: Array<{
@@ -37,6 +44,40 @@ export interface PromptDirectorInput {
     analysisWarnings?: unknown;
   };
   visualPreset: VisualPresetPrompt;
+  coCreation?: PromptDirectorCoCreationContext;
+}
+
+export interface PromptDirectorCoCreationContext {
+  musicProfile: {
+    id: string;
+    audio: MusicProfile["audio"];
+    rhythm: Pick<MusicProfile["rhythm"], "bpm" | "beatStrength" | "onsetDensity">;
+    tonality: Pick<MusicProfile["tonality"], "key" | "mode" | "harmonicStability">;
+    dynamics: Pick<MusicProfile["dynamics"], "averageEnergy" | "dynamicComplexity">;
+    timbre: MusicProfile["timbre"];
+    sections: Array<Pick<MusicProfile["sections"][number], "id" | "phase" | "energy" | "brightness" | "onsetDensity" | "dynamicTrend" | "motions" | "textures">>;
+    semantics: MusicProfile["semantics"];
+    warnings: MusicProfile["warnings"];
+  } | null;
+  visualBrief: {
+    id: string;
+    version: number;
+    status: VisualBrief["status"];
+    readiness: VisualBrief["readiness"];
+    fields: Array<{
+      field: VisualBriefFieldKey;
+      value: string | string[];
+      status: VisualBriefFieldStatus;
+      sourceIds: string[];
+    }>;
+  };
+  sources: Array<{
+    id: string;
+    kind: string;
+    sourceId: string;
+    speakerId?: string;
+    excerpt: string;
+  }>;
 }
 
 export interface PromptDirectorBrief {
@@ -46,6 +87,18 @@ export interface PromptDirectorBrief {
   sourceMappings: Array<{
     characterId: string;
     speaker: string;
+    visualTranslation: string;
+  }>;
+  userSourceMappings?: Array<{
+    sourceId: string;
+    priority: "primary";
+    visualTranslation: string;
+  }>;
+  visualBriefMappings?: Array<{
+    field: VisualBriefFieldKey;
+    status: VisualBriefFieldStatus;
+    sourceIds: string[];
+    priority: "primary" | "supporting" | "constraint";
     visualTranslation: string;
   }>;
   weightingRationale?: Array<{
@@ -137,7 +190,12 @@ export function buildPromptDirectorInput(
     tone?: string;
   },
   userNote?: string,
-  musicAnalysis?: Record<string, unknown>
+  musicAnalysis?: Record<string, unknown>,
+  coCreation?: {
+    musicProfile?: MusicProfile | null;
+    visualBrief?: VisualBrief | null;
+    conversationState?: ConversationState | null;
+  }
 ): PromptDirectorInput {
   const commentSummary = comments.map((comment) => {
     const character = characters.find((ch) => ch.id === comment.characterId);
@@ -180,6 +238,110 @@ export function buildPromptDirectorInput(
     userNote: userNote || "",
     musicAnalysis: musicContext,
     visualPreset: buildVisualPresetPrompt(presets),
+    coCreation: buildPromptDirectorCoCreationContext(coCreation),
+  };
+}
+
+function buildPromptDirectorCoCreationContext(
+  input?: {
+    musicProfile?: MusicProfile | null;
+    visualBrief?: VisualBrief | null;
+    conversationState?: ConversationState | null;
+  }
+): PromptDirectorCoCreationContext | undefined {
+  const visualBrief = input?.visualBrief;
+  const conversationState = input?.conversationState;
+  if (!visualBrief || !conversationState) return undefined;
+
+  const messages = new Map(conversationState.messages.map((message) => [message.id, message]));
+  const fieldEntries = Object.entries(visualBrief.fields) as Array<[
+    VisualBriefFieldKey,
+    VisualBrief["fields"][VisualBriefFieldKey],
+  ]>;
+  const fields = fieldEntries
+    .filter(([, field]) => field.status !== "missing" && field.value !== null)
+    .map(([field, value]) => ({
+      field,
+      value: value.value as string | string[],
+      status: value.status,
+      sourceIds: value.sources.map((source) => source.id),
+    }));
+  const sourceMap = new Map<string, PromptDirectorCoCreationContext["sources"][number]>();
+
+  for (const [, field] of fieldEntries) {
+    for (const source of field.sources) {
+      const message = messages.get(source.sourceId);
+      sourceMap.set(source.id, {
+        id: source.id,
+        kind: source.kind,
+        sourceId: source.sourceId,
+        speakerId: message?.speakerId,
+        excerpt: source.excerpt || message?.content || "MusicProfile evidence",
+      });
+    }
+  }
+  for (const message of conversationState.messages) {
+    if (message.role !== "user") continue;
+    sourceMap.set(message.id, {
+      id: message.id,
+      kind: "user-message",
+      sourceId: message.id,
+      speakerId: message.speakerId,
+      excerpt: message.content,
+    });
+  }
+
+  const musicProfile = input?.musicProfile
+    ? {
+        id: input.musicProfile.id,
+        audio: input.musicProfile.audio,
+        rhythm: {
+          bpm: input.musicProfile.rhythm.bpm,
+          beatStrength: input.musicProfile.rhythm.beatStrength,
+          onsetDensity: input.musicProfile.rhythm.onsetDensity,
+        },
+        tonality: {
+          key: input.musicProfile.tonality.key,
+          mode: input.musicProfile.tonality.mode,
+          harmonicStability: input.musicProfile.tonality.harmonicStability,
+        },
+        dynamics: {
+          averageEnergy: input.musicProfile.dynamics.averageEnergy,
+          dynamicComplexity: input.musicProfile.dynamics.dynamicComplexity,
+        },
+        timbre: input.musicProfile.timbre,
+        sections: input.musicProfile.sections.slice(0, 8).map((section) => ({
+          id: section.id,
+          phase: section.phase,
+          energy: section.energy,
+          brightness: section.brightness,
+          onsetDensity: section.onsetDensity,
+          dynamicTrend: section.dynamicTrend,
+          motions: section.motions.slice(0, 3),
+          textures: section.textures.slice(0, 3),
+        })),
+        semantics: {
+          moods: input.musicProfile.semantics.moods.slice(0, 5),
+          genres: input.musicProfile.semantics.genres.slice(0, 5),
+          instruments: input.musicProfile.semantics.instruments.slice(0, 5),
+          textures: input.musicProfile.semantics.textures.slice(0, 5),
+          motions: input.musicProfile.semantics.motions.slice(0, 5),
+          spaces: input.musicProfile.semantics.spaces.slice(0, 5),
+        },
+        warnings: input.musicProfile.warnings,
+      }
+    : null;
+
+  return {
+    musicProfile,
+    visualBrief: {
+      id: visualBrief.id,
+      version: visualBrief.version,
+      status: visualBrief.status,
+      readiness: visualBrief.readiness,
+      fields,
+    },
+    sources: [...sourceMap.values()],
   };
 }
 
@@ -189,9 +351,26 @@ function normalizeCommentWeight(value: unknown): number {
 }
 
 export function buildPromptDirectorInstruction(input: PromptDirectorInput): string {
+  const coCreationRules = input.coCreation
+    ? `
+Version 2 co-creation rules:
+- coCreation.visualBrief is the authoritative visual plan. Do not replace it with a new concept.
+- Every coCreation.sources item with kind=user-message is independent primary evidence. Preserve each exact source id once in userSourceMappings even if the Visual Scribe did not promote it into a VisualBrief field.
+- Preserve every present VisualBrief field in visualBriefMappings exactly once, including its field, status, and sourceIds.
+- sourceIds in visualBriefMappings must be copied exactly from that field. Never invent or remove a source.
+- A confirmed field, especially one backed by a user-message source, uses primary priority and must control the focal subject, personal meaning, composition, palette, or lighting as applicable.
+- mustInclude and mustAvoid always use constraint priority, even when their status is confirmed. Suggested and conflicted descriptive fields use supporting priority.
+- A suggested field may enrich secondary detail. A conflicted field must remain visibly unresolved rather than being silently collapsed.
+- mustInclude and mustAvoid are hard constraints. personalMeaning is the emotional center.
+- MusicProfile supplies motion, density, dynamics, timbre, and structural evidence. It cannot override confirmed user fields.
+- The legacy comments and userNote below are supporting context for source interpretation; do not use them to contradict the VisualBrief.
+`
+    : "";
+
   return `You are Prompt Director for a music-to-image product.
 
 Your job is to act as a visual creative director and reliability agent. First build a concise visual plan that faithfully translates the source material, then write the image-generation prompt. The selected visual preset provides production constraints, not a reusable scene template.
+${coCreationRules}
 
 Hard rules:
 1. User note has the highest priority for personal meaning.
@@ -227,6 +406,22 @@ Return this exact JSON shape:
       "characterId": "exact characterId from input",
       "speaker": "speaker name from input",
       "visualTranslation": "specific drawable contribution from this comment"
+    }
+  ],
+  "userSourceMappings": [
+    {
+      "sourceId": "exact id of a coCreation source whose kind is user-message",
+      "priority": "primary",
+      "visualTranslation": "specific drawable contribution from this user message"
+    }
+  ],
+  "visualBriefMappings": [
+    {
+      "field": "exact VisualBrief field name",
+      "status": "exact field status",
+      "sourceIds": ["exact source reference id from that field"],
+      "priority": "primary|supporting|constraint",
+      "visualTranslation": "specific drawable use of this field"
     }
   ],
   "weightingRationale": [
@@ -281,6 +476,9 @@ ${JSON.stringify(params.parsedBrief, null, 2)}
 Repair the output. Return the same JSON shape only.
 Do not explain.
 Keep every input characterId exactly once in sourceMappings.
+When Version 2 coCreation input exists, keep every present VisualBrief field exactly once in visualBriefMappings with the exact status and sourceIds.
+Keep every coCreation user-message source exactly once in userSourceMappings with primary priority.
+Use constraint priority for mustInclude and mustAvoid, primary for other confirmed fields, and supporting for suggested or conflicted fields.
 Make userNoteTrace concrete when userNote is present.
 Do not remove any musician's influence.
 Preserve the weighting hierarchy from comment.weight and userResonance.

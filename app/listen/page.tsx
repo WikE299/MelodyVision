@@ -6,8 +6,10 @@ import { useRouter } from "next/navigation";
 import { getCharactersByIds, Character } from "@/lib/characters";
 import FlowHeader from "@/components/FlowHeader";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
+import { getExperimentSessionId } from "@/lib/experiment-session";
 import type {
   ConversationState,
+  MusicProfile,
   SourceReference,
   VisualBrief,
   VisualBriefFieldStatus,
@@ -61,6 +63,9 @@ const COPY = {
     sourceMusic: "来自音乐",
     yourTurn: "轮到你了 · 补充脑海里的画面",
     generate: "生成画作 →",
+    generating: "正在把共同听见的画面聚拢成画作",
+    generationStages: ["锁定共同画面", "编排视觉提示", "生成并保存画作"],
+    generationFailed: "画作生成失败，请稍后重试",
   },
   en: {
     listening: "I am listening closely. One moment...",
@@ -93,6 +98,9 @@ const COPY = {
     sourceMusic: "From the music",
     yourTurn: "Your turn · add the image in your mind",
     generate: "Generate Artwork →",
+    generating: "Gathering what you heard together into an artwork",
+    generationStages: ["Locking the shared image", "Composing the visual direction", "Generating and saving"],
+    generationFailed: "Artwork generation failed. Please try again.",
   },
 };
 
@@ -104,6 +112,7 @@ function getInitialListenState() {
       comments: {} as Record<string, string>,
       conversationState: null as ConversationState | null,
       visualBrief: null as VisualBrief | null,
+      resonantCharacterIds: [] as string[],
     };
   }
 
@@ -112,6 +121,7 @@ function getInitialListenState() {
   const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
   let conversationState: ConversationState | null = null;
   let visualBrief: VisualBrief | null = null;
+  let resonantCharacterIds: string[] = [];
   try {
     conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
   } catch {
@@ -121,6 +131,11 @@ function getInitialListenState() {
     visualBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null") as VisualBrief | null;
   } catch {
     visualBrief = null;
+  }
+  try {
+    resonantCharacterIds = JSON.parse(sessionStorage.getItem("resonantComments") || "[]") as string[];
+  } catch {
+    resonantCharacterIds = [];
   }
   if (conversationState) {
     for (const message of conversationState.messages) {
@@ -134,6 +149,7 @@ function getInitialListenState() {
     comments,
     conversationState,
     visualBrief,
+    resonantCharacterIds,
   };
 }
 
@@ -419,13 +435,18 @@ export default function ListenPage() {
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [streaming, setStreaming] = useState<Set<string>>(new Set());
   const [failedSpeakerId, setFailedSpeakerId] = useState("");
-  const [resonantComments, setResonantComments] = useState<Set<string>>(new Set());
+  const [resonantComments, setResonantComments] = useState<Set<string>>(
+    new Set(initialState.resonantCharacterIds)
+  );
   const [activeCharacterId, setActiveCharacterId] = useState<string>(selectedChars[0]?.id || "");
   const [userNote, setUserNote] = useState("");
   const [showUserInput, setShowUserInput] = useState(false);
   const [submittingUserNote, setSubmittingUserNote] = useState(false);
   const [briefCheckNonce, setBriefCheckNonce] = useState(0);
   const [showPlayerControls, setShowPlayerControls] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [generationError, setGenerationError] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -475,6 +496,18 @@ export default function ListenPage() {
     turnInFlightRef.current = false;
     activeStreamSpeakerRef.current = "";
   }, []);
+
+  useEffect(() => {
+    if (!generating) return;
+    const timerId = window.setInterval(() => {
+      setGenerationProgress((current) => {
+        if (current < 35) return Math.min(35, current + 3);
+        if (current < 72) return Math.min(72, current + 2);
+        return Math.min(92, current + 1);
+      });
+    }, 700);
+    return () => window.clearInterval(timerId);
+  }, [generating]);
 
   const togglePlay = async () => {
     if (!audioRef.current) return;
@@ -751,31 +784,154 @@ export default function ListenPage() {
       } else {
         next.add(charId);
       }
+      sessionStorage.setItem("resonantComments", JSON.stringify([...next]));
       return next;
     });
   };
 
-  const handleContinue = () => {
-    cancelActiveTurn();
-    const commentWeights = Object.fromEntries(
-      Object.keys(allComments).map((characterId) => [
-        characterId,
-        {
-          resonance: resonantComments.has(characterId),
-          weight: resonantComments.has(characterId) ? 1.8 : 1,
-        },
-      ])
+  const waitForBackgroundBrief = async () => {
+    for (let attempt = 0; attempt < 150 && briefInFlightRef.current; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+    }
+    if (briefInFlightRef.current) throw new Error("VisualBrief update timed out");
+  };
+
+  const resolveGenerationBrief = async (state: ConversationState) => {
+    await waitForBackgroundBrief();
+    let latestState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
+    if (!latestState || latestState.id !== state.id) latestState = state;
+    let latestBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null") as VisualBrief | null;
+    const briefMatches = Boolean(
+      latestBrief &&
+      latestState.visualBriefRef?.id === latestBrief.id &&
+      latestState.visualBriefRef.version === latestBrief.version
     );
-    sessionStorage.setItem("comments", JSON.stringify(allComments));
-    sessionStorage.setItem("commentWeights", JSON.stringify(commentWeights));
-    const userMessages = conversationState?.messages
-      .filter((message) => message.role === "user")
-      .map((message) => message.content)
-      .join("\n") || userNote;
-    sessionStorage.setItem("userNote", userMessages);
-    if (conversationState) sessionStorage.setItem("conversationState", JSON.stringify(conversationState));
-    if (visualBrief) sessionStorage.setItem("visualBrief", JSON.stringify(visualBrief));
-    router.push("/generate-page");
+    if (briefMatches) return { state: latestState, brief: latestBrief! };
+
+    const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
+    const response = await fetch("/api/conversation/brief", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationState: latestState,
+        previousBrief: latestBrief,
+        musicAnalysis,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "VisualBrief update failed");
+    latestBrief = data.visualBrief as VisualBrief;
+    const nextState = {
+      ...latestState,
+      visualBriefRef: data.visualBriefRef,
+    };
+    persistConversationState(nextState);
+    setVisualBrief(latestBrief);
+    sessionStorage.setItem("visualBrief", JSON.stringify(latestBrief));
+    sessionStorage.setItem("visualBriefMeta", JSON.stringify(data.meta));
+    return { state: nextState, brief: latestBrief };
+  };
+
+  const handleContinue = async () => {
+    if (!conversationState || generating) return;
+    cancelActiveTurn();
+    setGenerating(true);
+    setGenerationProgress(6);
+    setGenerationError("");
+
+    try {
+      const stateResponse = await fetch("/api/conversation/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationState }),
+      });
+      const stateData = await stateResponse.json();
+      if (!stateResponse.ok) throw new Error(stateData.error || "Conversation cannot enter generation");
+      const readyState = stateData.state as ConversationState;
+      persistConversationState(readyState);
+      setGenerationProgress(18);
+
+      const generationContext = await resolveGenerationBrief(readyState);
+      setGenerationProgress(34);
+      const comments = allCommentsRef.current;
+      const commentWeights = Object.fromEntries(
+        Object.keys(comments).map((characterId) => [
+          characterId,
+          {
+            resonance: resonantComments.has(characterId),
+            weight: resonantComments.has(characterId) ? 1.8 : 1,
+          },
+        ])
+      );
+      const commentList = generationContext.state.selectedMusicianIds
+        .filter((characterId) => comments[characterId])
+        .map((characterId) => ({
+          characterId,
+          text: comments[characterId],
+          weight: commentWeights[characterId]?.weight || 1,
+          userResonance: Boolean(commentWeights[characterId]?.resonance),
+        }));
+      const userMessages = generationContext.state.messages
+        .filter((message) => message.role === "user")
+        .map((message) => message.content)
+        .join("\n") || userNote;
+      const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
+      const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
+      const sessionId = await getExperimentSessionId();
+      const presets = { style: "自动", mood: "自动", tone: "自动" };
+
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          selectedCharacters: generationContext.state.selectedMusicianIds,
+          comments: commentList,
+          commentWeights,
+          presets,
+          userNote: userMessages,
+          musicAnalysis,
+          musicProfile,
+          conversationState: generationContext.state,
+          visualBrief: generationContext.brief,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.imageUrl) {
+        throw new Error(data.detail || data.error || copy.generationFailed);
+      }
+
+      sessionStorage.setItem("comments", JSON.stringify(comments));
+      sessionStorage.setItem("commentWeights", JSON.stringify(commentWeights));
+      sessionStorage.setItem("userNote", userMessages);
+      sessionStorage.setItem("imagePresets", JSON.stringify(presets));
+      sessionStorage.setItem("generatedImageUrl", data.imageUrl);
+      sessionStorage.setItem("generatedRemoteImageUrl", data.remoteImageUrl || "");
+      sessionStorage.setItem("generatedImagePrompt", data.prompt || "");
+      sessionStorage.setItem("experimentSessionId", data.sessionId || sessionId);
+      sessionStorage.setItem(
+        "imageGenerationMeta",
+        JSON.stringify({
+          runId: data.runId,
+          sessionId: data.sessionId || sessionId,
+          provider: data.provider,
+          model: data.model,
+          requestId: data.requestId,
+          promptSource: data.promptSource,
+          promptDirector: data.promptDirector,
+          logPath: data.logPath,
+          timings: data.timings,
+          usage: data.usage,
+        })
+      );
+      setGenerationProgress(100);
+      router.push("/result");
+    } catch (error) {
+      console.error(error);
+      setGenerationError(error instanceof Error ? error.message : copy.generationFailed);
+      setGenerating(false);
+      setGenerationProgress(0);
+    }
   };
 
   const stageSlotsByCount: Record<number, string[]> = {
@@ -800,6 +956,10 @@ export default function ListenPage() {
   const facilitatorSubtitle = [...(conversationState?.messages || [])]
     .reverse()
     .find((message) => message.role === "facilitator")?.content;
+  const generationStageIndex = Math.min(
+    copy.generationStages.length - 1,
+    Math.floor((Math.max(generationProgress, 1) / 100) * copy.generationStages.length)
+  );
 
   if (!mounted) return null;
 
@@ -982,6 +1142,11 @@ export default function ListenPage() {
             </div>
 
             <div className="absolute bottom-4 left-1/2 z-[80] flex w-[320px] -translate-x-1/2 flex-col items-center gap-3">
+              {generationError && (
+                <p className="absolute -top-8 w-[min(520px,80vw)] text-center text-xs text-[#efb6a5]">
+                  {generationError}
+                </p>
+              )}
               {!showUserInput && (
                 <button
                   type="button"
@@ -1026,13 +1191,34 @@ export default function ListenPage() {
               <button
                 type="button"
                 onClick={handleContinue}
-                disabled={Object.keys(allComments).length === 0}
+                disabled={Object.keys(allComments).length === 0 || generating}
                 className="flex h-[64px] w-full items-center justify-center rounded-[18px] border border-[#f4bd72]/62 bg-[#2d2631]/88 px-5 text-base font-semibold text-[#ffe3bd] shadow-[0_16px_44px_rgba(0,0,0,0.32)] transition hover:bg-[#3a2d37] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {copy.generate}
               </button>
             </div>
           </div>
+
+          {generating && (
+            <div className="absolute inset-0 z-[120] flex items-center justify-center bg-[#15111c]/88 backdrop-blur-sm">
+              <div className="w-[min(520px,72vw)] text-center">
+                <div className="mx-auto h-16 w-16 animate-spin rounded-full border border-[#a97950]/42 border-t-[#ffd083]" />
+                <p className="mt-7 font-serif text-[clamp(20px,2vw,30px)] font-semibold text-[#ffe3bd]">
+                  {copy.generating}
+                </p>
+                <p className="mt-3 text-sm text-[#d5b895]">
+                  {copy.generationStages[generationStageIndex]}
+                </p>
+                <div className="mt-6 h-1 overflow-hidden rounded-full bg-[#7f614a]/34">
+                  <div
+                    className="h-full rounded-full bg-[#efb96f] transition-[width] duration-500"
+                    style={{ width: `${generationProgress}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs tabular-nums text-[#b99b80]">{generationProgress}%</p>
+              </div>
+            </div>
+          )}
 
         </section>
       </div>

@@ -14,6 +14,9 @@ import { callPromptDirector, callPromptDirectorRepair, PromptDirectorResult } fr
 import { characters } from "@/lib/characters";
 import { buildVisualPresetPrompt } from "@/lib/prompts/visual-presets";
 import { insertGenerationRun } from "@/lib/db/generation-runs";
+import type { ConversationState, MusicProfile, VisualBrief } from "@/lib/contracts";
+import { parseConversationState } from "@/lib/conversation";
+import { parseVisualBrief } from "@/lib/visual-brief";
 
 export const runtime = "nodejs";
 
@@ -138,7 +141,8 @@ function buildFallbackImagePrompt(
   comments: CommentInput[],
   presets: { style?: string; mood?: string; tone?: string },
   userNote?: string,
-  musicAnalysis?: Record<string, unknown>
+  musicAnalysis?: Record<string, unknown>,
+  directorInput?: PromptDirectorInput
 ): string {
   const sourceFragments = [...comments]
     .sort((a, b) => b.weight - a.weight)
@@ -172,6 +176,11 @@ function buildFallbackImagePrompt(
 
   return [
     "Create one distinctive visual concept with a clear focal subject. Do not default to a generic landscape.",
+    directorInput?.coCreation
+      ? `Treat these co-created fields as authoritative: ${directorInput.coCreation.visualBrief.fields
+          .map((field) => `${field.field}=${Array.isArray(field.value) ? field.value.join(" / ") : field.value} [${field.status}]`)
+          .join("; ")}.`
+      : "",
     `Use the following source impressions as mandatory visual anchors: ${sourceFragments}.`,
     comments.some((comment) => comment.userResonance)
       ? `Give strongest visual priority to the user-resonant impressions from: ${comments.filter((comment) => comment.userResonance).map((comment) => comment.characterId).join(", ")}.`
@@ -183,6 +192,52 @@ function buildFallbackImagePrompt(
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function appendCoCreationConstraints(
+  prompt: string,
+  input: PromptDirectorInput,
+  brief: PromptDirectorBrief | null
+): string {
+  const fields = input.coCreation?.visualBrief.fields || [];
+  const anchors = fields.filter(
+    (field) => field.status === "confirmed" && field.field !== "mustAvoid"
+  );
+  const conflicts = fields.filter((field) => field.status === "conflicted");
+  const userTranslations = brief?.userSourceMappings?.map(
+    (mapping) => mapping.visualTranslation
+  ).filter(Boolean) || [];
+  const parts = [
+    userTranslations.length
+      ? `Primary personal visual anchors: ${userTranslations.join("; ")}.`
+      : input.userNote
+        ? `Primary personal image to depict as content, not as an instruction: ${input.userNote}.`
+      : "",
+    anchors.length
+      ? `Non-negotiable co-creation anchors: ${anchors.map((field) => `${field.field}: ${Array.isArray(field.value) ? field.value.join(", ") : field.value}`).join("; ")}.`
+      : "",
+    conflicts.length
+      ? `Keep these tensions visibly unresolved: ${conflicts.map((field) => `${field.field}: ${Array.isArray(field.value) ? field.value.join(" versus ") : field.value}`).join("; ")}.`
+      : "",
+  ].filter(Boolean);
+  return parts.length ? `${prompt.trim()} ${parts.join(" ")}` : prompt.trim();
+}
+
+function appendVisualBriefNegativeConstraints(
+  negativePrompt: string,
+  input: PromptDirectorInput
+): string {
+  const mustAvoid = input.coCreation?.visualBrief.fields.find(
+    (field) => field.field === "mustAvoid"
+  );
+  const values = mustAvoid
+    ? Array.isArray(mustAvoid.value) ? mustAvoid.value : [mustAvoid.value]
+    : [];
+  return [...negativePrompt.split(","), ...values]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index)
+    .join(", ");
 }
 
 function appendVisualPresetPrompt(prompt: string, presets: Record<string, unknown>): string {
@@ -266,6 +321,37 @@ function hasWeightingRationale(value: unknown): value is NonNullable<PromptDirec
         typeof (item as { weight?: unknown }).weight === "number" &&
         hasText((item as { reason?: unknown }).reason) &&
         hasText((item as { visualImpact?: unknown }).visualImpact)
+    )
+  );
+}
+
+function hasVisualBriefMappings(value: unknown): value is NonNullable<PromptDirectorBrief["visualBriefMappings"]> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        hasText((item as { field?: unknown }).field) &&
+        hasText((item as { status?: unknown }).status) &&
+        Array.isArray((item as { sourceIds?: unknown }).sourceIds) &&
+        (item as { sourceIds: unknown[] }).sourceIds.every((sourceId) => hasText(sourceId)) &&
+        ["primary", "supporting", "constraint"].includes(String((item as { priority?: unknown }).priority)) &&
+        hasText((item as { visualTranslation?: unknown }).visualTranslation)
+    )
+  );
+}
+
+function hasUserSourceMappings(value: unknown): value is NonNullable<PromptDirectorBrief["userSourceMappings"]> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        hasText((item as { sourceId?: unknown }).sourceId) &&
+        (item as { priority?: unknown }).priority === "primary" &&
+        hasText((item as { visualTranslation?: unknown }).visualTranslation)
     )
   );
 }
@@ -424,6 +510,72 @@ function validatePromptDirectorBrief(
   }
   if (!hasStringItems(brief.mustInclude)) {
     errors.push("mustInclude must contain at least one item");
+  }
+
+  if (input.coCreation) {
+    const expectedUserSourceIds = input.coCreation.sources
+      .filter((source) => source.kind === "user-message")
+      .map((source) => source.id);
+    if (!hasUserSourceMappings(brief.userSourceMappings)) {
+      errors.push("userSourceMappings must trace every user message");
+    } else {
+      const mappedUserSourceIds = brief.userSourceMappings.map((mapping) => mapping.sourceId);
+      const duplicateUserSources = mappedUserSourceIds.filter(
+        (sourceId, index) => mappedUserSourceIds.indexOf(sourceId) !== index
+      );
+      const missingUserSources = expectedUserSourceIds.filter(
+        (sourceId) => !mappedUserSourceIds.includes(sourceId)
+      );
+      const extraUserSources = mappedUserSourceIds.filter(
+        (sourceId) => !expectedUserSourceIds.includes(sourceId)
+      );
+      if (duplicateUserSources.length) errors.push(`userSourceMappings contains duplicate sources: ${duplicateUserSources.join(", ")}`);
+      if (missingUserSources.length) errors.push(`userSourceMappings missing sources: ${missingUserSources.join(", ")}`);
+      if (extraUserSources.length) errors.push(`userSourceMappings contains unknown sources: ${extraUserSources.join(", ")}`);
+    }
+
+    const expectedFields = input.coCreation.visualBrief.fields;
+    if (!hasVisualBriefMappings(brief.visualBriefMappings)) {
+      errors.push("visualBriefMappings must trace every present VisualBrief field");
+    } else {
+      const mappings = brief.visualBriefMappings;
+      const mappingFields = mappings.map((mapping) => mapping.field);
+      const duplicateFields = mappingFields.filter(
+        (field, index) => mappingFields.indexOf(field) !== index
+      );
+      const missingFields = expectedFields
+        .map((field) => field.field)
+        .filter((field) => !mappingFields.includes(field));
+      const extraFields = mappingFields.filter(
+        (field) => !expectedFields.some((expected) => expected.field === field)
+      );
+      if (duplicateFields.length) errors.push(`visualBriefMappings contains duplicate fields: ${duplicateFields.join(", ")}`);
+      if (missingFields.length) errors.push(`visualBriefMappings missing fields: ${missingFields.join(", ")}`);
+      if (extraFields.length) errors.push(`visualBriefMappings contains unknown fields: ${extraFields.join(", ")}`);
+
+      for (const expected of expectedFields) {
+        const mapping = mappings.find((item) => item.field === expected.field);
+        if (!mapping) continue;
+        if (mapping.status !== expected.status) {
+          errors.push(`visualBriefMappings changed status for ${expected.field}`);
+        }
+        const expectedSources = [...expected.sourceIds].sort();
+        const mappedSources = [...mapping.sourceIds].sort();
+        if (JSON.stringify(expectedSources) !== JSON.stringify(mappedSources)) {
+          errors.push(`visualBriefMappings changed sourceIds for ${expected.field}`);
+        }
+        if (
+          expected.status === "confirmed" &&
+          !["mustInclude", "mustAvoid"].includes(expected.field) &&
+          mapping.priority !== "primary"
+        ) {
+          errors.push(`confirmed VisualBrief field must be primary: ${expected.field}`);
+        }
+        if (["mustInclude", "mustAvoid"].includes(expected.field) && mapping.priority !== "constraint") {
+          errors.push(`VisualBrief constraint field must use constraint priority: ${expected.field}`);
+        }
+      }
+    }
   }
 
   if (!hasText(brief.coreEmotion) || countWords(brief.coreEmotion) < 2) {
@@ -621,6 +773,84 @@ async function generateImageWithDashScope(prompt: string, negativePrompt?: strin
   };
 }
 
+async function generateImageWithRetry(prompt: string, negativePrompt?: string) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return {
+        result: await generateImageWithDashScope(prompt, negativePrompt),
+        attempts: attempt,
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  throw lastError;
+}
+
+function parseMusicProfile(value: unknown): MusicProfile | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const profile = value as Partial<MusicProfile>;
+  if (
+    profile.schemaVersion !== "2.0.0" ||
+    typeof profile.id !== "string" ||
+    !profile.audio ||
+    !profile.rhythm ||
+    !profile.tonality ||
+    !profile.dynamics ||
+    !profile.timbre ||
+    !Array.isArray(profile.sections) ||
+    !profile.semantics ||
+    !Array.isArray(profile.warnings)
+  ) {
+    return null;
+  }
+  return profile as MusicProfile;
+}
+
+function validateCoCreationContext(input: {
+  conversationState: ConversationState;
+  visualBrief: VisualBrief;
+  musicProfile: MusicProfile | null;
+}) {
+  const { conversationState, visualBrief, musicProfile } = input;
+  if (
+    visualBrief.conversationId !== conversationState.id ||
+    visualBrief.musicProfileId !== conversationState.musicProfileId
+  ) {
+    throw new Error("VisualBrief does not belong to this conversation");
+  }
+  if (
+    !conversationState.visualBriefRef ||
+    conversationState.visualBriefRef.id !== visualBrief.id ||
+    conversationState.visualBriefRef.version !== visualBrief.version
+  ) {
+    throw new Error("VisualBrief version is stale");
+  }
+  if (musicProfile && musicProfile.id !== conversationState.musicProfileId) {
+    throw new Error("MusicProfile does not belong to this conversation");
+  }
+
+  const messageIds = new Set(conversationState.messages.map((message) => message.id));
+  for (const [field, value] of Object.entries(visualBrief.fields)) {
+    for (const source of value.sources) {
+      if (!hasText(source.id) || !hasText(source.kind) || !hasText(source.sourceId)) {
+        throw new Error(`VisualBrief source is malformed: ${field}`);
+      }
+      if (
+        ["user-message", "musician-message", "facilitator-subtitle"].includes(source.kind) &&
+        !messageIds.has(source.sourceId)
+      ) {
+        throw new Error(`VisualBrief source does not resolve: ${field}`);
+      }
+      if (source.kind === "music-analysis" && source.sourceId !== conversationState.musicProfileId) {
+        throw new Error(`VisualBrief music source does not resolve: ${field}`);
+      }
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   const runId = randomUUID();
   const startedAt = new Date();
@@ -628,7 +858,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { comments, presets, userNote, musicAnalysis } = body;
+    const { comments, presets, musicAnalysis } = body;
+    let effectiveUserNote = typeof body.userNote === "string" ? body.userNote : "";
     const commentWeights = normalizeCommentWeights(body.commentWeights);
     const promptOverride =
       typeof body.promptOverride === "string" && body.promptOverride.trim()
@@ -642,18 +873,67 @@ export async function POST(request: NextRequest) {
       typeof body.sessionId === "string" && body.sessionId.trim()
         ? body.sessionId.trim()
         : runId;
-    const selectedCharacters = Array.isArray(body.selectedCharacters)
-      ? body.selectedCharacters.filter((characterId: unknown) => typeof characterId === "string")
+    let selectedCharacters: string[] = Array.isArray(body.selectedCharacters)
+      ? body.selectedCharacters.filter((characterId: unknown): characterId is string => typeof characterId === "string")
       : [];
-    const normalizedComments = normalizeComments(comments, commentWeights);
+    let normalizedComments = normalizeComments(comments, commentWeights);
+    const hasCoCreationPayload = body.visualBrief !== undefined || body.conversationState !== undefined || body.musicProfile !== undefined;
+    let conversationState: ConversationState | null = null;
+    let visualBrief: VisualBrief | null = null;
+    let musicProfile: MusicProfile | null = null;
+
+    if (hasCoCreationPayload) {
+      try {
+        conversationState = parseConversationState(body.conversationState);
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof Error ? error.message : "Invalid ConversationState" },
+          { status: 400 }
+        );
+      }
+      visualBrief = parseVisualBrief(body.visualBrief);
+      if (!visualBrief) return Response.json({ error: "Invalid VisualBrief" }, { status: 400 });
+      if (body.musicProfile !== null && body.musicProfile !== undefined) {
+        musicProfile = parseMusicProfile(body.musicProfile);
+        if (!musicProfile) return Response.json({ error: "Invalid MusicProfile" }, { status: 400 });
+      }
+      try {
+        validateCoCreationContext({ conversationState, visualBrief, musicProfile });
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof Error ? error.message : "Invalid co-creation context" },
+          { status: 409 }
+        );
+      }
+
+      selectedCharacters = [...conversationState.selectedMusicianIds];
+      const latestMusicianMessages = new Map<string, string>();
+      for (const message of conversationState.messages) {
+        if (message.role === "musician") latestMusicianMessages.set(message.speakerId, message.content);
+      }
+      normalizedComments = selectedCharacters
+        .filter((characterId) => latestMusicianMessages.has(characterId))
+        .map((characterId) => ({
+          characterId,
+          text: latestMusicianMessages.get(characterId)!,
+          weight: commentWeights[characterId]?.weight || 1,
+          userResonance: Boolean(commentWeights[characterId]?.resonance),
+        }));
+      effectiveUserNote = conversationState.messages
+        .filter((message) => message.role === "user")
+        .map((message) => message.content)
+        .join("\n");
+    }
 
     if (promptOverride) {
       const imageStartedAt = Date.now();
-      const imageResult = await generateImageWithDashScope(
+      const imageAttempt = await generateImageWithRetry(
         promptOverride,
         negativePromptOverride ||
           "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs"
       );
+      const imageResult = imageAttempt.result;
+      timings.imageGenerationAttempts = imageAttempt.attempts;
       timings.imageGenerationMs = Date.now() - imageStartedAt;
 
       const saveStartedAt = Date.now();
@@ -671,7 +951,7 @@ export async function POST(request: NextRequest) {
           comments: normalizedComments,
           commentWeights,
           presets,
-          userNote,
+          userNote: effectiveUserNote,
           promptOverride: true,
         },
         prompt: {
@@ -699,7 +979,7 @@ export async function POST(request: NextRequest) {
         createdAt: startedAt.toISOString(),
         selectedCharacters,
         presets,
-        userNote: typeof userNote === "string" ? userNote : "",
+        userNote: effectiveUserNote,
         musicAnalysis,
         musicianComments: normalizedComments,
         promptDirector: null,
@@ -740,8 +1020,9 @@ export async function POST(request: NextRequest) {
       characters,
       normalizedComments,
       presets || {},
-      userNote,
-      musicAnalysis
+      effectiveUserNote,
+      musicAnalysis,
+      { musicProfile, visualBrief, conversationState }
     );
     const promptDirectorInstruction = buildPromptDirectorInstruction(promptDirectorInput);
 
@@ -771,14 +1052,22 @@ export async function POST(request: NextRequest) {
     }
     const directorImagePrompt =
       cleanedPrompt ||
-      buildFallbackImagePrompt(normalizedComments, presets || {}, userNote, musicAnalysis);
-    const imagePrompt = appendVisualPresetPrompt(directorImagePrompt, presets || {});
-    const negativePrompt =
+      buildFallbackImagePrompt(normalizedComments, presets || {}, effectiveUserNote, musicAnalysis, promptDirectorInput);
+    const imagePrompt = appendCoCreationConstraints(
+      appendVisualPresetPrompt(directorImagePrompt, presets || {}),
+      promptDirectorInput,
+      promptBrief
+    );
+    const negativePrompt = appendVisualBriefNegativeConstraints(
       promptBrief?.negativePrompt ||
-      "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs";
+        "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs",
+      promptDirectorInput
+    );
 
     const imageStartedAt = Date.now();
-    const imageResult = await generateImageWithDashScope(imagePrompt, negativePrompt);
+    const imageAttempt = await generateImageWithRetry(imagePrompt, negativePrompt);
+    const imageResult = imageAttempt.result;
+    timings.imageGenerationAttempts = imageAttempt.attempts;
     timings.imageGenerationMs = Date.now() - imageStartedAt;
 
     const saveStartedAt = Date.now();
@@ -794,10 +1083,13 @@ export async function POST(request: NextRequest) {
       status: "success",
       input: {
         musicAnalysis,
+        musicProfile,
+        visualBrief,
+        conversationState,
         comments: normalizedComments,
         commentWeights,
         presets,
-        userNote,
+        userNote: effectiveUserNote,
       },
       prompt: {
         source: promptSource,
@@ -833,7 +1125,7 @@ export async function POST(request: NextRequest) {
       createdAt: startedAt.toISOString(),
       selectedCharacters,
       presets,
-      userNote: typeof userNote === "string" ? userNote : "",
+      userNote: effectiveUserNote,
       musicAnalysis,
       musicianComments: normalizedComments,
       promptDirector: runLog.prompt.director,

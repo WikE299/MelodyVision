@@ -192,6 +192,8 @@ export default function SelectPage() {
     setError("");
     sessionStorage.setItem("selectedCharacters", JSON.stringify(selected));
     sessionStorage.setItem("comments", "{}");
+    sessionStorage.removeItem("commentWeights");
+    sessionStorage.removeItem("resonantComments");
     sessionStorage.removeItem("conversationState");
     sessionStorage.removeItem("facilitatorPlan");
     sessionStorage.removeItem("visualBrief");
