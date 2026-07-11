@@ -13,12 +13,11 @@ import {
 import { characterUi, type Language, useLanguage } from "@/lib/i18n";
 
 const DEFAULT_COMBO = ["boya", "beethoven", "abing", "armstrong"];
-const COMMENT_FAILED_TEXT = "（评论生成失败，请重试）";
 const MAX_SELECTION = 4;
 
 const COPY = {
   zh: {
-    commentFailed: "评论生成失败，请稍后重试",
+    commentFailed: "聆听室初始化失败，请稍后重试",
     eyebrow: "✦ 选择你的聆听导览者 ✦",
     title: "选择你的聆听导览者",
     subtitle: "可多选 1-4 位",
@@ -31,10 +30,10 @@ const COPY = {
     entering: "正在进入...",
     enter: "进入聆听室",
     helper: "进入后可调整角色并开始聆听",
-    generating: "音乐家正在并行点评，完成后会自动进入聆听页",
+    generating: "正在安排第一轮共同聆听，完成后会自动进入聆听页",
   },
   en: {
-    commentFailed: "Failed to generate comments. Please try again later.",
+    commentFailed: "Failed to initialize the listening room. Please try again later.",
     eyebrow: "✦ Choose Your Listening Guides ✦",
     title: "Choose Your Listening Guides",
     subtitle: "Select 1-4 musicians",
@@ -47,7 +46,7 @@ const COPY = {
     entering: "Entering...",
     enter: "Enter Listening Room",
     helper: "You can listen and adjust the cast on the next page",
-    generating: "Musicians are commenting in parallel. The listening room will open soon.",
+    generating: "Preparing the first listening round. The room will open soon.",
   },
 };
 
@@ -186,81 +185,36 @@ export default function SelectPage() {
     setSelected([]);
   };
 
-  const generateComment = async (characterId: string, musicAnalysis: unknown) => {
-    const res = await fetch("/api/comment", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        characterId,
-        musicAnalysis,
-      }),
-    });
-
-    if (!res.ok) throw new Error("Comment API failed");
-    const data = await res.json();
-    return data.comment as string;
-  };
-
   const handleContinue = async () => {
     if (selected.length === 0 || generating) return;
 
     setGenerating(true);
     setError("");
     sessionStorage.setItem("selectedCharacters", JSON.stringify(selected));
-    sessionStorage.removeItem("comments");
+    sessionStorage.setItem("comments", "{}");
+    sessionStorage.removeItem("conversationState");
+    sessionStorage.removeItem("facilitatorPlan");
 
     try {
-      const musicAnalysis = JSON.parse(
-        sessionStorage.getItem("musicAnalysis") || "{}"
-      );
-      const results = await Promise.allSettled(
-        selected.map(async (characterId) => ({
-          characterId,
-          comment: await generateComment(characterId, musicAnalysis),
-        }))
-      );
-      const successCount = results.filter((result) => result.status === "fulfilled").length;
-
-      if (successCount === 0) {
-        throw new Error("All comment requests failed");
-      }
-
-      const comments = Object.fromEntries(
-        results.map((result, index) => {
-          const characterId = selected[index];
-          if (result.status === "fulfilled") {
-            return [result.value.characterId, result.value.comment];
-          }
-          return [characterId, COMMENT_FAILED_TEXT];
-        })
-      );
-
-      sessionStorage.setItem("comments", JSON.stringify(comments));
       const sessionId = sessionStorage.getItem("experimentSessionId") || crypto.randomUUID();
       const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as { id?: string } | null;
       const musicProfileId = musicProfile?.id || `degraded-${sessionId}`;
       sessionStorage.setItem("experimentSessionId", sessionId);
 
-      try {
-        const conversationResponse = await fetch("/api/conversation/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            musicProfileId,
-            selectedMusicianIds: selected,
-            preparedSummaries: comments,
-          }),
-        });
-        if (!conversationResponse.ok) throw new Error("Conversation initialization failed");
-        const conversation = await conversationResponse.json();
-        sessionStorage.setItem("conversationState", JSON.stringify(conversation.state));
-        sessionStorage.setItem("facilitatorPlan", JSON.stringify(conversation.facilitatorPlan));
-      } catch (conversationError) {
-        console.error(conversationError);
-        sessionStorage.removeItem("conversationState");
-        sessionStorage.removeItem("facilitatorPlan");
-      }
+      const conversationResponse = await fetch("/api/conversation/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          musicProfileId,
+          selectedMusicianIds: selected,
+          preparedSummaries: {},
+        }),
+      });
+      if (!conversationResponse.ok) throw new Error("Conversation initialization failed");
+      const conversation = await conversationResponse.json();
+      sessionStorage.setItem("conversationState", JSON.stringify(conversation.state));
+      sessionStorage.setItem("facilitatorPlan", JSON.stringify(conversation.facilitatorPlan));
       router.push("/listen");
     } catch {
       setError(copy.commentFailed);

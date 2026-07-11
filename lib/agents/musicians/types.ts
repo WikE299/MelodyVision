@@ -28,6 +28,11 @@ export interface MusicianAgentInput {
   userNote?: string;
 }
 
+export interface MusicianConversationInput extends MusicianAgentInput {
+  conversationState: import("../../contracts/conversation-state.ts").ConversationState;
+  musicianNames: Record<string, string>;
+}
+
 export interface MusicianAgentResult {
   comment: string;
   model: string;

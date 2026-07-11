@@ -9,6 +9,19 @@ export interface LLMResponse {
   };
 }
 
+export interface LLMStreamDelta {
+  content: string;
+  model: string;
+}
+
+export interface LLMStreamRequest {
+  systemPrompt: string;
+  userMessage: string;
+  temperature?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
 const client = new OpenAI({
   apiKey: process.env.LLM_API_KEY,
   baseURL: process.env.LLM_BASE_URL,
@@ -69,6 +82,39 @@ export async function callLLM(params: {
         }
       : undefined,
   };
+}
+
+export async function* streamLLM(params: LLMStreamRequest): AsyncGenerator<LLMStreamDelta> {
+  const {
+    systemPrompt,
+    userMessage,
+    temperature = 0.7,
+    maxTokens = 2000,
+    signal,
+  } = params;
+  const stream = await client.chat.completions.create(
+    {
+      model: MODEL,
+      max_tokens: maxTokens,
+      temperature,
+      stream: true,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+    },
+    signal ? { signal } : undefined
+  );
+
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content || "";
+    if (content) {
+      yield {
+        content,
+        model: chunk.model || MODEL,
+      };
+    }
+  }
 }
 
 export async function callPromptDirector(systemPrompt: string): Promise<PromptDirectorResult> {

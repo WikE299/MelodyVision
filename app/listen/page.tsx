@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { getCharactersByIds, Character } from "@/lib/characters";
 import FlowHeader from "@/components/FlowHeader";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
+import type { ConversationState } from "@/lib/contracts";
+import { readConversationStream } from "@/lib/conversation";
 
 const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
 
@@ -35,6 +37,8 @@ const COPY = {
     myFeeling: "我的感受",
     feelingPlaceholder: "我也想说两句（可选）",
     collapse: "收起",
+    sendFeeling: "发送听感",
+    sendingFeeling: "正在发送",
     closeComment: "关闭评论",
     resonate: "更接近我的听感",
     resonated: "已作为重点听法",
@@ -53,6 +57,8 @@ const COPY = {
     myFeeling: "My note",
     feelingPlaceholder: "I also want to say something (optional)",
     collapse: "Close",
+    sendFeeling: "Send listening note",
+    sendingFeeling: "Sending",
     closeComment: "Close comment",
     resonate: "Closer to my listening",
     resonated: "Marked as key lens",
@@ -67,17 +73,30 @@ function getInitialListenState() {
       selectedChars: [] as Character[],
       audioSrc: "",
       comments: {} as Record<string, string>,
+      conversationState: null as ConversationState | null,
     };
   }
 
   const ids = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
   const src = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
   const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
+  let conversationState: ConversationState | null = null;
+  try {
+    conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
+  } catch {
+    conversationState = null;
+  }
+  if (conversationState) {
+    for (const message of conversationState.messages) {
+      if (message.role === "musician") comments[message.speakerId] = message.content;
+    }
+  }
 
   return {
     selectedChars: getCharactersByIds(ids),
     audioSrc: src,
     comments,
+    conversationState,
   };
 }
 
@@ -244,29 +263,35 @@ export default function ListenPage() {
   const mounted = useHydrated();
   const [initialState] = useState(getInitialListenState);
   const [selectedChars] = useState<Character[]>(initialState.selectedChars);
+  const [conversationState, setConversationState] = useState<ConversationState | null>(initialState.conversationState);
   const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
-  const [visibleComments, setVisibleComments] = useState<Record<string, string>>({});
-  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [visibleComments, setVisibleComments] = useState<Record<string, string>>(initialState.comments);
+  const [revealed, setRevealed] = useState<Set<string>>(new Set(Object.keys(initialState.comments)));
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [streaming, setStreaming] = useState<Set<string>>(new Set());
-  const [streamedOnce, setStreamedOnce] = useState<Set<string>>(new Set());
+  const [failedSpeakerId, setFailedSpeakerId] = useState("");
   const [resonantComments, setResonantComments] = useState<Set<string>>(new Set());
   const [activeCharacterId, setActiveCharacterId] = useState<string>(selectedChars[0]?.id || "");
   const [userNote, setUserNote] = useState("");
   const [showUserInput, setShowUserInput] = useState(false);
+  const [submittingUserNote, setSubmittingUserNote] = useState(false);
   const [showPlayerControls, setShowPlayerControls] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [audioSrc] = useState(initialState.audioSrc);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const streamTimersRef = useRef<Map<string, number>>(new Map());
+  const turnInFlightRef = useRef(false);
+  const turnAbortRef = useRef<AbortController | null>(null);
+  const streamGenerationRef = useRef(0);
+  const activeStreamSpeakerRef = useRef("");
+  const allCommentsRef = useRef(initialState.comments);
 
   useEffect(() => {
-    if (selectedChars.length === 0) {
+    if (selectedChars.length === 0 || !conversationState) {
       router.push("/select");
     }
-  }, [router, selectedChars.length]);
+  }, [conversationState, router, selectedChars.length]);
 
   useEffect(() => {
     if (!audioSrc) return;
@@ -290,12 +315,12 @@ export default function ListenPage() {
     };
   }, [audioSrc]);
 
-  useEffect(() => {
-    const timers = streamTimersRef.current;
-    return () => {
-      timers.forEach((timerId) => window.clearTimeout(timerId));
-      timers.clear();
-    };
+  useEffect(() => () => {
+    streamGenerationRef.current += 1;
+    turnAbortRef.current?.abort();
+    turnAbortRef.current = null;
+    turnInFlightRef.current = false;
+    activeStreamSpeakerRef.current = "";
   }, []);
 
   const togglePlay = async () => {
@@ -316,110 +341,186 @@ export default function ListenPage() {
     setCurrentTime(nextTime);
   };
 
-  const fetchComment = useCallback(async (charId: string) => {
-    const analysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
-
-    const res = await fetch("/api/comment", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        characterId: charId,
-        musicAnalysis: analysis,
-      }),
-    });
-
-    if (!res.ok) throw new Error("Comment API failed");
-    const data = await res.json();
-    return data.comment as string;
+  const persistConversationState = useCallback((nextState: ConversationState) => {
+    setConversationState(nextState);
+    sessionStorage.setItem("conversationState", JSON.stringify(nextState));
   }, []);
 
-  const stopStreaming = useCallback((charId: string) => {
-    const timerId = streamTimersRef.current.get(charId);
-    if (timerId !== undefined) {
-      window.clearTimeout(timerId);
-      streamTimersRef.current.delete(charId);
-    }
+  const clearTurnIndicators = useCallback((speakerId: string) => {
+    setLoading((prev) => {
+      const next = new Set(prev);
+      next.delete(speakerId);
+      return next;
+    });
     setStreaming((prev) => {
       const next = new Set(prev);
-      next.delete(charId);
+      next.delete(speakerId);
       return next;
     });
   }, []);
 
-  const streamComment = useCallback((charId: string, text: string) => {
-    stopStreaming(charId);
-    setRevealed((prev) => new Set(prev).add(charId));
-    setVisibleComments((prev) => ({ ...prev, [charId]: "" }));
-    setStreaming((prev) => new Set(prev).add(charId));
+  const runScheduledTurn = useCallback(async (state: ConversationState) => {
+    const speakerId = state.queuedSpeakerIds[0];
+    if (!speakerId || turnInFlightRef.current) return;
 
-    let index = 0;
-    const step = () => {
-      index = Math.min(text.length, index + 1);
-      setVisibleComments((prev) => ({ ...prev, [charId]: text.slice(0, index) }));
-
-      if (index >= text.length) {
-        streamTimersRef.current.delete(charId);
-        setStreaming((prev) => {
-          const next = new Set(prev);
-          next.delete(charId);
-          return next;
-        });
-        setStreamedOnce((prev) => new Set(prev).add(charId));
-        return;
-      }
-
-      const char = text[index - 1] || "";
-      const pause = /[，。！？,.!?]/.test(char) ? 150 : 58;
-      const timerId = window.setTimeout(step, pause);
-      streamTimersRef.current.set(charId, timerId);
-    };
-
-    const timerId = window.setTimeout(step, 180);
-    streamTimersRef.current.set(charId, timerId);
-  }, [stopStreaming]);
-
-  const handleReveal = async (charId: string) => {
-    if (loading.has(charId)) return;
-
-    setActiveCharacterId(charId);
-
-    if (allComments[charId]) {
-      if (streamedOnce.has(charId)) {
-        setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] }));
-        setRevealed((prev) => new Set(prev).add(charId));
-        return;
-      }
-      streamComment(charId, allComments[charId]);
-      return;
-    }
-
-    setLoading((prev) => new Set(prev).add(charId));
+    turnInFlightRef.current = true;
+    const requestGeneration = ++streamGenerationRef.current;
+    const controller = new AbortController();
+    turnAbortRef.current = controller;
+    activeStreamSpeakerRef.current = speakerId;
+    setFailedSpeakerId("");
+    setActiveCharacterId(speakerId);
+    setRevealed((prev) => new Set(prev).add(speakerId));
+    setVisibleComments((prev) => ({ ...prev, [speakerId]: "" }));
+    setLoading((prev) => new Set(prev).add(speakerId));
+    setStreaming((prev) => new Set(prev).add(speakerId));
 
     try {
-      const comment = await fetchComment(charId);
-      setAllComments((prev) => ({ ...prev, [charId]: comment }));
-      streamComment(charId, comment);
-    } catch {
-      setAllComments((prev) => ({ ...prev, [charId]: copy.failed }));
-      streamComment(charId, copy.failed);
-    } finally {
-      setLoading((prev) => {
-        const next = new Set(prev);
-        next.delete(charId);
-        return next;
+      const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
+      const response = await fetch("/api/conversation/turn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationState: state, musicAnalysis }),
+        signal: controller.signal,
       });
+      if (!response.ok || !response.body) throw new Error("Conversation stream failed");
+
+      let streamError = "";
+      let completed = false;
+      await readConversationStream(response.body, (event) => {
+        if (requestGeneration !== streamGenerationRef.current) return;
+        if (event.type === "delta") {
+          setLoading((prev) => {
+            const next = new Set(prev);
+            next.delete(speakerId);
+            return next;
+          });
+          setVisibleComments((prev) => ({
+            ...prev,
+            [speakerId]: `${prev[speakerId] || ""}${event.delta}`,
+          }));
+        } else if (event.type === "complete") {
+          completed = true;
+          setVisibleComments((prev) => ({ ...prev, [speakerId]: event.comment }));
+          setAllComments((prev) => {
+            const next = { ...prev, [speakerId]: event.comment };
+            allCommentsRef.current = next;
+            sessionStorage.setItem("comments", JSON.stringify(next));
+            return next;
+          });
+          activeStreamSpeakerRef.current = "";
+          persistConversationState(event.state);
+        } else if (event.type === "error") {
+          streamError = event.message;
+        }
+      });
+      if (streamError || !completed) throw new Error(streamError || "Conversation stream ended early");
+    } catch (error) {
+      if (!controller.signal.aborted && requestGeneration === streamGenerationRef.current) {
+        console.error(error);
+        setFailedSpeakerId(speakerId);
+        setVisibleComments((prev) => ({ ...prev, [speakerId]: copy.failed }));
+      }
+    } finally {
+      if (requestGeneration === streamGenerationRef.current) {
+        clearTurnIndicators(speakerId);
+        turnInFlightRef.current = false;
+        turnAbortRef.current = null;
+        activeStreamSpeakerRef.current = "";
+      }
     }
+  }, [clearTurnIndicators, copy.failed, persistConversationState]);
+
+  useEffect(() => {
+    const nextSpeakerId = conversationState?.queuedSpeakerIds[0];
+    if (
+      conversationState?.status === "streaming-musician" &&
+      nextSpeakerId &&
+      failedSpeakerId !== nextSpeakerId
+    ) {
+      void runScheduledTurn(conversationState);
+    }
+  }, [conversationState, failedSpeakerId, runScheduledTurn]);
+
+  const handleReveal = (charId: string) => {
+    setActiveCharacterId(charId);
+    if (failedSpeakerId === charId && conversationState) {
+      setFailedSpeakerId("");
+      void runScheduledTurn(conversationState);
+      return;
+    }
+    if (!allComments[charId] && !streaming.has(charId)) return;
+    setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] || prev[charId] || "" }));
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      if (next.has(charId)) next.delete(charId);
+      else next.add(charId);
+      return next;
+    });
   };
 
   const handleCloseBubble = (charId: string) => {
-    stopStreaming(charId);
     setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] || prev[charId] || "" }));
-    setStreamedOnce((prev) => new Set(prev).add(charId));
     setRevealed((prev) => {
       const next = new Set(prev);
       next.delete(charId);
       return next;
     });
+  };
+
+  const cancelActiveTurn = useCallback(() => {
+    const speakerId = activeStreamSpeakerRef.current;
+    streamGenerationRef.current += 1;
+    turnAbortRef.current?.abort();
+    turnAbortRef.current = null;
+    turnInFlightRef.current = false;
+    activeStreamSpeakerRef.current = "";
+    setLoading(new Set());
+    setStreaming(new Set());
+    if (speakerId) {
+      setVisibleComments((prev) => {
+        const next = { ...prev };
+        const committed = allCommentsRef.current[speakerId];
+        if (committed) next[speakerId] = committed;
+        else delete next[speakerId];
+        return next;
+      });
+      if (!allCommentsRef.current[speakerId]) {
+        setRevealed((prev) => {
+          const next = new Set(prev);
+          next.delete(speakerId);
+          return next;
+        });
+      }
+    }
+  }, []);
+
+  const handleSubmitUserNote = async () => {
+    const content = userNote.trim();
+    if (!content || !conversationState || submittingUserNote) return;
+
+    setSubmittingUserNote(true);
+    cancelActiveTurn();
+    try {
+      const response = await fetch("/api/conversation/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationState, content }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Conversation response failed");
+      persistConversationState(data.state as ConversationState);
+      if (data.facilitatorPlan) {
+        sessionStorage.setItem("facilitatorPlan", JSON.stringify(data.facilitatorPlan));
+      }
+      setUserNote("");
+      setShowUserInput(false);
+      setFailedSpeakerId("");
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setSubmittingUserNote(false);
+    }
   };
 
   const toggleResonance = (charId: string) => {
@@ -435,6 +536,7 @@ export default function ListenPage() {
   };
 
   const handleContinue = () => {
+    cancelActiveTurn();
     const commentWeights = Object.fromEntries(
       Object.keys(allComments).map((characterId) => [
         characterId,
@@ -446,7 +548,12 @@ export default function ListenPage() {
     );
     sessionStorage.setItem("comments", JSON.stringify(allComments));
     sessionStorage.setItem("commentWeights", JSON.stringify(commentWeights));
-    sessionStorage.setItem("userNote", userNote);
+    const userMessages = conversationState?.messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content)
+      .join("\n") || userNote;
+    sessionStorage.setItem("userNote", userMessages);
+    if (conversationState) sessionStorage.setItem("conversationState", JSON.stringify(conversationState));
     router.push("/generate-page");
   };
 
@@ -469,6 +576,9 @@ export default function ListenPage() {
     ],
   };
   const stageSlots = stageSlotsByCount[Math.min(selectedChars.length, 4)] || stageSlotsByCount[4];
+  const facilitatorSubtitle = [...(conversationState?.messages || [])]
+    .reverse()
+    .find((message) => message.role === "facilitator")?.content;
 
   if (!mounted) return null;
 
@@ -514,8 +624,8 @@ export default function ListenPage() {
             <div className="absolute bottom-[18px] left-[28%] h-[360px] w-[1px] -rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
             <div className="absolute bottom-[18px] right-[28%] h-[360px] w-[1px] rotate-[16deg] bg-gradient-to-t from-[#c99560]/20 to-transparent" />
           </div>
-          <p className="pointer-events-none absolute left-1/2 top-4 z-20 max-w-[min(880px,82vw)] -translate-x-1/2 text-center font-serif text-[clamp(18px,1.55vw,28px)] font-semibold text-[#ffe4ba]/90 drop-shadow-[0_0_16px_rgba(255,194,103,0.28)] 2xl:top-5">
-            {copy.guideTip}
+          <p className="pointer-events-none absolute left-1/2 top-4 z-20 max-w-[min(880px,82vw)] -translate-x-1/2 translate-y-0 text-center font-serif text-[clamp(18px,1.55vw,28px)] font-semibold text-[#ffe4ba]/90 drop-shadow-[0_0_16px_rgba(255,194,103,0.28)] 2xl:top-5">
+            {facilitatorSubtitle || copy.guideTip}
           </p>
 
           <div className="relative z-10 flex min-w-0 flex-1 flex-col px-6 pb-5 pt-4 2xl:px-9 2xl:pb-7">
@@ -668,12 +778,22 @@ export default function ListenPage() {
                   >
                     {copy.collapse}
                   </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmitUserNote}
+                    disabled={!userNote.trim() || submittingUserNote}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#d5a160]/58 bg-[#ffe0bd] text-base font-semibold text-[#3a2b34] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
+                    title={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
+                  >
+                    ↑
+                  </button>
                 </div>
               )}
               <button
                 type="button"
                 onClick={handleContinue}
-                disabled={revealed.size === 0}
+                disabled={Object.keys(allComments).length === 0}
                 className="flex h-[64px] w-full items-center justify-center rounded-[18px] border border-[#f4bd72]/62 bg-[#2d2631]/88 px-5 text-base font-semibold text-[#ffe3bd] shadow-[0_16px_44px_rgba(0,0,0,0.32)] transition hover:bg-[#3a2d37] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {copy.generate}
