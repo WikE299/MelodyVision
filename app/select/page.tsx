@@ -236,6 +236,31 @@ export default function SelectPage() {
       );
 
       sessionStorage.setItem("comments", JSON.stringify(comments));
+      const sessionId = sessionStorage.getItem("experimentSessionId") || crypto.randomUUID();
+      const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as { id?: string } | null;
+      const musicProfileId = musicProfile?.id || `degraded-${sessionId}`;
+      sessionStorage.setItem("experimentSessionId", sessionId);
+
+      try {
+        const conversationResponse = await fetch("/api/conversation/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            musicProfileId,
+            selectedMusicianIds: selected,
+            preparedSummaries: comments,
+          }),
+        });
+        if (!conversationResponse.ok) throw new Error("Conversation initialization failed");
+        const conversation = await conversationResponse.json();
+        sessionStorage.setItem("conversationState", JSON.stringify(conversation.state));
+        sessionStorage.setItem("facilitatorPlan", JSON.stringify(conversation.facilitatorPlan));
+      } catch (conversationError) {
+        console.error(conversationError);
+        sessionStorage.removeItem("conversationState");
+        sessionStorage.removeItem("facilitatorPlan");
+      }
       router.push("/listen");
     } catch {
       setError(copy.commentFailed);
