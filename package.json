@@ -11,7 +11,8 @@
     "audio:evaluate:meyda": "node --experimental-strip-types scripts/evaluate-meyda.mjs",
     "test:audio-adapter": "node --experimental-strip-types --test tests/music-profile-adapter.test.ts",
     "test:musician-agents": "node --experimental-strip-types --test tests/musician-agents.test.ts",
-    "test:conversation": "node --experimental-strip-types --test tests/conversation-state-machine.test.ts tests/conversation-stream.test.ts"
+    "test:conversation": "node --experimental-strip-types --test tests/conversation-state-machine.test.ts tests/conversation-stream.test.ts",
+    "test:visual-scribe": "node --experimental-strip-types --test tests/visual-scribe.test.ts"
   },
   "dependencies": {
     "meyda": "^5.6.3",

@@ -194,6 +194,8 @@ export default function SelectPage() {
     sessionStorage.setItem("comments", "{}");
     sessionStorage.removeItem("conversationState");
     sessionStorage.removeItem("facilitatorPlan");
+    sessionStorage.removeItem("visualBrief");
+    sessionStorage.removeItem("visualBriefMeta");
 
     try {
       const sessionId = sessionStorage.getItem("experimentSessionId") || crypto.randomUUID();

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { getCharactersByIds, Character } from "@/lib/characters";
 import FlowHeader from "@/components/FlowHeader";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
-import type { ConversationState } from "@/lib/contracts";
+import type { ConversationState, VisualBrief } from "@/lib/contracts";
 import { readConversationStream } from "@/lib/conversation";
 
 const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
@@ -74,6 +74,7 @@ function getInitialListenState() {
       audioSrc: "",
       comments: {} as Record<string, string>,
       conversationState: null as ConversationState | null,
+      visualBrief: null as VisualBrief | null,
     };
   }
 
@@ -81,10 +82,16 @@ function getInitialListenState() {
   const src = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
   const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
   let conversationState: ConversationState | null = null;
+  let visualBrief: VisualBrief | null = null;
   try {
     conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
   } catch {
     conversationState = null;
+  }
+  try {
+    visualBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null") as VisualBrief | null;
+  } catch {
+    visualBrief = null;
   }
   if (conversationState) {
     for (const message of conversationState.messages) {
@@ -97,6 +104,7 @@ function getInitialListenState() {
     audioSrc: src,
     comments,
     conversationState,
+    visualBrief,
   };
 }
 
@@ -264,6 +272,7 @@ export default function ListenPage() {
   const [initialState] = useState(getInitialListenState);
   const [selectedChars] = useState<Character[]>(initialState.selectedChars);
   const [conversationState, setConversationState] = useState<ConversationState | null>(initialState.conversationState);
+  const [visualBrief, setVisualBrief] = useState<VisualBrief | null>(initialState.visualBrief);
   const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
   const [visibleComments, setVisibleComments] = useState<Record<string, string>>(initialState.comments);
   const [revealed, setRevealed] = useState<Set<string>>(new Set(Object.keys(initialState.comments)));
@@ -275,6 +284,7 @@ export default function ListenPage() {
   const [userNote, setUserNote] = useState("");
   const [showUserInput, setShowUserInput] = useState(false);
   const [submittingUserNote, setSubmittingUserNote] = useState(false);
+  const [briefCheckNonce, setBriefCheckNonce] = useState(0);
   const [showPlayerControls, setShowPlayerControls] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -286,6 +296,9 @@ export default function ListenPage() {
   const streamGenerationRef = useRef(0);
   const activeStreamSpeakerRef = useRef("");
   const allCommentsRef = useRef(initialState.comments);
+  const visualBriefRefRef = useRef(initialState.conversationState?.visualBriefRef || null);
+  const briefInFlightRef = useRef(false);
+  const failedBriefVersionRef = useRef(0);
 
   useEffect(() => {
     if (selectedChars.length === 0 || !conversationState) {
@@ -342,8 +355,24 @@ export default function ListenPage() {
   };
 
   const persistConversationState = useCallback((nextState: ConversationState) => {
-    setConversationState(nextState);
-    sessionStorage.setItem("conversationState", JSON.stringify(nextState));
+    const latestRef = visualBriefRefRef.current;
+    const mergedState = latestRef && (nextState.visualBriefRef?.version || 0) < latestRef.version
+      ? { ...nextState, visualBriefRef: latestRef }
+      : nextState;
+    visualBriefRefRef.current = mergedState.visualBriefRef;
+    setConversationState(mergedState);
+    sessionStorage.setItem("conversationState", JSON.stringify(mergedState));
+  }, []);
+
+  const mergeVisualBriefRef = useCallback((visualBriefRef: ConversationState["visualBriefRef"]) => {
+    if (visualBriefRef) visualBriefRefRef.current = visualBriefRef;
+    setConversationState((current) => {
+      if (!current || !visualBriefRef) return current;
+      if ((current.visualBriefRef?.version || 0) >= visualBriefRef.version) return current;
+      const next = { ...current, visualBriefRef };
+      sessionStorage.setItem("conversationState", JSON.stringify(next));
+      return next;
+    });
   }, []);
 
   const clearTurnIndicators = useCallback((speakerId: string) => {
@@ -441,6 +470,57 @@ export default function ListenPage() {
       void runScheduledTurn(conversationState);
     }
   }, [conversationState, failedSpeakerId, runScheduledTurn]);
+
+  const updateVisualBrief = useCallback(async (
+    state: ConversationState,
+    expectedVersion: number
+  ) => {
+    if (briefInFlightRef.current) return;
+    briefInFlightRef.current = true;
+    try {
+      const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
+      const previousBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null");
+      const response = await fetch("/api/conversation/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationState: state,
+          previousBrief,
+          musicAnalysis,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "VisualBrief update failed");
+      const nextBrief = data.visualBrief as VisualBrief;
+      setVisualBrief(nextBrief);
+      sessionStorage.setItem("visualBrief", JSON.stringify(nextBrief));
+      sessionStorage.setItem("visualBriefMeta", JSON.stringify(data.meta));
+      mergeVisualBriefRef(data.visualBriefRef);
+      failedBriefVersionRef.current = 0;
+    } catch (error) {
+      console.error(error);
+      failedBriefVersionRef.current = expectedVersion;
+    } finally {
+      briefInFlightRef.current = false;
+      setBriefCheckNonce((value) => value + 1);
+    }
+  }, [mergeVisualBriefRef]);
+
+  useEffect(() => {
+    if (!conversationState || conversationState.turnOwner !== "user") return;
+    const completedRounds = conversationState.messages.reduce((count, message, index, messages) => {
+      return message.role === "facilitator" && messages[index - 1]?.role === "musician"
+        ? count + 1
+        : count;
+    }, 0);
+    const currentVersion = conversationState.visualBriefRef?.version || visualBrief?.version || 0;
+    if (
+      completedRounds > currentVersion &&
+      failedBriefVersionRef.current !== completedRounds
+    ) {
+      void updateVisualBrief(conversationState, completedRounds);
+    }
+  }, [briefCheckNonce, conversationState, updateVisualBrief, visualBrief?.version]);
 
   const handleReveal = (charId: string) => {
     setActiveCharacterId(charId);
@@ -554,6 +634,7 @@ export default function ListenPage() {
       .join("\n") || userNote;
     sessionStorage.setItem("userNote", userMessages);
     if (conversationState) sessionStorage.setItem("conversationState", JSON.stringify(conversationState));
+    if (visualBrief) sessionStorage.setItem("visualBrief", JSON.stringify(visualBrief));
     router.push("/generate-page");
   };
 
