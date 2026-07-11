@@ -174,7 +174,7 @@ test("facilitator model plans are constrained to eligible speakers", async () =>
     async () => ({
       content: JSON.stringify({
         speakerIds: ["beethoven", "abing"],
-        transition: "刚才的画面还很开阔，接下来听听它如何开始移动。",
+        transition: "刚才的画面还很开阔，接下来探索 motion-composition。",
         userInvitation: "你更靠近哪一种，又看见了什么？",
         sentenceStarters: ["我最先看见……", "它像是在……"],
       }),
@@ -183,7 +183,7 @@ test("facilitator model plans are constrained to eligible speakers", async () =>
   );
   assert.equal(valid.source, "model");
   assert.equal(valid.model, "test-model");
-  assert.equal(valid.stageSubtitle, "刚才的画面还很开阔，接下来听听它如何开始移动。");
+  assert.equal(valid.stageSubtitle, "刚才的画面还很开阔，接下来探索 画面的运动。");
   assert.equal(valid.currentGoal, "subject-space");
   assert.deepEqual(valid.sentenceStarters, ["我最先看见……", "它像是在……"]);
 

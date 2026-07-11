@@ -120,7 +120,7 @@ export function buildFacilitatorPrompt(input: FacilitatorInput, eligibleIds: str
 - 用户已参与：${input.state.completedUserRounds} / ${input.state.turnPolicy.maxUserRounds} 轮
 - 最近发言者：${recent.length ? recent.join("、") : "无"}
 - 本轮最多选择：${Math.min(eligibleIds.length, input.state.turnPolicy.maxMusiciansPerResponse)} 位
-- 本轮画面目标：${currentGoal}
+- 本轮画面目标：${guidance.question}
 
 ## 当前画面记录
 ${briefSummary}
@@ -140,13 +140,21 @@ ${candidates}
 - transition 不超过 52 个中文字符，要说明“刚才聊出了什么、这一轮继续寻找什么”，不能只报姓名。
 - userInvitation 围绕本轮目标 ${currentGoal}，一次只问一个容易回答的问题。参考方向：${guidance.question}
 - sentenceStarters 返回 2-3 个不超过 14 字的自然句子开头，帮助用户开口，不得变成参数标签。
+- 不得向用户说出 subject-space、motion-composition、light-color-material、meaning-constraints 或 VisualBrief 等内部名称。
 - 主持人不评论音乐，不总结成最终画面，不使用姓名之外的人格表演。
 - userInvitation 必须给用户真实回答空间，不能只让用户二选一。`;
 }
 
 function cleanSubtitle(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
-  const singleLine = value.replace(/[\r\n]+/g, " ").trim();
+  const singleLine = value
+    .replace(/[\r\n]+/g, " ")
+    .replace(/subject-space/gi, "画面的主体与空间")
+    .replace(/motion-composition/gi, "画面的运动")
+    .replace(/light-color-material/gi, "光线、颜色与触感")
+    .replace(/meaning-constraints/gi, "想保留的意义")
+    .replace(/VisualBrief/gi, "当前画面")
+    .trim();
   const cleaned = singleLine.length > 52 ? `${singleLine.slice(0, 51)}…` : singleLine;
   return cleaned || fallback;
 }

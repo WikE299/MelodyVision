@@ -57,6 +57,9 @@ const COPY = {
     roomTitle: "共同画面",
     roomSubtitle: "和音乐家一起，把听见的音乐慢慢聊成一幅画",
     facilitator: "共创引导",
+    openChat: "展开聊天室",
+    closeChat: "收起聊天室",
+    nextSpeakerWaiting: "下一位音乐家正在等你 · 返回舞台",
     waitingTurn: "先听完这一轮，马上轮到你",
     starterLabel: "可以从这里开始",
     generateHint: "至少说出一处你看见的画面，才会真正成为共同创作",
@@ -105,6 +108,9 @@ const COPY = {
     roomTitle: "Shared Image",
     roomSubtitle: "Talk with the musicians and gradually shape the image you hear",
     facilitator: "Co-creation guide",
+    openChat: "Open conversation",
+    closeChat: "Close conversation",
+    nextSpeakerWaiting: "The next musician is ready · Return to the stage",
     waitingTurn: "Listen to this round. Your turn is next.",
     starterLabel: "You could begin here",
     generateHint: "Add at least one image of your own so this becomes a true co-creation.",
@@ -314,8 +320,10 @@ function GuideFigure({
   commented,
   loading,
   streaming,
+  canSpeak,
   stageOffset,
   onClick,
+  onSpeak,
   language,
 }: {
   character: Character;
@@ -323,8 +331,10 @@ function GuideFigure({
   commented: boolean;
   loading: boolean;
   streaming: boolean;
+  canSpeak: boolean;
   stageOffset: string;
   onClick: () => void;
+  onSpeak: () => void;
   language: Language;
 }) {
   const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
@@ -336,6 +346,22 @@ function GuideFigure({
     <div
       className={`pointer-events-none group absolute z-40 flex w-[clamp(148px,12vw,192px)] flex-col items-center text-center transition duration-500 ${stageOffset}`}
     >
+      {canSpeak && !loading && !streaming && (
+        <button
+          type="button"
+          onClick={onSpeak}
+          className="pointer-events-auto absolute left-1/2 top-[-24px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/96 px-3.5 py-2 shadow-[0_0_28px_rgba(255,208,131,0.55)] transition hover:-translate-y-1 hover:bg-[#fff0d4]"
+          aria-label={language === "zh" ? `听${label.name}说` : `Hear ${label.name}`}
+        >
+          {[0, 1, 2].map((dot) => (
+            <span
+              key={dot}
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#5b3e31]"
+              style={{ animationDelay: `${dot * 140}ms`, animationDuration: "900ms" }}
+            />
+          ))}
+        </button>
+      )}
       {(loading || streaming) && (
         <div className="absolute left-1/2 top-[-24px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/92 px-3.5 py-2 shadow-[0_0_28px_rgba(255,208,131,0.48)]">
           {[0, 1, 2].map((dot) => (
@@ -466,6 +492,8 @@ export default function ListenPage() {
   const [conversationState, setConversationState] = useState<ConversationState | null>(initialState.conversationState);
   const [visualBrief, setVisualBrief] = useState<VisualBrief | null>(initialState.visualBrief);
   const [facilitatorPlan, setFacilitatorPlan] = useState<FacilitatorPlan | null>(initialState.facilitatorPlan);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatWasOpened, setChatWasOpened] = useState(false);
   const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
   const [visibleComments, setVisibleComments] = useState<Record<string, string>>(initialState.comments);
   const [revealed, setRevealed] = useState<Set<string>>(new Set(Object.keys(initialState.comments)));
@@ -665,17 +693,6 @@ export default function ListenPage() {
     }
   }, [clearTurnIndicators, copy.failed, persistConversationState]);
 
-  useEffect(() => {
-    const nextSpeakerId = conversationState?.queuedSpeakerIds[0];
-    if (
-      conversationState?.status === "streaming-musician" &&
-      nextSpeakerId &&
-      failedSpeakerId !== nextSpeakerId
-    ) {
-      void runScheduledTurn(conversationState);
-    }
-  }, [conversationState, failedSpeakerId, runScheduledTurn]);
-
   const updateVisualBrief = useCallback(async (
     state: ConversationState,
     expectedVersion: number
@@ -729,12 +746,23 @@ export default function ListenPage() {
 
   const handleReveal = (charId: string) => {
     setActiveCharacterId(charId);
-    if (failedSpeakerId === charId && conversationState) {
-      setFailedSpeakerId("");
-      void runScheduledTurn(conversationState);
+    if (allComments[charId]) setRevealed((prev) => new Set(prev).add(charId));
+  };
+
+  const handleSpeakerPrompt = (charId: string) => {
+    if (
+      !conversationState ||
+      conversationState.status !== "streaming-musician" ||
+      conversationState.queuedSpeakerIds[0] !== charId ||
+      turnInFlightRef.current
+    ) {
       return;
     }
-    if (allComments[charId]) setRevealed((prev) => new Set(prev).add(charId));
+    setChatOpen(true);
+    setChatWasOpened(true);
+    setActiveCharacterId(charId);
+    if (failedSpeakerId === charId) setFailedSpeakerId("");
+    void runScheduledTurn(conversationState);
   };
 
   const cancelActiveTurn = useCallback(() => {
@@ -1005,8 +1033,8 @@ export default function ListenPage() {
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={3} />
 
-        <section className="relative mt-3 grid min-h-0 flex-1 overflow-hidden rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] lg:grid-cols-[minmax(0,1fr)_minmax(360px,32vw)] 2xl:mt-5 2xl:grid-cols-[minmax(0,1fr)_430px]">
-          <div className="relative min-h-0 overflow-hidden">
+        <section className="relative mt-3 flex min-h-0 flex-1 overflow-hidden rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
             {audioSrc && (
               <audio
                 ref={audioRef}
@@ -1097,8 +1125,15 @@ export default function ListenPage() {
                   commented={revealed.has(character.id)}
                   loading={loading.has(character.id)}
                   streaming={streaming.has(character.id)}
+                  canSpeak={
+                    conversationState?.status === "streaming-musician" &&
+                    conversationState.queuedSpeakerIds[0] === character.id &&
+                    !loading.has(character.id) &&
+                    !streaming.has(character.id)
+                  }
                   stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
                   onClick={() => handleReveal(character.id)}
+                  onSpeak={() => handleSpeakerPrompt(character.id)}
                   language={language}
                 />
               ))}
@@ -1153,10 +1188,24 @@ export default function ListenPage() {
             )}
           </div>
 
-          <aside className="relative z-[90] flex min-h-0 flex-col border-l border-[#9f6f45]/42 bg-[#1d1923]/88 backdrop-blur">
-            <header className="shrink-0 border-b border-[#9f6f45]/30 px-5 pb-3 pt-4">
+          <aside className={`absolute inset-y-0 right-0 z-[90] min-h-0 shrink-0 overflow-hidden bg-[#1d1923]/94 shadow-[-24px_0_60px_rgba(0,0,0,0.28)] backdrop-blur transition-[width,opacity,border-color] duration-500 lg:relative lg:inset-auto lg:bg-[#1d1923]/88 lg:shadow-none ${
+            chatOpen
+              ? "w-[min(430px,92vw)] border-l border-[#9f6f45]/42 opacity-100 lg:w-[min(430px,34vw)]"
+              : "pointer-events-none w-0 border-l border-transparent opacity-0"
+          }`}>
+            <div className="flex h-full min-w-[360px] flex-col">
+            <header className="relative shrink-0 border-b border-[#9f6f45]/30 px-5 pb-3 pt-4">
               <p className="font-serif text-xl font-semibold text-[#ffe3bd]">{copy.roomTitle}</p>
               <p className="mt-1 text-xs leading-relaxed text-[#c9aa8c]">{copy.roomSubtitle}</p>
+              <button
+                type="button"
+                onClick={() => setChatOpen(false)}
+                className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-[#8f6b52]/42 text-[#c9aa8c] transition hover:border-[#ffd083]/70 hover:text-[#ffe3bd]"
+                aria-label={copy.closeChat}
+                title={copy.closeChat}
+              >
+                →
+              </button>
               <div className="mt-3 grid grid-cols-4 gap-2">
                 {(Object.keys(copy.goalLabels) as FacilitatorGoal[]).map((goal, index) => {
                   const activeGoal = facilitatorPlan?.currentGoal || "subject-space";
@@ -1200,6 +1249,19 @@ export default function ListenPage() {
             </div>
 
             <div className="shrink-0 border-t border-[#9f6f45]/32 bg-[#211c26]/96 px-4 py-3">
+              {conversationState?.status === "streaming-musician" &&
+                conversationState.queuedSpeakerIds.length > 0 &&
+                streaming.size === 0 &&
+                loading.size === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setChatOpen(false)}
+                    className="mb-3 flex w-full items-center justify-between border-b border-[#c8955e]/45 pb-2 text-left text-xs font-semibold text-[#ffd39a] transition hover:border-[#ffd083] hover:text-[#ffe7c3]"
+                  >
+                    <span>{copy.nextSpeakerWaiting}</span>
+                    <span>←</span>
+                  </button>
+                )}
               {facilitatorPlan?.userInvitation && (
                 <p className="mb-2 border-l-2 border-[#e4ad68] pl-3 text-xs font-medium leading-relaxed text-[#f1d2ad]">
                   {facilitatorPlan.userInvitation}
@@ -1257,7 +1319,20 @@ export default function ListenPage() {
                 {copy.generate}
               </button>
             </div>
+            </div>
           </aside>
+
+          {!chatOpen && chatWasOpened && (
+            <button
+              type="button"
+              onClick={() => setChatOpen(true)}
+              className="absolute right-0 top-1/2 z-[95] flex h-14 w-8 -translate-y-1/2 items-center justify-center rounded-l-full border border-r-0 border-[#b1845d]/48 bg-[#2b242e]/94 text-[#ffe3bd] shadow-[-10px_0_30px_rgba(0,0,0,0.22)]"
+              aria-label={copy.openChat}
+              title={copy.openChat}
+            >
+              ←
+            </button>
+          )}
 
           {generating && (
             <div className="absolute inset-0 z-[120] flex items-center justify-center bg-[#15111c]/90 backdrop-blur-sm">
