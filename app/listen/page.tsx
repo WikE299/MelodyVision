@@ -6,7 +6,12 @@ import { useRouter } from "next/navigation";
 import { getCharactersByIds, Character } from "@/lib/characters";
 import FlowHeader from "@/components/FlowHeader";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
-import type { ConversationState, VisualBrief } from "@/lib/contracts";
+import type {
+  ConversationState,
+  SourceReference,
+  VisualBrief,
+  VisualBriefFieldStatus,
+} from "@/lib/contracts";
 import { readConversationStream } from "@/lib/conversation";
 
 const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
@@ -43,6 +48,18 @@ const COPY = {
     resonate: "更接近我的听感",
     resonated: "已作为重点听法",
     guideTip: "点击音乐家听点评，点亮共鸣或补充自己的听感。",
+    visualForming: "画面正在成形",
+    visualReady: "画面线索已聚拢",
+    visualLabels: {
+      subject: "主体",
+      motion: "动势",
+      palette: "色彩",
+      lighting: "光线",
+      atmosphere: "气息",
+    },
+    sourceUser: "来自你",
+    sourceMusic: "来自音乐",
+    yourTurn: "轮到你了 · 补充脑海里的画面",
     generate: "生成画作 →",
   },
   en: {
@@ -63,6 +80,18 @@ const COPY = {
     resonate: "Closer to my listening",
     resonated: "Marked as key lens",
     guideTip: "Tap a musician to hear their take, mark resonance, or add your own note.",
+    visualForming: "The image is taking shape",
+    visualReady: "Visual cues have converged",
+    visualLabels: {
+      subject: "Subject",
+      motion: "Motion",
+      palette: "Color",
+      lighting: "Light",
+      atmosphere: "Air",
+    },
+    sourceUser: "From you",
+    sourceMusic: "From the music",
+    yourTurn: "Your turn · add the image in your mind",
     generate: "Generate Artwork →",
   },
 };
@@ -113,6 +142,117 @@ function formatTime(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const rest = Math.floor(seconds % 60);
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+const PALETTE_SWATCHES: Array<[RegExp, string]> = [
+  [/黑|black/i, "#24212a"],
+  [/白|white/i, "#f3eadc"],
+  [/金|gold|amber/i, "#dca75d"],
+  [/红|red|crimson/i, "#a74742"],
+  [/蓝|blue|cyan/i, "#4f7894"],
+  [/绿|green/i, "#58745f"],
+  [/紫|purple|violet/i, "#756080"],
+  [/灰|gray|grey/i, "#858086"],
+  [/棕|brown|earth/i, "#795b49"],
+];
+
+function swatchColor(value: string) {
+  return PALETTE_SWATCHES.find(([pattern]) => pattern.test(value))?.[1] || "#b58a64";
+}
+
+function sourceSummary(
+  sources: SourceReference[],
+  state: ConversationState | null,
+  selectedChars: Character[],
+  language: Language
+) {
+  const copy = COPY[language];
+  const names = new Set<string>();
+  for (const source of sources) {
+    if (source.kind === "user-message") names.add(copy.sourceUser);
+    if (source.kind === "music-analysis") names.add(copy.sourceMusic);
+    if (source.kind === "musician-message") {
+      const message = state?.messages.find((item) => item.id === source.sourceId);
+      const character = selectedChars.find((item) => item.id === message?.speakerId);
+      if (character) {
+        names.add(characterUi[language][character.id as keyof typeof characterUi.zh]?.name || character.name);
+      }
+    }
+  }
+  return [...names].join(" + ");
+}
+
+function statusTone(status: VisualBriefFieldStatus) {
+  if (status === "confirmed") return "text-[#ffe0a3]";
+  if (status === "conflicted") return "text-[#efb6a5]";
+  return "text-[#d8c0aa]";
+}
+
+function VisualBriefTrace({
+  brief,
+  state,
+  selectedChars,
+  language,
+}: {
+  brief: VisualBrief | null;
+  state: ConversationState | null;
+  selectedChars: Character[];
+  language: Language;
+}) {
+  const copy = COPY[language];
+  const candidates = brief ? [
+    { key: "subject" as const, field: brief.fields.subject },
+    { key: "motion" as const, field: brief.fields.motion },
+    { key: "palette" as const, field: brief.fields.palette },
+    { key: "lighting" as const, field: brief.fields.lighting },
+    { key: "atmosphere" as const, field: brief.fields.atmosphere },
+  ].filter(({ field }) => field.status !== "missing" && field.value !== null).slice(0, 2) : [];
+
+  return (
+    <div
+      className="pointer-events-none absolute left-1/2 top-[58px] z-30 w-[min(240px,20vw)] -translate-x-1/2 translate-y-0 text-center 2xl:top-[72px]"
+      aria-live="polite"
+    >
+      <div className="flex items-center justify-center gap-3 text-[11px] tracking-[0.18em] text-[#d6b38d]/76">
+        <span className="h-px w-12 bg-[#d5a15f]/32" />
+        <span>{brief?.readiness.ready ? copy.visualReady : copy.visualForming}</span>
+        <span className="h-px w-12 bg-[#d5a15f]/32" />
+      </div>
+      {brief && (
+        <div className="mx-auto mt-2 h-px w-full bg-[#8a674e]/28">
+          <div
+            className="h-px bg-[#efb96f]/78 transition-[width] duration-700"
+            style={{ width: `${Math.max(8, brief.readiness.score * 100)}%` }}
+          />
+        </div>
+      )}
+      {candidates.length > 0 && (
+        <div className="mt-2 flex flex-col divide-y divide-[#9a7354]/28">
+          {candidates.map(({ key, field }) => {
+            const values = Array.isArray(field.value) ? field.value : [field.value];
+            const text = values.filter(Boolean).slice(0, 2).join(" · ");
+            const sources = sourceSummary(field.sources, state, selectedChars, language);
+            return (
+              <div key={key} className="flex min-w-0 items-center justify-center gap-1.5 py-1" title={sources}>
+                <span className="shrink-0 text-[10px] tracking-[0.12em] text-[#ad8e75]">{copy.visualLabels[key]}</span>
+                <div className={`flex min-w-0 items-center gap-1.5 text-xs font-medium ${statusTone(field.status)}`}>
+                  {key === "palette" && values.filter(Boolean).slice(0, 3).map((value) => (
+                    <span
+                      key={value}
+                      className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/20"
+                      style={{ backgroundColor: swatchColor(value || "") }}
+                    />
+                  ))}
+                  <span className="truncate">{text}</span>
+                </div>
+                {sources && <span className="shrink-0 text-[9px] text-[#a98b72]/72">· {sources}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function GuideFigure({
@@ -646,13 +786,13 @@ export default function ListenPage() {
     ],
     3: [
       "left-[17%] bottom-[48px] -translate-x-1/2 translate-y-16",
-      "left-[34%] bottom-[136px] -translate-x-1/2",
+      "left-[29%] bottom-[173px] -translate-x-1/2",
       "right-[17%] bottom-[48px] translate-x-1/2 translate-y-16",
     ],
     4: [
       "left-[17%] bottom-[48px] -translate-x-1/2 translate-y-16",
-      "left-[37%] bottom-[144px] -translate-x-1/2",
-      "right-[37%] bottom-[144px] translate-x-1/2",
+      "left-[29%] bottom-[177px] -translate-x-1/2",
+      "right-[29%] bottom-[177px] translate-x-1/2",
       "right-[17%] bottom-[48px] translate-x-1/2 translate-y-16",
     ],
   };
@@ -671,7 +811,7 @@ export default function ListenPage() {
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={3} />
 
-        <section className="relative mt-3 flex min-h-0 flex-1 overflow-hidden rounded-[26px] border border-[#9f6f45]/55 bg-[#251f2b]/38 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
+        <section className="relative mt-3 flex min-h-0 flex-1 overflow-clip rounded-[26px] border border-[#9f6f45]/55 bg-[#251f2b]/38 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
           <div className="absolute inset-0">
             <div className="absolute left-[-6%] right-[-6%] top-[26%] flex h-32 items-end justify-center gap-1 opacity-70">
               {Array.from({ length: 170 }).map((_, index) => (
@@ -708,31 +848,39 @@ export default function ListenPage() {
           <p className="pointer-events-none absolute left-1/2 top-4 z-20 max-w-[min(880px,82vw)] -translate-x-1/2 translate-y-0 text-center font-serif text-[clamp(18px,1.55vw,28px)] font-semibold text-[#ffe4ba]/90 drop-shadow-[0_0_16px_rgba(255,194,103,0.28)] 2xl:top-5">
             {facilitatorSubtitle || copy.guideTip}
           </p>
+          {!showPlayerControls && (
+            <VisualBriefTrace
+              brief={visualBrief}
+              state={conversationState}
+              selectedChars={selectedChars}
+              language={language}
+            />
+          )}
 
-          <div className="relative z-10 flex min-w-0 flex-1 flex-col px-6 pb-5 pt-4 2xl:px-9 2xl:pb-7">
+          <div className="relative z-10 flex h-full min-h-0 min-w-0 flex-1 self-stretch flex-col px-6 pb-5 pt-4 2xl:px-9 2xl:pb-7">
             <div className="relative flex min-h-0 flex-1 items-end justify-center pb-[clamp(92px,11vh,124px)]">
               <div className="pointer-events-none absolute bottom-[38px] left-1/2 z-0 h-[390px] w-[min(1180px,92vw)] -translate-x-1/2 rounded-[50%] border border-[#dba66a]/18 bg-[radial-gradient(ellipse_at_center,rgba(255,194,103,0.12)_0%,rgba(255,194,103,0.06)_32%,rgba(18,16,24,0)_70%)]" />
               <div className="pointer-events-none absolute bottom-[90px] left-1/2 z-0 h-[210px] w-[min(760px,62vw)] -translate-x-1/2 rounded-[50%] border border-[#ffcf7d]/20" />
 
               {showPlayerControls && (
-                <div className="absolute left-1/2 top-[86px] z-30 flex h-[58px] w-[min(620px,52vw)] -translate-x-1/2 items-center gap-4 rounded-full border border-[#ca8f53]/62 bg-[#1e1923]/86 px-4 shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_24px_rgba(255,194,103,0.1)] backdrop-blur">
+                <div className="absolute left-1/2 top-[100px] z-30 flex h-[50px] w-[min(240px,19vw)] -translate-x-1/2 items-center gap-2 rounded-full border border-[#ca8f53]/62 bg-[#1e1923]/90 px-2.5 shadow-[0_18px_48px_rgba(0,0,0,0.34),0_0_24px_rgba(255,194,103,0.1)] backdrop-blur 2xl:top-[114px]">
                   <button
                     type="button"
                     onClick={togglePlay}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ffe2bd] text-lg font-semibold text-[#382832] shadow-[0_0_24px_rgba(255,203,131,0.38)]"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ffe2bd] text-sm font-semibold text-[#382832] shadow-[0_0_24px_rgba(255,203,131,0.38)]"
                     aria-label={isPlaying ? copy.pause : copy.play}
                   >
                     {isPlaying ? "Ⅱ" : "▶"}
                   </button>
                   <div className="relative flex min-w-0 flex-1 items-center">
                     <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
-                      {Array.from({ length: 52 }).map((_, index) => (
+                      {Array.from({ length: 26 }).map((_, index) => (
                         <span
                           key={index}
                           className="w-[3px] rounded-full bg-[#e5a45b]"
                           style={{
                             height: `${(6 + Math.abs(Math.sin(index * 0.58)) * 22).toFixed(1)}px`,
-                            opacity: index / 52 <= (duration ? currentTime / duration : 0) ? 0.96 : 0.24,
+                            opacity: index / 26 <= (duration ? currentTime / duration : 0) ? 0.96 : 0.24,
                           }}
                         />
                       ))}
@@ -748,7 +896,7 @@ export default function ListenPage() {
                       aria-label={copy.progress}
                     />
                   </div>
-                  <span className="shrink-0 text-sm font-medium text-[#ffe0bd]">
+                  <span className="shrink-0 text-[10px] font-medium text-[#ffe0bd]">
                     {formatTime(currentTime)} / {formatTime(duration)}
                   </span>
                 </div>
@@ -838,9 +986,13 @@ export default function ListenPage() {
                 <button
                   type="button"
                   onClick={() => setShowUserInput(true)}
-                  className="rounded-full border border-[#c9965d]/38 bg-[#1f1a24]/70 px-5 py-2 text-center text-xs text-[#d7bfa7] shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur transition hover:border-[#d8aa70]/62 hover:text-[#ffe3bd]"
+                  className={`rounded-full border bg-[#1f1a24]/78 px-5 py-2 text-center text-xs shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur transition hover:text-[#ffe3bd] ${
+                    conversationState?.turnOwner === "user"
+                      ? "border-[#f0bd79]/78 text-[#ffe0ad] shadow-[0_0_24px_rgba(240,189,121,0.2)]"
+                      : "border-[#c9965d]/38 text-[#d7bfa7] hover:border-[#d8aa70]/62"
+                  }`}
                 >
-                  {copy.addFeeling}
+                  {conversationState?.turnOwner === "user" ? copy.yourTurn : copy.addFeeling}
                 </button>
               )}
               {showUserInput && (
