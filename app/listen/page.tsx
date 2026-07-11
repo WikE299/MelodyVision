@@ -908,6 +908,7 @@ export default function ListenPage() {
       sessionStorage.setItem("generatedImageUrl", data.imageUrl);
       sessionStorage.setItem("generatedRemoteImageUrl", data.remoteImageUrl || "");
       sessionStorage.setItem("generatedImagePrompt", data.prompt || "");
+      sessionStorage.setItem("generatedNegativePrompt", data.negativePrompt || "");
       sessionStorage.setItem("experimentSessionId", data.sessionId || sessionId);
       sessionStorage.setItem(
         "imageGenerationMeta",

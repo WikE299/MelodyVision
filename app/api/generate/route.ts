@@ -926,11 +926,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (promptOverride) {
+      const overrideNegativePrompt = negativePromptOverride ||
+        "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs";
       const imageStartedAt = Date.now();
       const imageAttempt = await generateImageWithRetry(
         promptOverride,
-        negativePromptOverride ||
-          "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs"
+        overrideNegativePrompt
       );
       const imageResult = imageAttempt.result;
       timings.imageGenerationAttempts = imageAttempt.attempts;
@@ -948,6 +949,9 @@ export async function POST(request: NextRequest) {
         status: "success",
         input: {
           musicAnalysis,
+          musicProfile,
+          visualBrief,
+          conversationState,
           comments: normalizedComments,
           commentWeights,
           presets,
@@ -957,7 +961,7 @@ export async function POST(request: NextRequest) {
         prompt: {
           source: "prompt-override",
           finalImagePrompt: promptOverride,
-          negativePrompt: negativePromptOverride,
+          negativePrompt: overrideNegativePrompt,
         },
         image: {
           provider: imageResult.provider,
@@ -984,7 +988,7 @@ export async function POST(request: NextRequest) {
         musicianComments: normalizedComments,
         promptDirector: null,
         finalImagePrompt: promptOverride,
-        negativePrompt: negativePromptOverride,
+        negativePrompt: overrideNegativePrompt,
         imageUrl: savedImage.publicUrl,
         remoteImageUrl: imageResult.remoteImageUrl,
         imageProvider: imageResult.provider,
@@ -1000,6 +1004,7 @@ export async function POST(request: NextRequest) {
         imageUrl: savedImage.publicUrl,
         remoteImageUrl: imageResult.remoteImageUrl,
         prompt: promptOverride,
+        negativePrompt: overrideNegativePrompt,
         promptSource: "prompt-override",
         promptDirector: null,
         presets,
@@ -1146,6 +1151,7 @@ export async function POST(request: NextRequest) {
       imageUrl: savedImage.publicUrl,
       remoteImageUrl: imageResult.remoteImageUrl,
       prompt: imagePrompt,
+      negativePrompt,
       promptSource,
       promptDirector: {
         source: promptSource,

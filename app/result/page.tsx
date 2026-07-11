@@ -6,7 +6,36 @@ import { useRouter } from "next/navigation";
 import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
 import { getExperimentSessionId } from "@/lib/experiment-session";
-import { characterUi, presetUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
+import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
+import type {
+  ConversationState,
+  MusicProfile,
+  VisualBrief,
+  VisualBriefFieldKey,
+} from "@/lib/contracts";
+
+interface PromptDirectorResultView {
+  userSourceMappings?: Array<{
+    sourceId: string;
+    visualTranslation: string;
+  }>;
+  visualBriefMappings?: Array<{
+    field: VisualBriefFieldKey;
+    status: string;
+    visualTranslation: string;
+  }>;
+  sourceMappings?: Array<{
+    characterId: string;
+    speaker: string;
+    visualTranslation: string;
+  }>;
+}
+
+interface PromptDirectorTrace {
+  source?: string;
+  result?: PromptDirectorResultView | null;
+  repaired?: boolean;
+}
 
 interface GenerationMeta {
   runId?: string;
@@ -15,7 +44,7 @@ interface GenerationMeta {
   model?: string;
   requestId?: string;
   promptSource?: string;
-  promptDirector?: unknown;
+  promptDirector?: PromptDirectorTrace | null;
   logPath?: string;
   timings?: Record<string, number>;
   usage?: unknown;
@@ -47,23 +76,35 @@ const COPY = {
     emptyComment: "暂无点评。",
     regenerateFailed: "重新生成失败",
     feedbackFailed: "反馈提交失败",
-    overviewTitle: "生成概览",
-    overviewText: "你的音乐已经完成可视化，画作可保存，也可以回到开头重新生成。",
+    overviewTitle: "生成依据",
+    overviewText: "查看你的画面、共创线索与音乐家视角如何进入这幅画。",
     collapse: "收起",
     generatedAt: "生成时间",
     imageSource: "画面来源",
-    sourceValue: "音乐与点评",
+    sourceValue: "音乐 + 共创对话 + 你的画面",
     guideCount: "导览数量",
     modelStatus: "模型状态",
     generated: "已生成",
-    params: "生成参数",
-    style: "风格",
-    mood: "情绪",
-    tone: "光色",
-    auto: "自动",
-    overviewRail: "生成概览",
+    userAnchor: "你的画面",
+    coCreationClues: "共创线索",
+    musicianClues: "音乐家视角",
+    noRationale: "当前结果来自旧版流程，暂无逐项来源记录。",
+    fieldLabels: {
+      subject: "主体",
+      space: "空间",
+      composition: "构图",
+      motion: "动势",
+      materials: "材质",
+      palette: "色彩",
+      lighting: "光线",
+      atmosphere: "氛围",
+      personalMeaning: "个人意义",
+      mustInclude: "必须保留",
+      mustAvoid: "需要避开",
+    },
+    overviewRail: "生成依据",
     title: "画作已生成",
-    subtitle: "来自音乐、导览点评和你的画面选择",
+    subtitle: "来自音乐、共创对话和你的画面",
     regenerate: "重新生成",
     regenerateTip: "用同一提示重新生成",
     save: "保存画作",
@@ -97,23 +138,35 @@ const COPY = {
     emptyComment: "No comment yet.",
     regenerateFailed: "Regeneration failed",
     feedbackFailed: "Failed to submit feedback",
-    overviewTitle: "Overview",
-    overviewText: "Your music has been visualized. Save the artwork or return to the beginning.",
+    overviewTitle: "Generation Rationale",
+    overviewText: "See how your image, co-created cues, and musician perspectives shaped this artwork.",
     collapse: "Close",
     generatedAt: "Generated",
     imageSource: "Source",
-    sourceValue: "Music & comments",
+    sourceValue: "Music + co-creation + your image",
     guideCount: "Guides",
     modelStatus: "Model",
     generated: "Generated",
-    params: "Generation Choices",
-    style: "Style",
-    mood: "Mood",
-    tone: "Light",
-    auto: "Auto",
+    userAnchor: "Your Image",
+    coCreationClues: "Co-created Cues",
+    musicianClues: "Musician Perspectives",
+    noRationale: "This result came from the legacy flow and has no field-level source record.",
+    fieldLabels: {
+      subject: "Subject",
+      space: "Space",
+      composition: "Composition",
+      motion: "Motion",
+      materials: "Materials",
+      palette: "Color",
+      lighting: "Lighting",
+      atmosphere: "Atmosphere",
+      personalMeaning: "Personal Meaning",
+      mustInclude: "Must Include",
+      mustAvoid: "Must Avoid",
+    },
     overviewRail: "Overview",
     title: "Artwork Generated",
-    subtitle: "Built from the music, guide comments, and your visual choices",
+    subtitle: "Built from the music, co-created conversation, and your image",
     regenerate: "Regenerate",
     regenerateTip: "Regenerate with the same prompt",
     save: "Save artwork",
@@ -154,6 +207,10 @@ function getInitialResultState() {
       presets: null as { style: string; mood: string; tone: string } | null,
       characterIds: [] as string[],
       debugInfo: null as DebugInfo | null,
+      negativePrompt: "",
+      visualBrief: null as VisualBrief | null,
+      conversationState: null as ConversationState | null,
+      musicProfile: null as MusicProfile | null,
       generatedTime: "",
     };
   }
@@ -164,10 +221,14 @@ function getInitialResultState() {
   const characterIds = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]") as string[];
   const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
   const prompt = sessionStorage.getItem("generatedImagePrompt") || "";
+  const negativePrompt = sessionStorage.getItem("generatedNegativePrompt") || "";
   const remoteImageUrl = sessionStorage.getItem("generatedRemoteImageUrl") || "";
   const meta = JSON.parse(sessionStorage.getItem("imageGenerationMeta") || "null") as GenerationMeta | null;
   const audioUrl = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
   const audioName = (sessionStorage.getItem("audioFileName") || "音乐").replace(/\.\w+$/, "");
+  const visualBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null") as VisualBrief | null;
+  const conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
+  const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
   const usePreviewData = !imageUrl && window.location.search.includes("page05-gallery-result");
 
   return {
@@ -192,6 +253,10 @@ function getInitialResultState() {
       meta: meta || (usePreviewData ? { runId: "preview-run", sessionId: "preview-session", model: "preview" } : null),
       remoteImageUrl,
     },
+    negativePrompt,
+    visualBrief,
+    conversationState,
+    musicProfile,
     generatedTime: new Date().toLocaleString("zh-CN", {
       month: "2-digit",
       day: "2-digit",
@@ -212,9 +277,14 @@ function getCharacterView(character: Character, language: Language) {
   return characterUi[language][character.id as keyof typeof characterUi.zh] || { name: character.name, focus: character.focusDescription };
 }
 
-function presetLabel(value: string | undefined, language: Language, fallback: string) {
-  if (!value) return fallback;
-  return presetUi[language].values[value as keyof typeof presetUi.zh.values]?.label || value;
+function briefFieldText(
+  brief: VisualBrief | null,
+  field: VisualBriefFieldKey,
+  fallback: string
+) {
+  const value = brief?.fields[field].value;
+  if (Array.isArray(value)) return value.join(" · ");
+  return value || fallback;
 }
 
 function GuideCommentCard({
@@ -269,6 +339,10 @@ export default function ResultPage() {
   const [presets] = useState<{ style: string; mood: string; tone: string } | null>(initialState.presets);
   const [characterIds] = useState<string[]>(initialState.characterIds);
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(initialState.debugInfo);
+  const [negativePrompt] = useState(initialState.negativePrompt);
+  const [visualBrief] = useState(initialState.visualBrief);
+  const [conversationState] = useState(initialState.conversationState);
+  const [musicProfile] = useState(initialState.musicProfile);
   const [generatedTime] = useState(initialState.generatedTime);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -356,6 +430,10 @@ export default function ResultPage() {
           userNote: sessionStorage.getItem("userNote") || "",
           musicAnalysis: debugInfo?.musicAnalysis || {},
           promptOverride: prompt,
+          negativePrompt,
+          ...(visualBrief && conversationState
+            ? { visualBrief, conversationState, musicProfile }
+            : {}),
         }),
       });
       const data = await response.json();
@@ -376,7 +454,7 @@ export default function ResultPage() {
           model: data.model,
           requestId: data.requestId,
           promptSource: data.promptSource,
-          promptDirector: data.promptDirector,
+          promptDirector: debugInfo?.meta?.promptDirector || data.promptDirector,
           logPath: data.logPath,
           timings: data.timings,
           usage: data.usage,
@@ -386,6 +464,7 @@ export default function ResultPage() {
       sessionStorage.setItem("generatedImageUrl", data.imageUrl);
       sessionStorage.setItem("generatedRemoteImageUrl", data.remoteImageUrl || "");
       sessionStorage.setItem("generatedImagePrompt", data.prompt || prompt);
+      sessionStorage.setItem("generatedNegativePrompt", data.negativePrompt || negativePrompt);
       sessionStorage.setItem("experimentSessionId", data.sessionId || sessionId);
       sessionStorage.setItem("imageGenerationMeta", JSON.stringify(nextDebugInfo.meta));
     } catch (error) {
@@ -452,6 +531,14 @@ export default function ResultPage() {
     text: comments[characterId] || "",
   }));
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const promptDirectorResult = debugInfo?.meta?.promptDirector?.result || null;
+  const userRationale = promptDirectorResult?.userSourceMappings || [];
+  const briefRationale = promptDirectorResult?.visualBriefMappings || [];
+  const musicianRationale = promptDirectorResult?.sourceMappings || [];
+  const conversationUserMessages = conversationState?.messages.filter(
+    (message) => message.role === "user"
+  ) || [];
+  const hasRationale = userRationale.length + briefRationale.length + musicianRationale.length > 0;
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#15111c] text-[#f8dfbb]">
@@ -471,7 +558,7 @@ export default function ResultPage() {
       </div>
 
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
-        <FlowHeader activeStep={5} />
+        <FlowHeader activeStep={4} />
 
         <section
           className={`relative mt-3 grid min-h-0 flex-1 gap-4 overflow-hidden rounded-[26px] border border-[#9f6f45]/55 bg-[#251f2b]/38 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5 ${
@@ -503,19 +590,61 @@ export default function ResultPage() {
                 <p className="flex justify-between gap-3"><span>{copy.guideCount}</span><span>{characters.length || 0}</span></p>
                 <p className="flex justify-between gap-3"><span>{copy.modelStatus}</span><span>{debugInfo?.meta?.model || copy.generated}</span></p>
               </div>
-              <div className="mt-4 rounded-[18px] border border-[#a77b57]/34 bg-[#2d2732]/70 p-3">
-                <p className="text-sm font-semibold text-[#ffe3bd]">{copy.params}</p>
-                <div className="mt-3 grid gap-2 text-xs text-[#d7b99b]">
-                  <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
-                    {copy.style}: {presetLabel(presets?.style, language, copy.auto)}
-                  </span>
-                  <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
-                    {copy.mood}: {presetLabel(presets?.mood, language, copy.auto)}
-                  </span>
-                  <span className="rounded-full border border-[#d7a464]/34 px-3 py-2">
-                    {copy.tone}: {presetLabel(presets?.tone, language, copy.auto)}
-                  </span>
-                </div>
+              <div className="mt-4 min-h-0 flex-1 overflow-y-auto border-t border-[#8f6b52]/34 pt-4 pr-1 text-xs">
+                {hasRationale ? (
+                  <div className="space-y-4">
+                    {userRationale.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-[#ffe3bd]">{copy.userAnchor}</p>
+                        {userRationale.map((mapping) => (
+                          <p key={mapping.sourceId} className="mt-2 leading-relaxed text-[#e4c6a4]">
+                            {language === "zh"
+                              ? conversationUserMessages.find((message) => message.id === mapping.sourceId)?.content || mapping.visualTranslation
+                              : mapping.visualTranslation}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {briefRationale.length > 0 && (
+                      <div className="border-t border-[#8f6b52]/28 pt-3">
+                        <p className="font-semibold text-[#ffe3bd]">{copy.coCreationClues}</p>
+                        <div className="mt-2 space-y-2.5">
+                          {briefRationale.slice(0, 5).map((mapping) => (
+                            <div key={mapping.field}>
+                              <p className="text-[10px] text-[#b79678]">
+                                {copy.fieldLabels[mapping.field]}
+                              </p>
+                              <p
+                                className="mt-0.5 line-clamp-3 leading-relaxed text-[#d7b99b]"
+                                title={mapping.visualTranslation}
+                              >
+                                {language === "zh"
+                                  ? briefFieldText(visualBrief, mapping.field, mapping.visualTranslation)
+                                  : mapping.visualTranslation}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {musicianRationale.length > 0 && (
+                      <div className="border-t border-[#8f6b52]/28 pt-3">
+                        <p className="font-semibold text-[#ffe3bd]">{copy.musicianClues}</p>
+                        <div className="mt-2 space-y-2">
+                          {musicianRationale.slice(0, 3).map((mapping, index) => (
+                            <p key={`${mapping.speaker}-${index}`} className="line-clamp-3 leading-relaxed text-[#d7b99b]" title={mapping.visualTranslation}>
+                              <span className="text-[#efc68e]">{mapping.speaker}</span> · {language === "zh"
+                                ? comments[mapping.characterId] || mapping.visualTranslation
+                                : mapping.visualTranslation}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="leading-relaxed text-[#b99b80]">{copy.noRationale}</p>
+                )}
               </div>
             </aside>
           ) : (

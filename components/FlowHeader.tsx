@@ -14,9 +14,8 @@ type FlowStep = {
 const STEPS: FlowStep[] = [
   { index: "01", title: { zh: "音乐输入", en: "Music Input" }, icon: "note" },
   { index: "02", title: { zh: "选择导览", en: "Choose Guides" }, icon: "guides" },
-  { index: "03", title: { zh: "聆听与点评", en: "Listen & Review" }, icon: "ear" },
-  { index: "04", title: { zh: "策展生成", en: "Curate Image" }, icon: "palette" },
-  { index: "05", title: { zh: "画作呈现", en: "Artwork" }, icon: "image" },
+  { index: "03", title: { zh: "共创聆听", en: "Co-create" }, icon: "ear" },
+  { index: "04", title: { zh: "画作呈现", en: "Artwork" }, icon: "image" },
 ];
 
 function StepIcon({ type }: { type: string }) {
@@ -31,13 +30,6 @@ function StepIcon({ type }: { type: string }) {
     return (
       <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.5 10.5a3.5 3.5 0 1 1 6.3 2.1c-.72 1.04-1.75 1.43-2.45 2.14-.48.49-.72 1.03-.72 1.76A2.5 2.5 0 0 1 9.12 19M5.5 10.5a6.5 6.5 0 1 1 11.3 4.4" />
-      </svg>
-    );
-  }
-  if (type === "palette") {
-    return (
-      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4a8 8 0 0 0 0 16h1.2a1.8 1.8 0 0 0 1.08-3.24 1.2 1.2 0 0 1 .72-2.16H16a4 4 0 0 0 0-8h-.5M8 10h.01M11 8h.01M15 9h.01" />
       </svg>
     );
   }
@@ -60,7 +52,7 @@ export default function FlowHeader({
   variant = "dark",
   brandLabel = "MelodyVision",
 }: {
-  activeStep: 1 | 2 | 3 | 4 | 5;
+  activeStep: 1 | 2 | 3 | 4;
   variant?: "dark" | "light";
   brandLabel?: string;
 }) {
