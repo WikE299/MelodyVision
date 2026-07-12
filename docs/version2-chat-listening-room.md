@@ -29,10 +29,13 @@ These are conversational scaffolds rather than image-generation controls. The us
 
 - The conversation drawer starts closed. Only the first queued musician shows an animated speech bubble.
 - Clicking that bubble opens the drawer and starts that musician's streamed response. No musician response starts automatically.
+- The queued musician receives a restrained breathing aura around the figure and stage, in addition to the speech bubble.
 - When a response completes, only the next queued musician receives a bubble. After the scheduled musicians finish, the turn returns to the user.
 - A user response schedules the next guided round, but the next musician still waits for an explicit bubble click.
 - On narrow screens the drawer overlays the right side of the stage and provides a visible return-to-stage action whenever another musician is waiting.
 - The current facilitator question remains pinned above the composer.
+- Every new facilitator question triggers one border-light sweep; the effect does not loop continuously.
+- The composer receives a soft breathing highlight only while the conversation turn belongs to the user.
 - Sentence starters fill the composer but do not submit automatically.
 - The primary generation action stays disabled until the user contributes at least one message.
 - Resonance controls live with musician messages in the conversation stream.

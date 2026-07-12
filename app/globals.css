@@ -32,3 +32,39 @@ body {
 .animate-in {
   animation: fade-in 0.3s ease-out, slide-in-from-bottom 0.3s ease-out;
 }
+
+@keyframes mv-guide-aura {
+  0%, 100% { opacity: 0.22; transform: translateX(-50%) scale(0.9); }
+  50% { opacity: 0.78; transform: translateX(-50%) scale(1.1); }
+}
+
+@keyframes mv-facilitator-cue {
+  0% { border-color: rgba(228, 173, 104, 0.35); box-shadow: 0 0 0 rgba(255, 196, 107, 0); }
+  35% { border-color: rgba(255, 213, 145, 0.95); box-shadow: 0 0 28px rgba(255, 196, 107, 0.32); }
+  100% { border-color: rgba(228, 173, 104, 0.5); box-shadow: 0 0 0 rgba(255, 196, 107, 0); }
+}
+
+@keyframes mv-user-turn {
+  0%, 100% { box-shadow: 0 0 12px rgba(255, 194, 103, 0.1); }
+  50% { box-shadow: 0 0 28px rgba(255, 194, 103, 0.3); }
+}
+
+.mv-guide-aura {
+  animation: mv-guide-aura 1.8s ease-in-out infinite;
+}
+
+.mv-facilitator-cue {
+  animation: mv-facilitator-cue 1.8s ease-out 1;
+}
+
+.mv-user-turn {
+  animation: mv-user-turn 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-guide-aura,
+  .mv-facilitator-cue,
+  .mv-user-turn {
+    animation: none;
+  }
+}

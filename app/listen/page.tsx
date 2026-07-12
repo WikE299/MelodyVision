@@ -347,6 +347,12 @@ function GuideFigure({
       className={`pointer-events-none group absolute z-40 flex w-[clamp(148px,12vw,192px)] flex-col items-center text-center transition duration-500 ${stageOffset}`}
     >
       {canSpeak && !loading && !streaming && (
+        <>
+          <div className="mv-guide-aura absolute left-1/2 top-[30px] h-[clamp(150px,18vh,210px)] w-[clamp(120px,10vw,170px)] rounded-[50%] border border-[#ffd083]/65 bg-[#ffc267]/16 blur-[2px] shadow-[0_0_42px_rgba(255,194,103,0.55)]" />
+          <div className="mv-guide-aura absolute bottom-[30px] left-1/2 h-[clamp(52px,5vw,72px)] w-[clamp(162px,13vw,220px)] rounded-[50%] border border-[#ffd481]/70 bg-[#ffc267]/24 shadow-[0_0_36px_rgba(255,194,103,0.7)]" />
+        </>
+      )}
+      {canSpeak && !loading && !streaming && (
         <button
           type="button"
           onClick={onSpeak}
@@ -385,7 +391,9 @@ function GuideFigure({
         type="button"
         onClick={onClick}
         className={`pointer-events-auto relative z-10 mb-1 flex h-[clamp(186px,22vh,254px)] items-end justify-center outline-none transition duration-300 ${
-          active ? "scale-[1.06] drop-shadow-[0_0_24px_rgba(255,218,145,0.74)]" : "drop-shadow-[0_24px_24px_rgba(0,0,0,0.46)] group-hover:scale-[1.025]"
+          canSpeak
+            ? "scale-[1.06] brightness-110 drop-shadow-[0_0_30px_rgba(255,218,145,0.82)]"
+            : active ? "scale-[1.06] drop-shadow-[0_0_24px_rgba(255,218,145,0.74)]" : "drop-shadow-[0_24px_24px_rgba(0,0,0,0.46)] group-hover:scale-[1.025]"
         }`}
         aria-label={label.name}
       >
@@ -1263,7 +1271,10 @@ export default function ListenPage() {
                   </button>
                 )}
               {facilitatorPlan?.userInvitation && (
-                <p className="mb-2 border-l-2 border-[#e4ad68] pl-3 text-xs font-medium leading-relaxed text-[#f1d2ad]">
+                <p
+                  key={facilitatorPlan.userInvitation}
+                  className="mv-facilitator-cue mb-2 rounded-[6px] border border-[#e4ad68]/50 bg-[#342832]/72 px-3 py-2 text-xs font-medium leading-relaxed text-[#f1d2ad]"
+                >
                   {facilitatorPlan.userInvitation}
                 </p>
               )}
@@ -1284,7 +1295,11 @@ export default function ListenPage() {
                   </div>
                 </div>
               ) : null}
-              <div className={`flex items-end gap-2 border-b px-1 pb-2 transition ${conversationState?.turnOwner === "user" ? "border-[#e4ad68]" : "border-[#8c6a50]/55"}`}>
+              <div className={`flex items-end gap-2 rounded-[10px] border px-3 py-2 transition duration-300 ${
+                conversationState?.turnOwner === "user"
+                  ? "mv-user-turn border-[#f1bd76]/85 bg-[#46323b]/72"
+                  : "border-[#8c6a50]/45 bg-[#1c1820]/42"
+              }`}>
                 <textarea
                   value={userNote}
                   onChange={(event) => setUserNote(event.target.value)}
