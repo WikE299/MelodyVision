@@ -6,7 +6,7 @@ The listening room now presents one continuous co-creation conversation instead 
 
 Musician figures only show speaking and active states. Long comments therefore cannot cover figures, the crystal, the composer, or other comments.
 
-## Facilitator 2.1
+## Facilitator 2.2
 
 The facilitator now receives the shared transcript and current VisualBrief. Each plan contains:
 
@@ -14,7 +14,9 @@ The facilitator now receives the shared transcript and current VisualBrief. Each
 - a transition that explains what the conversation has found and where it goes next
 - one current visual goal
 - one focused user question
-- two or three optional sentence starters
+- two or three sentence starters that require the user to add their own words before sending
+
+The facilitator also receives each selected musician's identity context. Its output is rejected when it introduces a guarded identity confusion, such as treating jazz musician Louis Armstrong as astronaut Neil Armstrong.
 
 The four conversational goals are:
 
@@ -32,15 +34,19 @@ These are conversational scaffolds rather than image-generation controls. The us
 - The queued musician receives a restrained breathing aura around the figure and stage, in addition to the speech bubble.
 - When a response completes, only the next queued musician receives a bubble. After the scheduled musicians finish, the turn returns to the user.
 - A user response schedules the next guided round, but the next musician still waits for an explicit bubble click.
-- On narrow screens the drawer overlays the right side of the stage and provides a visible return-to-stage action whenever another musician is waiting.
+- On narrow screens the drawer overlays the right side of the stage and can be collapsed to reveal the next musician's cue.
 - The current facilitator question remains pinned above the composer.
 - Every new facilitator question triggers one border-light sweep; the effect does not loop continuously.
 - The composer receives a soft breathing highlight only while the conversation turn belongs to the user.
-- Sentence starters fill the composer but do not submit automatically.
-- The primary generation action stays disabled until the user contributes at least one message.
+- Sentence starters fill the composer but cannot be submitted without a personal continuation.
+- Users may intentionally interrupt a musician turn; the composer states this clearly instead of implying that it is disabled.
+- Each submitted user message immediately produces a new VisualBrief version, so the stage can show the recorded visual cue before the next musician responds.
+- The primary action remains "Continue Listening Together" until the VisualBrief is ready. An early generation option is secondary and requires a user-confirmed visual anchor.
 - Resonance controls live with musician messages in the conversation stream.
 - The stream scrolls independently, so long messages do not move or cover the stage.
 - The crystal controls a persistent page-level audio element. Playback failures are visible instead of failing silently.
+- Before the first user contribution, the stage quietly invites the user to touch the crystal and bring the music into the room.
+- Returning to guide selection preserves the audio analysis but asks for confirmation before resetting a started conversation.
 - Figure wrappers no longer capture pointer events through transparent regions.
 
 ## Validation

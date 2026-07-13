@@ -40,6 +40,8 @@ curl -X POST http://127.0.0.1:8001/analyze \
   -F "file=@../../public/preset-audio/clips/bach-cello-prelude-clip.mp3"
 ```
 
+From the repository root, `npm run dev:full` starts both this service and Next.js after the virtual environment is ready. The normal product flow requires this service; set `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` only for visual-only local development.
+
 ## Application integration
 
 The Next.js `/api/analyze` route proxies uploads to this service. Configure the server-only environment variable:
@@ -48,7 +50,7 @@ The Next.js `/api/analyze` route proxies uploads to this service. Configure the 
 AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
 ```
 
-The browser runs Meyda in parallel for realtime animation features. If this service is unavailable, the application continues with an explicitly marked `meyda-degraded` result. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
+The browser runs Meyda in parallel for realtime animation features. The product flow stops when this service is unavailable unless `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is set explicitly. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
 
 ## Run from the command line
 

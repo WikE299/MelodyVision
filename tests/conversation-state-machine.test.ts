@@ -200,3 +200,22 @@ test("facilitator model plans are constrained to eligible speakers", async () =>
   assert.equal(invalid.source, "deterministic-fallback");
   assert.deepEqual(invalid.speakerIds, ["boya", "beethoven"]);
 });
+
+test("facilitator rejects an identity-confused Armstrong plan", async () => {
+  const state = createFourPersonState();
+  const plan = await runFacilitatorAgent(
+    { state, musicianNames },
+    async () => ({
+      content: JSON.stringify({
+        speakerIds: ["armstrong"],
+        transition: "从月球回望地球，我们继续听这一段。",
+        userInvitation: "你看见了什么？",
+        sentenceStarters: ["我最先看见……", "它像是在……"],
+      }),
+      model: "test-model",
+    })
+  );
+
+  assert.equal(plan.source, "deterministic-fallback");
+  assert.deepEqual(plan.speakerIds, ["boya", "beethoven"]);
+});

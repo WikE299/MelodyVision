@@ -51,37 +51,41 @@ export default function FlowHeader({
   activeStep,
   variant = "dark",
   brandLabel = "MelodyVision",
+  compact = false,
 }: {
   activeStep: 1 | 2 | 3 | 4;
   variant?: "dark" | "light";
   brandLabel?: string;
+  compact?: boolean;
 }) {
   const isDark = variant === "dark";
   const { language, toggleLanguage } = useLanguage();
 
   return (
-    <header className="flex items-start justify-between gap-4 lg:gap-6 2xl:gap-8">
-      <div className="min-w-[210px] 2xl:min-w-[290px]">
+    <header className={`flex justify-between gap-4 lg:gap-6 2xl:gap-8 ${compact ? "h-14 items-center" : "items-start"}`}>
+      <div className={compact ? "min-w-[190px]" : "min-w-[210px] 2xl:min-w-[290px]"}>
         <h1
-          className={`font-serif text-3xl leading-none tracking-tight drop-shadow-[0_3px_18px_rgba(255,194,119,0.16)] 2xl:text-4xl ${
+          className={`font-serif leading-none tracking-tight drop-shadow-[0_3px_18px_rgba(255,194,119,0.16)] ${compact ? "text-2xl" : "text-3xl 2xl:text-4xl"} ${
             isDark ? "text-[#ffe4bd]" : "text-[#2f2638]"
           }`}
         >
-          {brandLabel} <span className="text-2xl text-[#f3b862]">✦</span>
+          {brandLabel} <span className={`${compact ? "text-lg" : "text-2xl"} text-[#f3b862]`}>✦</span>
         </h1>
-        <p className={`mt-2 text-lg font-medium 2xl:mt-3 2xl:text-xl ${isDark ? "text-[#ffe7c6]" : "text-[#6c5d68]"}`}>
-          {language === "zh" ? "音乐画师 · 当音乐作画" : "Music Painter · When Music Paints"}
-        </p>
+        {!compact && (
+          <p className={`mt-2 text-lg font-medium 2xl:mt-3 2xl:text-xl ${isDark ? "text-[#ffe7c6]" : "text-[#6c5d68]"}`}>
+            {language === "zh" ? "音乐画师 · 当音乐作画" : "Music Painter · When Music Paints"}
+          </p>
+        )}
       </div>
 
-      <nav className="hidden flex-1 items-start justify-center gap-2 xl:flex 2xl:gap-6">
+      <nav className={`hidden flex-1 justify-center xl:flex ${compact ? "items-center gap-2" : "items-start gap-2 2xl:gap-6"}`}>
         {STEPS.map((step, index) => {
           const active = activeStep === index + 1;
           return (
-            <div key={step.index} className="flex items-start gap-2 2xl:gap-6">
-              <div className="flex min-w-[104px] items-start gap-2 2xl:min-w-[146px] 2xl:gap-3">
+            <div key={step.index} className={`flex gap-2 ${compact ? "items-center" : "items-start 2xl:gap-6"}`}>
+              <div className={`flex items-start gap-2 ${compact ? "min-w-[96px]" : "min-w-[104px] 2xl:min-w-[146px] 2xl:gap-3"}`}>
                 <div
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border 2xl:h-14 2xl:w-14 ${
+                  className={`flex shrink-0 items-center justify-center rounded-full border ${compact ? "h-9 w-9" : "h-11 w-11 2xl:h-14 2xl:w-14"} ${
                     active
                       ? "border-[#f8bf6a] bg-[#4a342b] text-[#ffd789] shadow-[0_0_24px_rgba(255,184,83,0.55)]"
                       : isDark
@@ -92,16 +96,16 @@ export default function FlowHeader({
                   <StepIcon type={step.icon} />
                 </div>
                 <div>
-                  <p className={`text-xl 2xl:text-2xl ${active ? "text-[#ffd385]" : isDark ? "text-[#d8bf9e]" : "text-[#6b5c67]"}`}>
+                  <p className={`${compact ? "text-base" : "text-xl 2xl:text-2xl"} ${active ? "text-[#ffd385]" : isDark ? "text-[#d8bf9e]" : "text-[#6b5c67]"}`}>
                     {step.index}
                   </p>
-                  <p className={`mt-1 whitespace-nowrap text-[13px] leading-tight 2xl:text-sm ${isDark ? "text-[#f3d5ad]" : "text-[#756674]"}`}>
+                  <p className={`${compact ? "mt-0 text-[11px]" : "mt-1 text-[13px] 2xl:text-sm"} whitespace-nowrap leading-tight ${isDark ? "text-[#f3d5ad]" : "text-[#756674]"}`}>
                     {step.title[language]}
                   </p>
                 </div>
               </div>
               {index < STEPS.length - 1 && (
-                <div className={`pt-4 text-xl 2xl:pt-5 2xl:text-3xl ${isDark ? "text-[#d5aa79]/85" : "text-[#b99a78]"}`}>→</div>
+                <div className={`${compact ? "text-lg" : "pt-4 text-xl 2xl:pt-5 2xl:text-3xl"} ${isDark ? "text-[#d5aa79]/85" : "text-[#b99a78]"}`}>→</div>
               )}
             </div>
           );
@@ -111,7 +115,7 @@ export default function FlowHeader({
       <button
         type="button"
         onClick={toggleLanguage}
-        className={`shrink-0 rounded-full border px-3 py-2 text-sm font-semibold transition 2xl:px-4 ${
+        className={`shrink-0 rounded-full border px-3 text-sm font-semibold transition 2xl:px-4 ${compact ? "py-1.5" : "py-2"} ${
           isDark
             ? "border-[#b18b72]/50 bg-white/5 text-[#ffe3bd] hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
             : "border-[#c8b7a8] bg-white text-[#5d5060] hover:border-[#9f6f45]"

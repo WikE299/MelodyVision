@@ -36,6 +36,7 @@ const COPY = {
     productHint: "选一段声音，邀请音乐家聆听，再把感受变成画作。",
     analyzing: "正在分析音乐...",
     analyzeFailed: "音频分析失败，请换一段音频再试。",
+    richAnalysisUnavailable: "音乐理解服务暂不可用。请稍后重试，或确认音频分析服务已经启动。",
     exampleFailed: "示例音频加载失败，请稍后再试或上传自己的音频。",
     searchFailed: "音乐搜索失败，请稍后再试。",
     downloadFailed: "音乐下载失败，请换一首或稍后再试。",
@@ -75,6 +76,7 @@ const COPY = {
     productHint: "Choose a sound, invite musicians to listen, then turn the response into an artwork.",
     analyzing: "Analyzing your music...",
     analyzeFailed: "Audio analysis failed. Please try another file.",
+    richAnalysisUnavailable: "The music understanding service is unavailable. Please try again after it has started.",
     exampleFailed: "The example audio could not be loaded. Try again later or upload your own audio.",
     searchFailed: "Music search failed. Please try again later.",
     downloadFailed: "Music download failed. Try another track or try again later.",
@@ -174,11 +176,18 @@ export default function HomePageClient() {
       let analysis;
       if (richResult.status === "fulfilled") {
         sessionStorage.setItem("musicProfile", JSON.stringify(richResult.value));
+        sessionStorage.removeItem("audioAnalysisNotice");
         analysis = profileToCompatibleAnalysis(richResult.value, context.sourceMetadata);
-      } else if (realtimeResult.status === "fulfilled") {
+      } else if (
+        realtimeResult.status === "fulfilled" &&
+        (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS === "true")
+      ) {
         console.warn("Rich analysis unavailable; using explicit Meyda degraded mode.", richResult.reason);
         sessionStorage.removeItem("musicProfile");
+        sessionStorage.setItem("audioAnalysisNotice", "meyda-degraded");
         analysis = meydaToDegradedAnalysis(realtimeResult.value, context.sourceMetadata);
+      } else if (realtimeResult.status === "fulfilled") {
+        throw new Error("RICH_ANALYSIS_UNAVAILABLE");
       } else {
         throw new Error("Rich and realtime audio analysis both failed");
       }
@@ -211,7 +220,9 @@ export default function HomePageClient() {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       sessionStorage.removeItem("audioObjectUrl");
       setAnalyzing(false);
-      setError(copy.analyzeFailed);
+      setError(err instanceof Error && err.message === "RICH_ANALYSIS_UNAVAILABLE"
+        ? copy.richAnalysisUnavailable
+        : copy.analyzeFailed);
     }
   };
 
@@ -228,7 +239,7 @@ export default function HomePageClient() {
       const file = new File([blob], `${item.name}${extension}`, { type: blob.type || "audio/mpeg" });
       await handleFileSelect(file, {
         sourceKind: "preset",
-        playbackUrl: item.file,
+        playbackUrl: item.originalFile,
         catalogItemId: item.id,
         sourceMetadata: {
           title: item.name,

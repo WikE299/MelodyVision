@@ -16,8 +16,9 @@ import type {
   VisualBrief,
   VisualBriefFieldStatus,
 } from "@/lib/contracts";
-import type { FacilitatorPlan, FacilitatorGoal } from "@/lib/agents/facilitator";
+import type { FacilitatorPlan } from "@/lib/agents/facilitator";
 import { readConversationStream } from "@/lib/conversation";
+import { isMeaningfulUserInput } from "@/lib/conversation/user-input";
 
 const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
 
@@ -46,7 +47,7 @@ const COPY = {
     expandProgress: "展开播放进度",
     addFeeling: "点击可补充你的听感",
     myFeeling: "我的感受",
-    feelingPlaceholder: "我也想说两句（可选）",
+    feelingPlaceholder: "说说你听见或看见的画面",
     collapse: "收起",
     sendFeeling: "发送听感",
     sendingFeeling: "正在发送",
@@ -59,10 +60,18 @@ const COPY = {
     facilitator: "共创引导",
     openChat: "展开聊天室",
     closeChat: "收起聊天室",
-    nextSpeakerWaiting: "下一位音乐家正在等你 · 返回舞台",
-    waitingTurn: "先听完这一轮，马上轮到你",
+    nextSpeakerWaiting: "下一位音乐家正在等你",
+    waitingTurn: "音乐家正在说话。你也可以随时写下听感并加入对话。",
     starterLabel: "可以从这里开始",
-    generateHint: "至少说出一处你看见的画面，才会真正成为共同创作",
+    generateHint: "先补充一处你自己的画面，音乐家的听法才会真正和你汇合。",
+    inputNeedsDetail: "在起句后补充一点自己的画面，再发送。",
+    userNoteFailed: "这句话没有送达，请稍后重试。",
+    continueListening: "继续共同聆听",
+    generateEarly: "用当前线索提前生成",
+    startMusic: "触碰水晶，让音乐回到房间",
+    visualRecorded: "刚刚记下你的画面",
+    returnToGuides: "返回选择音乐家",
+    changeGuidesConfirm: "更换音乐家会重置当前的共同聆听记录，确定返回吗？",
     goalLabels: {
       "subject-space": "看见什么",
       "motion-composition": "如何运动",
@@ -97,7 +106,7 @@ const COPY = {
     expandProgress: "Show playback progress",
     addFeeling: "Add your listening note",
     myFeeling: "My note",
-    feelingPlaceholder: "I also want to say something (optional)",
+    feelingPlaceholder: "Describe the image you hear or see",
     collapse: "Close",
     sendFeeling: "Send listening note",
     sendingFeeling: "Sending",
@@ -110,10 +119,18 @@ const COPY = {
     facilitator: "Co-creation guide",
     openChat: "Open conversation",
     closeChat: "Close conversation",
-    nextSpeakerWaiting: "The next musician is ready · Return to the stage",
-    waitingTurn: "Listen to this round. Your turn is next.",
+    nextSpeakerWaiting: "The next musician is ready",
+    waitingTurn: "A musician is speaking. You can still add your own listening note at any time.",
     starterLabel: "You could begin here",
-    generateHint: "Add at least one image of your own so this becomes a true co-creation.",
+    generateHint: "Add one image of your own so the musicians' views can meet yours.",
+    inputNeedsDetail: "Add a little of your own image after the starter before sending.",
+    userNoteFailed: "Your note did not send. Please try again.",
+    continueListening: "Continue Listening Together",
+    generateEarly: "Generate from Current Cues",
+    startMusic: "Touch the crystal and bring the music back into the room",
+    visualRecorded: "Your visual cue is now recorded",
+    returnToGuides: "Change musicians",
+    changeGuidesConfirm: "Changing musicians will reset this shared listening session. Return anyway?",
     goalLabels: {
       "subject-space": "What appears",
       "motion-composition": "How it moves",
@@ -274,7 +291,7 @@ function VisualBriefTrace({
     >
       <div className="flex items-center justify-center gap-3 text-[11px] tracking-[0.18em] text-[#d6b38d]/76">
         <span className="h-px w-12 bg-[#d5a15f]/32" />
-        <span>{brief?.readiness.ready ? copy.visualReady : copy.visualForming}</span>
+        <span>{brief?.readiness.ready ? copy.visualReady : candidates.length ? copy.visualRecorded : copy.visualForming}</span>
         <span className="h-px w-12 bg-[#d5a15f]/32" />
       </div>
       {brief && (
@@ -514,7 +531,7 @@ export default function ListenPage() {
   const [activeCharacterId, setActiveCharacterId] = useState<string>(selectedChars[0]?.id || "");
   const [userNote, setUserNote] = useState("");
   const [submittingUserNote, setSubmittingUserNote] = useState(false);
-  const [briefCheckNonce, setBriefCheckNonce] = useState(0);
+  const [userNoteError, setUserNoteError] = useState("");
   const [showPlayerControls, setShowPlayerControls] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
@@ -525,6 +542,7 @@ export default function ListenPage() {
   const [audioError, setAudioError] = useState(initialState.audioSrc ? "" : copy.playbackUnavailable);
   const [audioSrc] = useState(initialState.audioSrc);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoplayAttemptedRef = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const turnInFlightRef = useRef(false);
   const turnAbortRef = useRef<AbortController | null>(null);
@@ -532,8 +550,6 @@ export default function ListenPage() {
   const activeStreamSpeakerRef = useRef("");
   const allCommentsRef = useRef(initialState.comments);
   const visualBriefRefRef = useRef(initialState.conversationState?.visualBriefRef || null);
-  const briefInFlightRef = useRef(false);
-  const failedBriefVersionRef = useRef(0);
 
   useEffect(() => {
     if (selectedChars.length === 0 || !conversationState) {
@@ -588,6 +604,23 @@ export default function ListenPage() {
     }
   };
 
+  const attemptAutoplay = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio || autoplayAttemptedRef.current) return;
+    autoplayAttemptedRef.current = true;
+
+    try {
+      await audio.play();
+      setAudioError("");
+      setIsPlaying(true);
+    } catch (error) {
+      // Browsers may still require a gesture; the crystal remains the fallback control.
+      if (error instanceof DOMException && error.name === "NotAllowedError") return;
+      console.warn("Listening-room autoplay failed:", error);
+      setAudioError(copy.playbackUnavailable);
+    }
+  }, [copy.playbackUnavailable]);
+
   const handleSeek = (value: string) => {
     const nextTime = Number(value);
     if (!audioRef.current || Number.isNaN(nextTime)) return;
@@ -603,17 +636,6 @@ export default function ListenPage() {
     visualBriefRefRef.current = mergedState.visualBriefRef;
     setConversationState(mergedState);
     sessionStorage.setItem("conversationState", JSON.stringify(mergedState));
-  }, []);
-
-  const mergeVisualBriefRef = useCallback((visualBriefRef: ConversationState["visualBriefRef"]) => {
-    if (visualBriefRef) visualBriefRefRef.current = visualBriefRef;
-    setConversationState((current) => {
-      if (!current || !visualBriefRef) return current;
-      if ((current.visualBriefRef?.version || 0) >= visualBriefRef.version) return current;
-      const next = { ...current, visualBriefRef };
-      sessionStorage.setItem("conversationState", JSON.stringify(next));
-      return next;
-    });
   }, []);
 
   const clearTurnIndicators = useCallback((speakerId: string) => {
@@ -701,57 +723,6 @@ export default function ListenPage() {
     }
   }, [clearTurnIndicators, copy.failed, persistConversationState]);
 
-  const updateVisualBrief = useCallback(async (
-    state: ConversationState,
-    expectedVersion: number
-  ) => {
-    if (briefInFlightRef.current) return;
-    briefInFlightRef.current = true;
-    try {
-      const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
-      const previousBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null");
-      const response = await fetch("/api/conversation/brief", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationState: state,
-          previousBrief,
-          musicAnalysis,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "VisualBrief update failed");
-      const nextBrief = data.visualBrief as VisualBrief;
-      setVisualBrief(nextBrief);
-      sessionStorage.setItem("visualBrief", JSON.stringify(nextBrief));
-      sessionStorage.setItem("visualBriefMeta", JSON.stringify(data.meta));
-      mergeVisualBriefRef(data.visualBriefRef);
-      failedBriefVersionRef.current = 0;
-    } catch (error) {
-      console.error(error);
-      failedBriefVersionRef.current = expectedVersion;
-    } finally {
-      briefInFlightRef.current = false;
-      setBriefCheckNonce((value) => value + 1);
-    }
-  }, [mergeVisualBriefRef]);
-
-  useEffect(() => {
-    if (!conversationState || conversationState.turnOwner !== "user") return;
-    const completedRounds = conversationState.messages.reduce((count, message, index, messages) => {
-      return message.role === "facilitator" && messages[index - 1]?.role === "musician"
-        ? count + 1
-        : count;
-    }, 0);
-    const currentVersion = conversationState.visualBriefRef?.version || visualBrief?.version || 0;
-    if (
-      completedRounds > currentVersion &&
-      failedBriefVersionRef.current !== completedRounds
-    ) {
-      void updateVisualBrief(conversationState, completedRounds);
-    }
-  }, [briefCheckNonce, conversationState, updateVisualBrief, visualBrief?.version]);
-
   const handleReveal = (charId: string) => {
     setActiveCharacterId(charId);
     if (allComments[charId]) setRevealed((prev) => new Set(prev).add(charId));
@@ -803,14 +774,24 @@ export default function ListenPage() {
   const handleSubmitUserNote = async () => {
     const content = userNote.trim();
     if (!content || !conversationState || submittingUserNote) return;
+    if (!isMeaningfulUserInput(content)) {
+      setUserNoteError(copy.inputNeedsDetail);
+      return;
+    }
 
     setSubmittingUserNote(true);
+    setUserNoteError("");
     cancelActiveTurn();
     try {
       const response = await fetch("/api/conversation/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationState, content, visualBrief }),
+        body: JSON.stringify({
+          conversationState,
+          content,
+          visualBrief,
+          musicAnalysis: JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}"),
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Conversation response failed");
@@ -823,10 +804,16 @@ export default function ListenPage() {
         setFacilitatorPlan(data.facilitatorPlan as FacilitatorPlan);
         sessionStorage.setItem("facilitatorPlan", JSON.stringify(data.facilitatorPlan));
       }
+      if (data.visualBrief) {
+        const nextBrief = data.visualBrief as VisualBrief;
+        setVisualBrief(nextBrief);
+        sessionStorage.setItem("visualBrief", JSON.stringify(nextBrief));
+      }
       setUserNote("");
       setFailedSpeakerId("");
     } catch (error) {
       console.error(error);
+      setUserNoteError(error instanceof Error ? error.message : copy.userNoteFailed);
     } finally {
       setSubmittingUserNote(false);
     }
@@ -850,15 +837,7 @@ export default function ListenPage() {
     });
   };
 
-  const waitForBackgroundBrief = async () => {
-    for (let attempt = 0; attempt < 150 && briefInFlightRef.current; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 400));
-    }
-    if (briefInFlightRef.current) throw new Error("VisualBrief update timed out");
-  };
-
   const resolveGenerationBrief = async (state: ConversationState) => {
-    await waitForBackgroundBrief();
     let latestState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
     if (!latestState || latestState.id !== state.id) latestState = state;
     let latestBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null") as VisualBrief | null;
@@ -983,6 +962,7 @@ export default function ListenPage() {
           sessionId: data.sessionId || sessionId,
           provider: data.provider,
           model: data.model,
+          imageSize: data.imageSize,
           requestId: data.requestId,
           promptSource: data.promptSource,
           promptDirector: data.promptDirector,
@@ -1022,6 +1002,16 @@ export default function ListenPage() {
   const stageSlots = stageSlotsByCount[Math.min(selectedChars.length, 4)] || stageSlotsByCount[4];
   const conversationMessages = conversationState?.messages || [];
   const latestMessage = conversationMessages.at(-1);
+  const hasUserContribution = conversationMessages.some((message) => message.role === "user");
+  const visualFields = visualBrief?.readiness.presentFields || [];
+  const hasVisualAnchor = visualFields.includes("subject") && (
+    visualFields.includes("space") || visualFields.includes("composition")
+  );
+  const visualBriefReady = Boolean(visualBrief?.readiness.ready);
+  const canGenerateEarly = hasUserContribution && hasVisualAnchor;
+  const waitingForNextMusician = Boolean(
+    conversationState?.status === "streaming-musician" && conversationState.queuedSpeakerIds.length > 0
+  );
   const timelineMessages = latestMessage?.role === "facilitator" &&
     latestMessage.content === facilitatorPlan?.userInvitation
     ? conversationMessages.slice(0, -1)
@@ -1042,14 +1032,28 @@ export default function ListenPage() {
         <FlowHeader activeStep={3} />
 
         <section className="relative mt-3 flex min-h-0 flex-1 overflow-hidden rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
+          <button
+            type="button"
+            onClick={() => {
+              if (conversationMessages.length > 0 && !window.confirm(copy.changeGuidesConfirm)) return;
+              router.push("/select");
+            }}
+            className="absolute left-3 top-3 z-[100] flex h-9 w-9 items-center justify-center rounded-full border border-[#9f6f45]/45 bg-[#211c26]/82 text-lg text-[#f5d3a8] transition hover:border-[#ffd083]/80 hover:bg-[#382b32]"
+            aria-label={copy.returnToGuides}
+            title={copy.returnToGuides}
+          >
+            ←
+          </button>
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
             {audioSrc && (
               <audio
                 ref={audioRef}
                 src={audioSrc}
                 preload="auto"
+                autoPlay
                 loop
                 onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+                onCanPlay={() => void attemptAutoplay()}
                 onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
                 onPlay={() => {
                   setAudioError("");
@@ -1187,6 +1191,11 @@ export default function ListenPage() {
                   {showPlayerControls ? "⌄" : "⌃"}
                 </button>
               </div>
+              {!isPlaying && !hasUserContribution && (
+                <p className="pointer-events-none absolute bottom-[42px] left-1/2 z-20 w-[min(260px,64%)] -translate-x-1/2 text-center text-xs font-medium tracking-[0.06em] text-[#f0cf9f]/86">
+                  {copy.startMusic}
+                </p>
+              )}
             </div>
 
             {audioError && (
@@ -1214,20 +1223,9 @@ export default function ListenPage() {
               >
                 →
               </button>
-              <div className="mt-3 grid grid-cols-4 gap-2">
-                {(Object.keys(copy.goalLabels) as FacilitatorGoal[]).map((goal, index) => {
-                  const activeGoal = facilitatorPlan?.currentGoal || "subject-space";
-                  const activeIndex = (Object.keys(copy.goalLabels) as FacilitatorGoal[]).indexOf(activeGoal);
-                  return (
-                    <div key={goal} className="min-w-0">
-                      <div className={`h-0.5 w-full ${index <= activeIndex ? "bg-[#efb96f]" : "bg-[#715744]/48"}`} />
-                      <p className={`mt-1 truncate text-[10px] ${index === activeIndex ? "text-[#ffd18a]" : "text-[#9f8874]"}`}>
-                        {copy.goalLabels[goal]}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
+              <p className="mt-3 text-[11px] font-medium tracking-[0.08em] text-[#d8b080]">
+                {copy.goalLabels[facilitatorPlan?.currentGoal || "subject-space"]}
+              </p>
             </header>
 
             <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
@@ -1302,7 +1300,10 @@ export default function ListenPage() {
               }`}>
                 <textarea
                   value={userNote}
-                  onChange={(event) => setUserNote(event.target.value)}
+                  onChange={(event) => {
+                    setUserNote(event.target.value);
+                    setUserNoteError("");
+                  }}
                   placeholder={conversationState?.turnOwner === "user" ? copy.feelingPlaceholder : copy.waitingTurn}
                   rows={2}
                   className="min-h-[46px] min-w-0 flex-1 resize-none bg-transparent text-sm leading-relaxed text-[#ffe3bd] outline-none placeholder:text-[#927c69]"
@@ -1317,22 +1318,33 @@ export default function ListenPage() {
                   ↑
                 </button>
               </div>
+              {userNoteError && <p className="mt-2 text-xs text-[#efb6a5]">{userNoteError}</p>}
               {generationError && <p className="mt-2 text-xs text-[#efb6a5]">{generationError}</p>}
-              {!conversationState?.messages.some((message) => message.role === "user") && (
+              {!hasUserContribution && (
                 <p className="mt-2 text-[10px] leading-relaxed text-[#a88e77]">{copy.generateHint}</p>
               )}
               <button
                 type="button"
-                onClick={handleContinue}
+                onClick={visualBriefReady ? handleContinue : () => setChatOpen(false)}
                 disabled={
-                  Object.keys(allComments).length === 0 ||
-                  !conversationState?.messages.some((message) => message.role === "user") ||
-                  generating
+                  visualBriefReady
+                    ? generating
+                    : !waitingForNextMusician
                 }
                 className="mt-2 flex h-12 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 px-5 text-sm font-semibold text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.26)] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61]"
               >
-                {copy.generate}
+                {visualBriefReady ? copy.generate : copy.continueListening}
               </button>
+              {!visualBriefReady && canGenerateEarly && (
+                <button
+                  type="button"
+                  onClick={handleContinue}
+                  disabled={generating}
+                  className="mt-2 w-full text-center text-xs text-[#d8b18b] transition hover:text-[#ffe0b5] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {copy.generateEarly}
+                </button>
+              )}
             </div>
             </div>
           </aside>

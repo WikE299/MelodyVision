@@ -304,26 +304,31 @@ export async function runVisualScribeAgent(
   let lastModel = "unknown";
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const response = await complete({
-      systemPrompt: attempt === 1
-        ? basePrompt
-        : `${basePrompt}\n\n上一版未通过验证：\n${lastErrors.map((error) => `- ${error}`).join("\n")}\n请修复并重新返回完整 JSON。`,
-      userMessage: "更新 VisualBrief。只返回 JSON。",
-      temperature: attempt === 1 ? 0.25 : 0.1,
-      maxTokens: 2600,
-    });
-    lastModel = response.model;
-    const draft = parseDraft(response.content);
-    lastErrors = validateVisualScribeDraft(draft, input);
-    if (draft && lastErrors.length === 0) {
-      return {
-        brief: buildBrief(draft, input),
-        model: response.model,
-        attempts: attempt,
-        profileVersion: VISUAL_SCRIBE_PROFILE_VERSION,
-        fallback: false,
-        validationErrors: [],
-      };
+    try {
+      const response = await complete({
+        systemPrompt: attempt === 1
+          ? basePrompt
+          : `${basePrompt}\n\n上一版未通过验证：\n${lastErrors.map((error) => `- ${error}`).join("\n")}\n请修复并重新返回完整 JSON。`,
+        userMessage: "更新 VisualBrief。只返回 JSON。",
+        temperature: attempt === 1 ? 0.25 : 0.1,
+        maxTokens: 2600,
+      });
+      lastModel = response.model;
+      const draft = parseDraft(response.content);
+      lastErrors = validateVisualScribeDraft(draft, input);
+      if (draft && lastErrors.length === 0) {
+        return {
+          brief: buildBrief(draft, input),
+          model: response.model,
+          attempts: attempt,
+          profileVersion: VISUAL_SCRIBE_PROFILE_VERSION,
+          fallback: false,
+          validationErrors: [],
+        };
+      }
+    } catch (error) {
+      lastErrors = [error instanceof Error ? error.message : "VisualBrief model request failed"];
+      break;
     }
   }
 

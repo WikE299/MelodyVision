@@ -121,26 +121,31 @@ Version 2 rich audio analysis also uses:
 ```text
 AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
 EXPERIMENT_EXPORT_TOKEN=<long-random-server-secret>
+IMAGE_SIZE=1696*960
 ```
 
-Both are server-only values. Do not prefix them with `NEXT_PUBLIC_`. Research exports require either `Authorization: Bearer <token>` or `x-export-token: <token>`.
+These are server-only values. Do not prefix them with `NEXT_PUBLIC_`. Research exports require either `Authorization: Bearer <token>` or `x-export-token: <token>`.
+
+`IMAGE_SIZE` controls the generated artwork dimensions. Version 2 defaults to `1696*960` for a wide 16:9 result; keep the same value on local and server deployments so regeneration and research logs remain comparable.
 
 ## Version 2 Audio Service
 
 The deployment script requires Node.js 22.13 or newer and Python 3.12 through the Windows `py` launcher. Node 22.13+ is required by the built-in SQLite research store. The script creates `services/audio-analysis/.venv`, installs dependencies when `requirements.txt` changes, and starts the analyzer on `127.0.0.1:8001`.
 
-For local Version 2 development, start the Python analyzer before Next.js:
+For local Version 2 development, start the Python analyzer before Next.js, or use the combined command after creating the Python 3.12 virtual environment:
 
 ```bash
 cd services/audio-analysis
 HF_HOME=.cache/huggingface .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-Then run `npm run dev` from the repository root. Check the proxy with:
+Then run `npm run dev` from the repository root, or run `npm run dev:full` to start both services. Check the proxy with:
 
 ```bash
 curl http://127.0.0.1:3000/api/analyze
 ```
+
+The normal product flow requires the rich analyzer. `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is an explicit visual-only local-development escape hatch and must not be set for user studies or public deployment.
 
 The deployment is considered healthy only when both `/health` on port `8001` and the Next.js root on port `3000` respond. The first analyzer start may download and warm the CLAP model, so its health-check window is four minutes. A failed check restores and rebuilds the pre-deployment Git commit.
 

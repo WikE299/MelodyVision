@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
@@ -43,6 +42,7 @@ interface GenerationMeta {
   sessionId?: string;
   provider?: string;
   model?: string;
+  imageSize?: string;
   requestId?: string;
   promptSource?: string;
   promptDirector?: PromptDirectorTrace | null;
@@ -133,6 +133,9 @@ const COPY = {
     notRecorded: "未记录",
     startOver: "重新开始",
     startOverTip: "清空当前流程，回到首页",
+    replayTitle: "共同聆听的回声",
+    you: "你",
+    overview: "查看生成依据",
   },
   en: {
     audioName: "Music",
@@ -195,6 +198,9 @@ const COPY = {
     notRecorded: "Not recorded",
     startOver: "Start over",
     startOverTip: "Clear this flow and return home",
+    replayTitle: "Echoes from the shared listening",
+    you: "You",
+    overview: "View generation rationale",
   },
 };
 
@@ -233,7 +239,7 @@ function getInitialResultState() {
   const usePreviewData = !imageUrl && window.location.search.includes("page05-gallery-result");
 
   return {
-    imageUrl: imageUrl || (usePreviewData ? "/generated/18d3ad2f-17ae-4daf-b2d5-16096bcf0491.png" : null),
+    imageUrl: imageUrl || (usePreviewData ? "/preview/cinema-landscape.jpg" : null),
     audioUrl: audioUrl || (usePreviewData ? "/preset-audio/music2image.mp3" : ""),
     audioName: audioName || "音乐",
     comments: usePreviewData
@@ -288,44 +294,6 @@ function briefFieldText(
   return value || fallback;
 }
 
-function GuideCommentCard({
-  character,
-  comment,
-  language,
-}: {
-  character: Character;
-  comment: string;
-  language: Language;
-}) {
-  const label = getCharacterView(character, language);
-  const copy = COPY[language];
-
-  return (
-    <article className="flex min-h-0 gap-3 rounded-[18px] border border-[#a77b57]/34 bg-[#2b2530]/76 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-      <div className="relative h-[74px] w-[66px] shrink-0 overflow-hidden rounded-[14px] border border-[#c99761]/34 bg-[#201b25]">
-        <Image
-          src={`/characters/stage/${character.id}.png`}
-          alt={label.name}
-          fill
-          sizes="66px"
-          className="object-contain"
-        />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <h3 className="text-base font-semibold text-[#ffe3bd]">{label.name}</h3>
-          <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-[#6bb36b] text-xs text-[#173017]">
-            ✓
-          </span>
-        </div>
-        <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[#dec3a5]">
-          {comment || copy.emptyComment}
-        </p>
-      </div>
-    </article>
-  );
-}
-
 export default function ResultPage() {
   const router = useRouter();
   const { language } = useLanguage();
@@ -353,6 +321,7 @@ export default function ResultPage() {
   const [showOverview, setShowOverview] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
   const [showAppendix, setShowAppendix] = useState(false);
+  const [pausedDanmakuLane, setPausedDanmakuLane] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateError, setRegenerateError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({
@@ -466,6 +435,7 @@ export default function ResultPage() {
           sessionId: data.sessionId || sessionId,
           provider: data.provider,
           model: data.model,
+          imageSize: data.imageSize,
           requestId: data.requestId,
           promptSource: data.promptSource,
           promptDirector: debugInfo?.meta?.promptDirector || data.promptDirector,
@@ -553,138 +523,46 @@ export default function ResultPage() {
     (message) => message.role === "user"
   ) || [];
   const hasRationale = userRationale.length + briefRationale.length + musicianRationale.length > 0;
+  const replayMessages = conversationState?.messages
+    .filter((message) => (message.role === "musician" || message.role === "user") && message.content.trim())
+    .map((message) => {
+      const speakerCharacter = characters.find((character) => character.id === message.speakerId);
+      return {
+        id: message.id,
+        speaker: message.role === "user"
+          ? copy.you
+          : speakerCharacter
+            ? getCharacterView(speakerCharacter, language).name
+            : message.speakerId,
+        content: message.content,
+        role: message.role,
+      };
+    }) || [];
+  const danmakuMessages = replayMessages.length > 0
+    ? replayMessages
+    : characters.flatMap((character) => comments[character.id]
+      ? [{
+          id: `comment-${character.id}`,
+          speaker: getCharacterView(character, language).name,
+          content: comments[character.id],
+          role: "musician" as const,
+        }]
+      : []);
+  const danmakuLanes = [
+    danmakuMessages.filter((_, index) => index % 2 === 0),
+    danmakuMessages.filter((_, index) => index % 2 === 1),
+  ].filter((lane) => lane.length > 0);
 
   return (
-    <main className="relative h-screen overflow-hidden bg-[#15111c] text-[#f8dfbb]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_36%,rgba(255,178,91,0.21),transparent_30%),radial-gradient(circle_at_78%_80%,rgba(255,179,90,0.16),transparent_28%),linear-gradient(135deg,#111420_0%,#2b2533_45%,#10121d_100%)]" />
-      <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(115deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:180px_180px,220px_220px]" />
-      <div className="pointer-events-none absolute left-[-5%] right-[-5%] top-[44%] flex h-32 items-center justify-center gap-1 opacity-55">
-        {Array.from({ length: 170 }).map((_, index) => (
-          <span
-            key={index}
-            className="w-1 rounded-full bg-[#d99b4d]"
-            style={{
-              height: `${(6 + Math.abs(Math.sin(index * 0.16)) * 68).toFixed(1)}px`,
-              opacity: (0.2 + Math.abs(Math.sin(index * 0.21)) * 0.48).toFixed(3),
-            }}
-          />
-        ))}
-      </div>
+    <main className="relative h-screen overflow-hidden bg-[#111019] text-[#f8dfbb]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_46%,rgba(208,139,74,0.18),transparent_38%),linear-gradient(135deg,#0d1019_0%,#241f2b_48%,#0c0e16_100%)]" />
+      <div className="absolute inset-0 opacity-25 [background-image:linear-gradient(115deg,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.035)_1px,transparent_1px)] [background-size:190px_190px,230px_230px]" />
 
-      <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
-        <FlowHeader activeStep={4} />
+      <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-12 2xl:py-5">
+        <FlowHeader activeStep={4} compact />
+        <section className="relative mt-2 min-h-0 flex-1 overflow-hidden rounded-[20px] border border-[#9f6f45]/46 bg-[#1d1923]/34 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
 
-        <section
-          className={`relative mt-3 grid min-h-0 flex-1 gap-4 overflow-hidden rounded-[26px] border border-[#9f6f45]/55 bg-[#251f2b]/38 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5 ${
-            showOverview
-              ? "grid-cols-[220px_minmax(0,1fr)_360px] 2xl:grid-cols-[260px_minmax(0,1fr)_420px]"
-              : "grid-cols-[76px_minmax(0,1fr)_360px] 2xl:grid-cols-[76px_minmax(0,1fr)_420px]"
-          }`}
-        >
-          {showOverview ? (
-            <aside className="flex min-h-0 flex-col rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/72 p-4 shadow-[0_20px_70px_rgba(0,0,0,0.24)] backdrop-blur">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-[#ffe3bd]">{copy.overviewTitle}</h2>
-                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
-                    {copy.overviewText}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowOverview(false)}
-                  className="rounded-full border border-[#a77b57]/42 px-2 py-1 text-xs text-[#d7b99b] hover:border-[#ffd083]/70"
-                >
-                  {copy.collapse}
-                </button>
-              </div>
-              <div className="mt-4 space-y-3 border-t border-[#8f6b52]/34 pt-4 text-xs text-[#d7b99b]">
-                <p className="flex justify-between gap-3"><span>{copy.generatedAt}</span><span>{generatedTime}</span></p>
-                <p className="flex justify-between gap-3"><span>{copy.imageSource}</span><span>{copy.sourceValue}</span></p>
-                <p className="flex justify-between gap-3"><span>{copy.guideCount}</span><span>{characters.length || 0}</span></p>
-                <p className="flex justify-between gap-3"><span>{copy.modelStatus}</span><span>{debugInfo?.meta?.model || copy.generated}</span></p>
-              </div>
-              <div className="mt-4 min-h-0 flex-1 overflow-y-auto border-t border-[#8f6b52]/34 pt-4 pr-1 text-xs">
-                {hasRationale ? (
-                  <div className="space-y-4">
-                    {userRationale.length > 0 && (
-                      <div>
-                        <p className="font-semibold text-[#ffe3bd]">{copy.userAnchor}</p>
-                        {userRationale.map((mapping) => (
-                          <p key={mapping.sourceId} className="mt-2 leading-relaxed text-[#e4c6a4]">
-                            {language === "zh"
-                              ? conversationUserMessages.find((message) => message.id === mapping.sourceId)?.content || mapping.visualTranslation
-                              : mapping.visualTranslation}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    {briefRationale.length > 0 && (
-                      <div className="border-t border-[#8f6b52]/28 pt-3">
-                        <p className="font-semibold text-[#ffe3bd]">{copy.coCreationClues}</p>
-                        <div className="mt-2 space-y-2.5">
-                          {briefRationale.slice(0, 5).map((mapping) => (
-                            <div key={mapping.field}>
-                              <p className="text-[10px] text-[#b79678]">
-                                {copy.fieldLabels[mapping.field]}
-                              </p>
-                              <p
-                                className="mt-0.5 line-clamp-3 leading-relaxed text-[#d7b99b]"
-                                title={mapping.visualTranslation}
-                              >
-                                {language === "zh"
-                                  ? briefFieldText(visualBrief, mapping.field, mapping.visualTranslation)
-                                  : mapping.visualTranslation}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {musicianRationale.length > 0 && (
-                      <div className="border-t border-[#8f6b52]/28 pt-3">
-                        <p className="font-semibold text-[#ffe3bd]">{copy.musicianClues}</p>
-                        <div className="mt-2 space-y-2">
-                          {musicianRationale.slice(0, 3).map((mapping, index) => (
-                            <p key={`${mapping.speaker}-${index}`} className="line-clamp-3 leading-relaxed text-[#d7b99b]" title={mapping.visualTranslation}>
-                              <span className="text-[#efc68e]">{mapping.speaker}</span> · {language === "zh"
-                                ? comments[mapping.characterId] || mapping.visualTranslation
-                                : mapping.visualTranslation}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="leading-relaxed text-[#b99b80]">{copy.noRationale}</p>
-                )}
-              </div>
-            </aside>
-          ) : (
-            <aside className="relative z-10 flex h-full w-[76px] shrink-0 items-start justify-center rounded-[22px] border border-[#a77b57]/36 bg-[#241f2a]/46 p-3 backdrop-blur">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowOverview(true);
-                  recordExperimentEvent("rationale-opened", "/result", {
-                    runId: debugInfo?.meta?.runId || null,
-                  });
-                }}
-                className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-[16px] border border-[#a77b57]/36 bg-[#2d2732]/58 text-[#ffe3bd] transition hover:border-[#ffd083]/70 hover:bg-[#3a2d32]/70"
-              >
-                <span className="text-lg">↗</span>
-                <span className="text-xs leading-tight [writing-mode:vertical-rl]">{copy.overviewRail}</span>
-              </button>
-            </aside>
-          )}
-
-          <div className="relative min-w-0">
-            <div className="absolute left-0 right-0 top-0 text-center">
-              <h2 className="text-2xl font-semibold text-[#ffe3bd] 2xl:text-3xl">{copy.title}</h2>
-              <p className="mt-1 text-sm text-[#d7b99b]">{copy.subtitle}</p>
-            </div>
-            <div className="absolute right-[7%] top-[38px] z-20 flex gap-3">
+          <div className="absolute right-5 top-4 z-50 flex gap-3">
               <div className="group relative">
                 <button
                   type="button"
@@ -721,29 +599,81 @@ export default function ResultPage() {
                   {copy.save}
                 </span>
               </div>
-            </div>
-            {regenerateError && (
-              <p className="absolute left-0 right-0 top-[84px] text-center text-xs text-[#ff9f9f]">
-                {regenerateError}
-              </p>
-            )}
+          </div>
 
-            <div className="absolute left-1/2 top-[44px] inline-block max-w-full -translate-x-1/2 pt-11">
-              <div className="relative inline-block rounded-[10px] border-[8px] border-[#8b5d32] bg-[#17131a] p-2 shadow-[0_30px_90px_rgba(0,0,0,0.5),0_0_38px_rgba(255,187,91,0.18)]">
-                <div className="absolute inset-[-13px] -z-10 rounded-[14px] border border-[#efbd77]/46" />
-                <div className="overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={imageUrl}
-                    alt={copy.imageAlt}
-                    className="block max-h-[430px] max-w-[720px] object-contain 2xl:max-h-[560px] 2xl:max-w-[900px]"
-                    onLoad={playResultAudio}
-                  />
+          <button
+            type="button"
+            onClick={() => {
+              setShowOverview(true);
+              recordExperimentEvent("rationale-opened", "/result", {
+                runId: debugInfo?.meta?.runId || null,
+              });
+            }}
+            aria-label={copy.overview}
+            title={copy.overview}
+            className="absolute left-5 top-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 text-lg text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
+          >
+            ↗
+          </button>
+
+          {regenerateError && (
+            <p className="absolute left-1/2 top-16 z-50 -translate-x-1/2 text-xs text-[#ff9f9f]">{regenerateError}</p>
+          )}
+
+          <div className="absolute inset-x-6 bottom-[96px] top-[56px] flex items-center justify-center xl:top-3">
+            <div className="relative flex h-full w-full items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl}
+                alt={copy.imageAlt}
+                className="block max-h-full max-w-full rounded-[6px] object-contain shadow-[0_34px_110px_rgba(0,0,0,0.62),0_0_45px_rgba(255,187,91,0.16)] ring-1 ring-[#efbd77]/38"
+                onLoad={playResultAudio}
+              />
+            </div>
+          </div>
+
+          {!showPlayer && (
+          <div className={`absolute bottom-1 left-[170px] z-40 h-[76px] overflow-hidden border-y border-[#9f6f45]/22 bg-[#15131c]/48 py-1 backdrop-blur-sm transition-[right] ${showAppendix ? "right-[370px]" : "right-[240px]"}`} aria-label={copy.replayTitle}>
+            {danmakuLanes.map((lane, laneIndex) => (
+              <div key={laneIndex} className="mv-danmaku-lane h-1/2 overflow-hidden">
+                <div
+                  className="mv-danmaku-track flex h-full w-max min-w-max items-center"
+                  style={{
+                    animationDuration: `${38 + laneIndex * 8}s`,
+                    animationPlayState: pausedDanmakuLane === laneIndex ? "paused" : "running",
+                  }}
+                >
+                  {[0, 1].map((copyIndex) => (
+                    <div
+                      key={copyIndex}
+                      className="flex min-w-[100vw] shrink-0 items-center gap-10 pr-10"
+                      aria-hidden={copyIndex === 1}
+                    >
+                      {lane.map((message) => (
+                        <p
+                          key={`${copyIndex}-${message.id}`}
+                          className={`mv-danmaku-item max-w-[min(54rem,74vw)] shrink-0 cursor-default truncate whitespace-nowrap rounded-full border px-4 py-1.5 text-xs shadow-[0_6px_18px_rgba(0,0,0,0.24)] transition-colors ${
+                            message.role === "user"
+                              ? "border-[#f2c675]/58 bg-[#694938]/88 text-[#fff0d4]"
+                              : "border-white/16 bg-[#211d27]/88 text-[#f5ddbf]"
+                          }`}
+                          title={message.content}
+                          onMouseEnter={() => setPausedDanmakuLane(laneIndex)}
+                          onMouseLeave={() => setPausedDanmakuLane(null)}
+                        >
+                          <strong className="mr-2 font-semibold text-[#ffd28f]">{message.speaker}</strong>
+                          {message.content}
+                        </p>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
+            ))}
+          </div>
+          )}
 
-            {audioUrl && (
+          {audioUrl && (
               <>
                 <audio
                   ref={audioRef}
@@ -753,7 +683,7 @@ export default function ResultPage() {
                   onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
                   onEnded={() => setIsAudioPlaying(false)}
                 />
-                <div className="absolute bottom-0 left-1/2 flex h-[74px] w-full max-w-[620px] -translate-x-1/2 items-center justify-center">
+                <div className={`absolute bottom-1 left-4 z-50 flex h-[76px] items-center justify-center transition-[width] ${showPlayer ? "w-[620px]" : "w-[145px]"}`}>
                   {showPlayer ? (
                     <div className="flex w-full items-center gap-4 rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/84 px-5 py-2.5 text-left shadow-[0_18px_50px_rgba(0,0,0,0.3)] backdrop-blur">
                     <button
@@ -812,26 +742,50 @@ export default function ResultPage() {
                 </div>
               </>
             )}
-          </div>
 
-          <aside className="flex min-h-0 flex-col rounded-[22px] border border-[#a77b57]/46 bg-[#241f2a]/72 p-4 shadow-[0_20px_70px_rgba(0,0,0,0.24)] backdrop-blur">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-[#ffe3bd]">{copy.reviewTitle}</h2>
-                <p className="mt-1 text-xs text-[#c7aa8d]">{characters.length} / {characters.length} {copy.collected}</p>
+          {showOverview && (
+            <aside className="absolute bottom-4 left-4 top-4 z-[70] flex w-[330px] flex-col rounded-[18px] border border-[#a77b57]/50 bg-[#211c27]/94 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.52)] backdrop-blur-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#ffe3bd]">{copy.overviewTitle}</h2>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.overviewText}</p>
+                </div>
+                <button type="button" onClick={() => setShowOverview(false)} className="text-xl text-[#d7b99b] hover:text-[#ffe3bd]" aria-label={copy.collapse}>×</button>
               </div>
-            </div>
-            <div className="mt-4 grid min-h-0 flex-1 content-start gap-3 overflow-hidden">
-              {characters.slice(0, 4).map((character) => (
-                <GuideCommentCard
-                  key={character.id}
-                  character={character}
-                  comment={comments[character.id] || ""}
-                  language={language}
-                />
-              ))}
-            </div>
-          </aside>
+              <div className="mt-4 space-y-2 border-t border-[#8f6b52]/34 pt-4 text-xs text-[#d7b99b]">
+                <p className="flex justify-between gap-3"><span>{copy.generatedAt}</span><span>{generatedTime}</span></p>
+                <p className="flex justify-between gap-3"><span>{copy.guideCount}</span><span>{characters.length}</span></p>
+                <p className="flex justify-between gap-3"><span>{copy.modelStatus}</span><span>{debugInfo?.meta?.model || copy.generated}</span></p>
+              </div>
+              <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto border-t border-[#8f6b52]/34 pt-4 pr-1 text-xs text-[#d7b99b]">
+                {!hasRationale && <p>{copy.noRationale}</p>}
+                {userRationale.length > 0 && (
+                  <div>
+                    <p className="font-semibold text-[#ffe3bd]">{copy.userAnchor}</p>
+                    {userRationale.map((mapping) => (
+                      <p key={mapping.sourceId} className="mt-2 leading-relaxed text-[#e4c6a4]">
+                        {language === "zh"
+                          ? conversationUserMessages.find((message) => message.id === mapping.sourceId)?.content || mapping.visualTranslation
+                          : mapping.visualTranslation}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {briefRationale.length > 0 && (
+                  <div className="border-t border-[#8f6b52]/28 pt-3">
+                    <p className="font-semibold text-[#ffe3bd]">{copy.coCreationClues}</p>
+                    {briefRationale.slice(0, 7).map((mapping) => (
+                      <p key={mapping.field} className="mt-2 leading-relaxed">
+                        <span className="text-[#efc68e]">{copy.fieldLabels[mapping.field]}</span> · {language === "zh"
+                          ? briefFieldText(visualBrief, mapping.field, mapping.visualTranslation)
+                          : mapping.visualTranslation}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </aside>
+          )}
 
           <details
             onToggle={(event) => {
@@ -842,7 +796,7 @@ export default function ResultPage() {
                 });
               }
             }}
-            className="absolute bottom-4 right-4 z-50 w-[348px] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/88 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur 2xl:w-[404px]"
+            className={`absolute bottom-1 right-4 z-[70] rounded-[18px] border border-[#a77b57]/44 bg-[#241f2a]/94 p-4 text-sm text-[#ffe3bd] shadow-[0_18px_50px_rgba(0,0,0,0.42)] backdrop-blur-xl transition-[width] ${showAppendix ? "w-[348px] 2xl:w-[404px]" : "w-[170px]"}`}
           >
             <summary className="cursor-pointer font-semibold">{copy.appendix}</summary>
             <div className="mt-4 max-h-[420px] overflow-auto pr-1">
@@ -945,12 +899,14 @@ export default function ResultPage() {
             <button
               type="button"
               onClick={handleStartOver}
-              className="group absolute bottom-[88px] right-4 z-30 flex items-center gap-2 rounded-full border border-[#a77b57]/44 bg-[#241f2a]/88 px-4 py-2.5 text-sm font-semibold text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur transition hover:border-[#ffd083]/70 hover:bg-[#302735]"
+              aria-label={copy.startOver}
+              title={copy.startOverTip}
+              className="group absolute bottom-5 right-[194px] z-[60] flex h-11 w-11 items-center justify-center rounded-full border border-[#a77b57]/44 bg-[#241f2a]/88 text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur transition hover:border-[#ffd083]/70 hover:bg-[#302735]"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
               </svg>
-              {copy.startOver}
+              <span className="sr-only">{copy.startOver}</span>
               <span className="pointer-events-none absolute bottom-[46px] left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#a77b57]/44 bg-[#1f1923]/92 px-3 py-1.5 text-xs text-[#ffe3bd] opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.3)] transition group-hover:opacity-100">
                 {copy.startOverTip}
               </span>

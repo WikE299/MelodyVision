@@ -10,7 +10,7 @@ import {
   getCharactersByIds,
   westernCharacters,
 } from "@/lib/characters";
-import { characterUi, type Language, useLanguage } from "@/lib/i18n";
+import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 import { recordExperimentEvent } from "@/lib/experiment-events";
 
 const DEFAULT_COMBO = ["boya", "beethoven", "abing", "armstrong"];
@@ -30,8 +30,9 @@ const COPY = {
     empty: "请选择至少一位音乐家",
     entering: "正在进入...",
     enter: "进入聆听室",
-    helper: "进入后可调整角色并开始聆听",
+    helper: "进入后，音乐家会依次邀请你说出自己的画面。",
     generating: "正在安排第一轮共同聆听，完成后会自动进入聆听页",
+    degradedAnalysis: "当前使用基础音频分析模式，音乐理解精度会较低。",
   },
   en: {
     commentFailed: "Failed to initialize the listening room. Please try again later.",
@@ -46,8 +47,9 @@ const COPY = {
     empty: "Choose at least one musician",
     entering: "Entering...",
     enter: "Enter Listening Room",
-    helper: "You can listen and adjust the cast on the next page",
+    helper: "Inside, the musicians will invite you to describe the image you hear.",
     generating: "Preparing the first listening round. The room will open soon.",
+    degradedAnalysis: "Basic audio analysis is active, so music understanding may be less precise.",
   },
 };
 
@@ -153,10 +155,12 @@ function CharacterFigure({
 export default function SelectPage() {
   const router = useRouter();
   const { language } = useLanguage();
+  const mounted = useHydrated();
   const copy = COPY[language];
   const [selected, setSelected] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
+  const analysisMode = mounted ? sessionStorage.getItem("audioAnalysisMode") || "" : "";
 
   const guides = useMemo(() => {
     const allCharacters = [...chineseCharacters, ...westernCharacters];
@@ -279,6 +283,11 @@ export default function SelectPage() {
                 {copy.title}
               </h2>
               <p className="mt-1 text-sm text-[#f8d8af]/88 2xl:mt-2 2xl:text-base">{copy.subtitle}</p>
+              {analysisMode === "meyda-degraded" && (
+                <p className="mx-auto mt-2 max-w-xl text-xs leading-relaxed text-[#f2c58d]/90">
+                  {copy.degradedAnalysis}
+                </p>
+              )}
             </div>
 
             <div className="relative -mt-2 flex min-h-0 flex-1 translate-y-[-90px] items-end justify-center 2xl:translate-y-[-98px]">
@@ -348,6 +357,7 @@ export default function SelectPage() {
                           src={`/characters/stage/${character.id}.png`}
                           alt={characterUi[language][character.id as keyof typeof characterUi.zh]?.name || character.name}
                           fill
+                          sizes="(min-width: 1536px) 64px, 48px"
                           className="object-contain p-1"
                         />
                       </div>

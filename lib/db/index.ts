@@ -144,6 +144,7 @@ async function createDatabase(): Promise<SQLiteDatabase> {
   ensureColumn(database, "generation_runs", "music_profile_json", "TEXT NOT NULL DEFAULT 'null'");
   ensureColumn(database, "generation_runs", "conversation_state_json", "TEXT NOT NULL DEFAULT 'null'");
   ensureColumn(database, "generation_runs", "visual_brief_json", "TEXT NOT NULL DEFAULT 'null'");
+  ensureColumn(database, "generation_runs", "image_size", "TEXT NOT NULL DEFAULT ''");
 
   return database;
 }

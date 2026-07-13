@@ -71,7 +71,22 @@ interface PromptDirectorStep {
   };
 }
 
-const PROMPT_DIRECTOR_MAX_REPAIRS = 2;
+const PROMPT_DIRECTOR_MAX_REPAIRS = 1;
+const DEFAULT_IMAGE_SIZE = "1696*960";
+const LANDSCAPE_FORMAT_CONSTRAINT =
+  "Compose for a wide 16:9 horizontal canvas. Use the width intentionally with a clear focal subject, readable foreground-to-background depth, and meaningful negative space; avoid a square composition placed inside the wide frame.";
+
+function getConfiguredImageSize(): string {
+  const configured = process.env.IMAGE_SIZE?.trim();
+  return configured && /^\d+\*\d+$/.test(configured) ? configured : DEFAULT_IMAGE_SIZE;
+}
+
+function appendLandscapeFormatConstraint(prompt: string): string {
+  const cleaned = prompt.trim();
+  return cleaned.includes(LANDSCAPE_FORMAT_CONSTRAINT)
+    ? cleaned
+    : `${cleaned} ${LANDSCAPE_FORMAT_CONSTRAINT}`;
+}
 
 function normalizeCommentWeight(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 1;
@@ -350,7 +365,7 @@ function hasUserSourceMappings(value: unknown): value is NonNullable<PromptDirec
         item &&
         typeof item === "object" &&
         hasText((item as { sourceId?: unknown }).sourceId) &&
-        (item as { priority?: unknown }).priority === "primary" &&
+        ["primary", "constraint"].includes(String((item as { priority?: unknown }).priority)) &&
         hasText((item as { visualTranslation?: unknown }).visualTranslation)
     )
   );
@@ -645,6 +660,7 @@ async function runPromptDirectorLoop(
   for (let repairIndex = 0; repairIndex < PROMPT_DIRECTOR_MAX_REPAIRS; repairIndex += 1) {
     const latestStep = attempts[attempts.length - 1];
     if (latestStep.validation.ok) break;
+    if (!latestStep.rawOutput.trim() && latestStep.meta.finishReason === "length") break;
 
     const repairStartedAt = Date.now();
     const repairInstruction = buildPromptDirectorRepairInstruction({
@@ -717,6 +733,7 @@ async function generateImageWithDashScope(prompt: string, negativePrompt?: strin
     process.env.IMAGE_API_BASE_URL ||
     "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
   const model = process.env.IMAGE_MODEL || "wan2.7-image";
+  const imageSize = getConfiguredImageSize();
 
   if (!apiKey) {
     throw new Error("DASHSCOPE_API_KEY is not configured");
@@ -742,7 +759,7 @@ async function generateImageWithDashScope(prompt: string, negativePrompt?: strin
         prompt_extend: false,
         watermark: false,
         n: 1,
-        size: "1280*1280",
+        size: imageSize,
         negative_prompt:
           negativePrompt ||
           "text, watermark, logo, signature, blurry, low quality, distorted anatomy, extra limbs",
@@ -768,6 +785,7 @@ async function generateImageWithDashScope(prompt: string, negativePrompt?: strin
     remoteImageUrl: imageUrl,
     provider: "dashscope",
     model,
+    imageSize,
     requestId: data.request_id,
     usage: data.usage,
   };
@@ -926,11 +944,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (promptOverride) {
+      const overrideImagePrompt = appendLandscapeFormatConstraint(promptOverride);
       const overrideNegativePrompt = negativePromptOverride ||
         "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs";
       const imageStartedAt = Date.now();
       const imageAttempt = await generateImageWithRetry(
-        promptOverride,
+        overrideImagePrompt,
         overrideNegativePrompt
       );
       const imageResult = imageAttempt.result;
@@ -960,12 +979,13 @@ export async function POST(request: NextRequest) {
         },
         prompt: {
           source: "prompt-override",
-          finalImagePrompt: promptOverride,
+          finalImagePrompt: overrideImagePrompt,
           negativePrompt: overrideNegativePrompt,
         },
         image: {
           provider: imageResult.provider,
           model: imageResult.model,
+          imageSize: imageResult.imageSize,
           requestId: imageResult.requestId,
           usage: imageResult.usage,
           remoteUrl: imageResult.remoteImageUrl,
@@ -990,12 +1010,13 @@ export async function POST(request: NextRequest) {
         visualBrief,
         musicianComments: normalizedComments,
         promptDirector: null,
-        finalImagePrompt: promptOverride,
+        finalImagePrompt: overrideImagePrompt,
         negativePrompt: overrideNegativePrompt,
         imageUrl: savedImage.publicUrl,
         remoteImageUrl: imageResult.remoteImageUrl,
         imageProvider: imageResult.provider,
         imageModel: imageResult.model,
+        imageSize: imageResult.imageSize,
         imageRequestId: imageResult.requestId || "",
         timings,
         logPath,
@@ -1006,13 +1027,14 @@ export async function POST(request: NextRequest) {
         sessionId,
         imageUrl: savedImage.publicUrl,
         remoteImageUrl: imageResult.remoteImageUrl,
-        prompt: promptOverride,
+        prompt: overrideImagePrompt,
         negativePrompt: overrideNegativePrompt,
         promptSource: "prompt-override",
         promptDirector: null,
         presets,
         provider: imageResult.provider,
         model: imageResult.model,
+        imageSize: imageResult.imageSize,
         requestId: imageResult.requestId,
         usage: imageResult.usage,
         logPath,
@@ -1061,10 +1083,12 @@ export async function POST(request: NextRequest) {
     const directorImagePrompt =
       cleanedPrompt ||
       buildFallbackImagePrompt(normalizedComments, presets || {}, effectiveUserNote, musicAnalysis, promptDirectorInput);
-    const imagePrompt = appendCoCreationConstraints(
-      appendVisualPresetPrompt(directorImagePrompt, presets || {}),
-      promptDirectorInput,
-      promptBrief
+    const imagePrompt = appendLandscapeFormatConstraint(
+      appendCoCreationConstraints(
+        appendVisualPresetPrompt(directorImagePrompt, presets || {}),
+        promptDirectorInput,
+        promptBrief
+      )
     );
     const negativePrompt = appendVisualBriefNegativeConstraints(
       promptBrief?.negativePrompt ||
@@ -1116,6 +1140,7 @@ export async function POST(request: NextRequest) {
       image: {
         provider: imageResult.provider,
         model: imageResult.model,
+        imageSize: imageResult.imageSize,
         requestId: imageResult.requestId,
         usage: imageResult.usage,
         remoteUrl: imageResult.remoteImageUrl,
@@ -1146,6 +1171,7 @@ export async function POST(request: NextRequest) {
       remoteImageUrl: imageResult.remoteImageUrl,
       imageProvider: imageResult.provider,
       imageModel: imageResult.model,
+      imageSize: imageResult.imageSize,
       imageRequestId: imageResult.requestId || "",
       timings,
       logPath,
@@ -1169,6 +1195,7 @@ export async function POST(request: NextRequest) {
       presets,
       provider: imageResult.provider,
       model: imageResult.model,
+      imageSize: imageResult.imageSize,
       requestId: imageResult.requestId,
       usage: imageResult.usage,
       logPath,

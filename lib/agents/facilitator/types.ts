@@ -1,7 +1,7 @@
 import type { ConversationState } from "../../contracts/conversation-state.ts";
 import type { VisualBrief } from "../../contracts/visual-brief.ts";
 
-export const FACILITATOR_PROFILE_VERSION = "2.1.0" as const;
+export const FACILITATOR_PROFILE_VERSION = "2.2.0" as const;
 
 export type FacilitatorGoal =
   | "subject-space"
@@ -12,6 +12,7 @@ export type FacilitatorGoal =
 export interface FacilitatorInput {
   state: ConversationState;
   musicianNames: Record<string, string>;
+  musicianIdentityContexts?: Record<string, string>;
   preparedSummaries?: Record<string, string>;
   visualBrief?: VisualBrief | null;
 }

@@ -14,6 +14,13 @@ type CompleteFacilitatorTurn = (params: {
   maxTokens?: number;
 }) => Promise<LLMResponse>;
 
+const IDENTITY_GUARDS: Partial<Record<string, { required: string; forbidden: string[] }>> = {
+  armstrong: {
+    required: "此处的阿姆斯特朗是 Louis Armstrong，爵士小号手和歌手，不是宇航员 Neil Armstrong。",
+    forbidden: ["登月", "月球", "宇航", "太空", "NASA", "阿波罗"],
+  },
+};
+
 function recentMusicianIds(state: ConversationState): string[] {
   return state.messages
     .filter((message) => message.role === "musician")
@@ -102,7 +109,9 @@ export function buildFacilitatorPrompt(input: FacilitatorInput, eligibleIds: str
   const candidates = eligibleIds.map((id) => {
     const name = input.musicianNames[id] || id;
     const summary = input.preparedSummaries?.[id]?.trim() || "尚无公开发言摘要";
-    return `- ${id}（${name}）：${summary}`;
+    const identity = input.musicianIdentityContexts?.[id]?.trim() || "";
+    const guard = IDENTITY_GUARDS[id]?.required || "";
+    return `- ${id}（${name}）：身份=${identity || "未提供"} ${guard}\n  已有发言：${summary}`;
   }).join("\n");
   const recent = recentMusicianIds(input.state);
   const currentGoal = nextGoal(input);
@@ -136,6 +145,7 @@ ${candidates}
 
 规则：
 - speakerIds 只能来自允许候选，不得添加其他人物。
+- 不得把音乐家与同名人物、作品或历史事件混淆；候选中的身份说明优先于你的常识联想。
 - userInvitation 不超过 38 个中文字符。
 - transition 不超过 52 个中文字符，要说明“刚才聊出了什么、这一轮继续寻找什么”，不能只报姓名。
 - userInvitation 围绕本轮目标 ${currentGoal}，一次只问一个容易回答的问题。参考方向：${guidance.question}
@@ -143,6 +153,11 @@ ${candidates}
 - 不得向用户说出 subject-space、motion-composition、light-color-material、meaning-constraints 或 VisualBrief 等内部名称。
 - 主持人不评论音乐，不总结成最终画面，不使用姓名之外的人格表演。
 - userInvitation 必须给用户真实回答空间，不能只让用户二选一。`;
+}
+
+function hasIdentityConflict(plan: { speakerIds: string[]; stageSubtitle: string; userInvitation: string; sentenceStarters: string[] }) {
+  const text = [plan.stageSubtitle, plan.userInvitation, ...plan.sentenceStarters].join(" ").toLowerCase();
+  return plan.speakerIds.some((id) => IDENTITY_GUARDS[id]?.forbidden.some((term) => text.includes(term.toLowerCase())));
 }
 
 function cleanSubtitle(value: unknown, fallback: string): string {
@@ -186,7 +201,7 @@ function parsePlan(content: string, input: FacilitatorInput, eligibleIds: string
     }
 
     const fallback = createDeterministicFacilitatorPlan(input);
-    return {
+    const plan: FacilitatorPlan = {
       speakerIds,
       stageSubtitle: cleanSubtitle(parsed.transition, fallback.stageSubtitle),
       userInvitation: cleanSubtitle(parsed.userInvitation, fallback.userInvitation),
@@ -195,6 +210,7 @@ function parsePlan(content: string, input: FacilitatorInput, eligibleIds: string
       source: "model",
       profileVersion: FACILITATOR_PROFILE_VERSION,
     };
+    return hasIdentityConflict(plan) ? null : plan;
   } catch {
     return null;
   }

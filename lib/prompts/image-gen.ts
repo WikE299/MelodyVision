@@ -91,7 +91,7 @@ export interface PromptDirectorBrief {
   }>;
   userSourceMappings?: Array<{
     sourceId: string;
-    priority: "primary";
+    priority: "primary" | "constraint";
     visualTranslation: string;
   }>;
   visualBriefMappings?: Array<{

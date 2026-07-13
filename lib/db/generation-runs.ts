@@ -19,6 +19,7 @@ export interface GenerationRunRecord {
   remoteImageUrl: string;
   imageProvider: string;
   imageModel: string;
+  imageSize: string;
   imageRequestId: string;
   timings: unknown;
   logPath: string;
@@ -47,10 +48,11 @@ export async function insertGenerationRun(record: GenerationRunRecord) {
         remote_image_url,
         image_provider,
         image_model,
+        image_size,
         image_request_id,
         timings_json,
         log_path
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       record.id,
@@ -71,6 +73,7 @@ export async function insertGenerationRun(record: GenerationRunRecord) {
       record.remoteImageUrl,
       record.imageProvider,
       record.imageModel,
+      record.imageSize,
       record.imageRequestId,
       toJson(record.timings),
       record.logPath

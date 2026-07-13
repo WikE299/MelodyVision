@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getCharacterById } from "@/lib/characters";
 import { runFacilitatorAgent } from "@/lib/agents/facilitator";
+import { getMusicianAgentProfile } from "@/lib/agents/musicians";
 import {
   createConversationState,
   scheduleMusicianTurn,
@@ -40,6 +41,9 @@ export async function POST(request: NextRequest) {
     const musicianNames = Object.fromEntries(
       selectedMusicianIds.map((id) => [id, getCharacterById(id)!.name])
     );
+    const musicianIdentityContexts = Object.fromEntries(
+      selectedMusicianIds.map((id) => [id, getMusicianAgentProfile(id)?.identityContext || ""])
+    );
     const state = createConversationState({
       sessionId,
       musicProfileId,
@@ -48,6 +52,7 @@ export async function POST(request: NextRequest) {
     const plan = await runFacilitatorAgent({
       state,
       musicianNames,
+      musicianIdentityContexts,
       preparedSummaries: readStringRecord(body.preparedSummaries),
     });
 
