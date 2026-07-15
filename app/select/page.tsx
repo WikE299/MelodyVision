@@ -206,12 +206,18 @@ export default function SelectPage() {
 
     try {
       const sessionId = sessionStorage.getItem("experimentSessionId") || crypto.randomUUID();
+      const trialId = sessionStorage.getItem("studyTrialId") || sessionId;
       const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as { id?: string } | null;
       const musicProfileId = musicProfile?.id || `degraded-${sessionId}`;
+      const condition = sessionStorage.getItem("interactiveCondition") === "single_agent"
+        ? "single_agent"
+        : "multi_agent";
       sessionStorage.setItem("experimentSessionId", sessionId);
       recordExperimentEvent("musicians-selected", "/select", {
         musicianIds: selected,
         count: selected.length,
+        trialId,
+        condition,
       });
 
       const conversationResponse = await fetch("/api/conversation/start", {
@@ -219,7 +225,9 @@ export default function SelectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
+          trialId,
           musicProfileId,
+          condition,
           selectedMusicianIds: selected,
           preparedSummaries: {},
         }),

@@ -1,11 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioUploader from "@/components/AudioUploader";
 import FlowHeader from "@/components/FlowHeader";
-import { audioCatalog, type AudioCatalogItem } from "@/lib/audio/catalog";
+import { audioCatalog, getAudioPlaybackUrl, type AudioCatalogItem } from "@/lib/audio/catalog";
 import {
   MUSIC_SEARCH_TAG_GROUPS,
   MUSIC_SEARCH_TAGS,
@@ -17,24 +17,58 @@ import {
   profileToCompatibleAnalysis,
   type AudioSourceMetadata,
 } from "@/lib/audio/music-profile-adapter";
-import { requestRichMusicProfile } from "@/lib/audio/rich-analysis-client";
-import type { AudioSourceKind } from "@/lib/contracts";
+import {
+  requestRemoteMusicProfile,
+  requestRichMusicProfile,
+  warmRichAnalysisService,
+} from "@/lib/audio/rich-analysis-client";
+import type { AudioSourceKind, InteractiveCondition } from "@/lib/contracts";
 import { getExperimentSessionId } from "@/lib/experiment-session";
+import { createStudyTrial, startDirectBaseline } from "@/lib/experiment-trial-client";
+import { recordExperimentEvent } from "@/lib/experiment-events";
 import { useLanguage } from "@/lib/i18n";
 
 type InputMode = "examples" | "search" | "upload";
+type ListeningPath = "A" | "B";
+
+const CONDITION_BY_PATH: Record<ListeningPath, InteractiveCondition> = {
+  A: "single_agent",
+  B: "multi_agent",
+};
 
 interface AudioSelectionContext {
   sourceKind: AudioSourceKind;
   playbackUrl?: string;
   catalogItemId?: string;
   sourceMetadata?: AudioSourceMetadata;
+  remoteSourceUrl?: string;
+  fileName?: string;
+  fileSize?: number;
 }
 
 const COPY = {
   zh: {
-    productHint: "选一段声音，邀请音乐家聆听，再把感受变成画作。",
+    productHint: "选一段声音，在引导中把感受变成画作。",
+    pathTitle: "选择你的聆听方式",
+    pathIntro: "两条路径会以不同方式陪你把音乐变成一幅画。",
+    paths: {
+      A: {
+        title: "聆听路径 A",
+        label: "静心聆听",
+        description: "从不同听法中停下来，逐步写下你看见的画面",
+      },
+      B: {
+        title: "聆听路径 B",
+        label: "流动聆听",
+        description: "让不同听法自然接续，在交流中逐步靠近画面",
+      },
+    },
+    selectedPath: "当前方式",
+    changePath: "重新选择",
+    audioEntryTitle: "选择一段音乐开始",
+    choosePathFirst: "请先选择一条聆听路径。",
     analyzing: "正在分析音乐...",
+    wakingAnalyzer: "正在唤醒音乐理解服务...",
     analyzeFailed: "音频分析失败，请换一段音频再试。",
     richAnalysisUnavailable: "音乐理解服务暂不可用。请稍后重试，或确认音频分析服务已经启动。",
     exampleFailed: "示例音频加载失败，请稍后再试或上传自己的音频。",
@@ -73,8 +107,27 @@ const COPY = {
     uploadTitle: "已有音频文件？上传自己的音乐",
   },
   en: {
-    productHint: "Choose a sound, invite musicians to listen, then turn the response into an artwork.",
+    productHint: "Choose a sound and turn what you hear into an artwork through guided listening.",
+    pathTitle: "Choose how you want to listen",
+    pathIntro: "Each path offers a different way to turn the music into an image.",
+    paths: {
+      A: {
+        title: "Listening Path A",
+        label: "Still Listening",
+        description: "Pause with different perspectives and record the image you see",
+      },
+      B: {
+        title: "Listening Path B",
+        label: "Flowing Listening",
+        description: "Let different perspectives continue through conversation toward an image",
+      },
+    },
+    selectedPath: "Current path",
+    changePath: "Choose again",
+    audioEntryTitle: "Choose a piece of music to begin",
+    choosePathFirst: "Choose a listening path first.",
     analyzing: "Analyzing your music...",
+    wakingAnalyzer: "Waking the music understanding service...",
     analyzeFailed: "Audio analysis failed. Please try another file.",
     richAnalysisUnavailable: "The music understanding service is unavailable. Please try again after it has started.",
     exampleFailed: "The example audio could not be loaded. Try again later or upload your own audio.",
@@ -126,6 +179,8 @@ function formatDuration(seconds: number) {
 export default function HomePageClient() {
   const router = useRouter();
   const { language } = useLanguage();
+  const [studyMode, setStudyMode] = useState<boolean | null>(null);
+  const [selectedPath, setSelectedPath] = useState<ListeningPath | null>(null);
   const [activeInputMode, setActiveInputMode] = useState<InputMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSearchTags, setSelectedSearchTags] = useState<string[]>([]);
@@ -133,11 +188,35 @@ export default function HomePageClient() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisServiceReady, setAnalysisServiceReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const copy = COPY[language];
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      setStudyMode(params.get("study") === "1");
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void warmRichAnalysisService()
+      .then((ready) => {
+        if (!cancelled) setAnalysisServiceReady(ready);
+      })
+      .catch(() => {
+        if (!cancelled) setAnalysisServiceReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleFileSelect = async (
-    file: File,
+    file: File | null,
     context: AudioSelectionContext = { sourceKind: "upload" }
   ) => {
     setAnalyzing(true);
@@ -145,27 +224,59 @@ export default function HomePageClient() {
     let objectUrl: string | null = null;
 
     try {
-      sessionStorage.setItem("audioFileName", file.name);
-      sessionStorage.setItem("audioFileSize", String(file.size));
+      const params = new URLSearchParams(window.location.search);
+      const isStudyMode = params.get("study") === "1";
+      if (!isStudyMode && !selectedPath) {
+        throw new Error("LISTENING_PATH_REQUIRED");
+      }
+      const fileName = file?.name || context.fileName || "remote-audio.mp3";
+      let fileSize = file?.size || context.fileSize || 0;
+      sessionStorage.setItem("audioFileName", fileName);
+      sessionStorage.setItem("audioFileSize", String(fileSize));
       if (context.playbackUrl) {
         sessionStorage.setItem("audioSrc", context.playbackUrl);
       } else {
         sessionStorage.removeItem("audioSrc");
       }
 
-      objectUrl = URL.createObjectURL(file);
-      sessionStorage.setItem("audioObjectUrl", objectUrl);
+      if (file) {
+        objectUrl = URL.createObjectURL(file);
+        sessionStorage.setItem("audioObjectUrl", objectUrl);
+      } else {
+        sessionStorage.removeItem("audioObjectUrl");
+      }
 
       const sessionId = await getExperimentSessionId().catch(() => crypto.randomUUID());
       sessionStorage.setItem("experimentSessionId", sessionId);
-      const [richResult, realtimeResult] = await Promise.allSettled([
-        requestRichMusicProfile(file, {
+      const richRequest = {
           sessionId,
           sourceKind: context.sourceKind,
           catalogItemId: context.catalogItemId,
-        }),
-        analyzeAudioFile(file),
-      ]);
+      };
+      const richAnalysis = context.remoteSourceUrl
+        ? requestRemoteMusicProfile({
+            sourceUrl: context.remoteSourceUrl,
+            fileName,
+          }, richRequest)
+        : file
+          ? requestRichMusicProfile(file, richRequest)
+          : Promise.reject(new Error("Audio source is missing"));
+      const [richResult] = await Promise.allSettled([richAnalysis]);
+      if (richResult.status === "fulfilled") {
+        setAnalysisServiceReady(true);
+        fileSize = richResult.value.audio.byteSize || fileSize;
+        sessionStorage.setItem("audioFileSize", String(fileSize));
+      }
+      let realtimeResult: PromiseSettledResult<Awaited<ReturnType<typeof analyzeAudioFile>>> = {
+        status: "rejected",
+        reason: new Error("Realtime fallback was not requested"),
+      };
+      if (
+        richResult.status === "rejected" &&
+        file && process.env.NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS === "true"
+      ) {
+        [realtimeResult] = await Promise.allSettled([analyzeAudioFile(file)]);
+      }
 
       if (realtimeResult.status === "fulfilled") {
         sessionStorage.setItem("realtimeAudioFeatures", JSON.stringify(realtimeResult.value));
@@ -180,7 +291,7 @@ export default function HomePageClient() {
         analysis = profileToCompatibleAnalysis(richResult.value, context.sourceMetadata);
       } else if (
         realtimeResult.status === "fulfilled" &&
-        (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS === "true")
+        process.env.NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS === "true"
       ) {
         console.warn("Rich analysis unavailable; using explicit Meyda degraded mode.", richResult.reason);
         sessionStorage.removeItem("musicProfile");
@@ -189,7 +300,8 @@ export default function HomePageClient() {
       } else if (realtimeResult.status === "fulfilled") {
         throw new Error("RICH_ANALYSIS_UNAVAILABLE");
       } else {
-        throw new Error("Rich and realtime audio analysis both failed");
+        console.error("Rich audio analysis unavailable:", richResult.reason);
+        throw new Error("RICH_ANALYSIS_UNAVAILABLE");
       }
 
       sessionStorage.setItem("musicAnalysis", JSON.stringify(analysis));
@@ -203,8 +315,8 @@ export default function HomePageClient() {
             sessionId,
             mode: analysis.analysisEngine,
             sourceKind: context.sourceKind,
-            fileName: file.name,
-            fileSize: file.size,
+            fileName,
+            fileSize,
             musicProfile: richResult.status === "fulfilled" ? richResult.value : null,
             compatibilityAnalysis: analysis,
           }),
@@ -214,15 +326,67 @@ export default function HomePageClient() {
         console.warn("Audio analysis record was not persisted.");
       }
 
+      if (richResult.status !== "fulfilled") {
+        router.push("/select");
+        return;
+      }
+
+      const trial = await createStudyTrial({
+        mode: isStudyMode ? "study" : "demo",
+        sessionId,
+        participantId: params.get("participant") || undefined,
+        musicProfileId: richResult.value.id,
+        requestedCondition: !isStudyMode && selectedPath
+          ? CONDITION_BY_PATH[selectedPath]
+          : undefined,
+      });
+      sessionStorage.setItem("studyTrial", JSON.stringify(trial));
+      sessionStorage.setItem("studyTrialId", trial.id);
+      sessionStorage.setItem("interactiveCondition", trial.condition);
+      recordExperimentEvent("condition-assigned", "/", {
+        trialId: trial.id,
+        condition: trial.condition,
+        assignmentMethod: trial.assignmentMethod,
+      });
+      recordExperimentEvent("baseline-generation-started", "/", {
+        trialId: trial.id,
+        condition: trial.condition,
+      });
+      void startDirectBaseline({
+        trial,
+        musicProfile: richResult.value,
+        musicAnalysis: analysis as unknown as Record<string, unknown>,
+      }).then((result) => {
+        if (result?.imageUrl) {
+          recordExperimentEvent("baseline-generation-completed", "/", {
+            trialId: trial.id,
+            condition: trial.condition,
+          });
+        }
+      }).catch((baselineError) => {
+        recordExperimentEvent("baseline-generation-failed", "/", {
+          trialId: trial.id,
+          condition: trial.condition,
+        });
+        console.warn("Direct baseline generation failed:", baselineError);
+      });
+
+      sessionStorage.setItem("selectedCharacters", "[]");
+      sessionStorage.setItem("comments", "{}");
+      sessionStorage.removeItem("conversationState");
+      sessionStorage.removeItem("facilitatorPlan");
+      sessionStorage.removeItem("visualBrief");
       router.push("/select");
     } catch (err) {
       console.error("Audio analysis failed:", err);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       sessionStorage.removeItem("audioObjectUrl");
       setAnalyzing(false);
-      setError(err instanceof Error && err.message === "RICH_ANALYSIS_UNAVAILABLE"
-        ? copy.richAnalysisUnavailable
-        : copy.analyzeFailed);
+      setError(err instanceof Error && err.message === "LISTENING_PATH_REQUIRED"
+        ? copy.choosePathFirst
+        : err instanceof Error && err.message === "RICH_ANALYSIS_UNAVAILABLE"
+          ? copy.richAnalysisUnavailable
+          : copy.analyzeFailed);
     }
   };
 
@@ -239,7 +403,7 @@ export default function HomePageClient() {
       const file = new File([blob], `${item.name}${extension}`, { type: blob.type || "audio/mpeg" });
       await handleFileSelect(file, {
         sourceKind: "preset",
-        playbackUrl: item.originalFile,
+        playbackUrl: getAudioPlaybackUrl(item),
         catalogItemId: item.id,
         sourceMetadata: {
           title: item.name,
@@ -297,15 +461,13 @@ export default function HomePageClient() {
     setError(null);
 
     try {
-      const res = await fetch(`/api/music/download?id=${encodeURIComponent(item.id)}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || `Download failed with ${res.status}`);
-      }
-      const blob = await res.blob();
-      const file = new File([blob], `${item.title}.mp3`, { type: blob.type || "audio/mpeg" });
-      await handleFileSelect(file, {
+      await handleFileSelect(null, {
         sourceKind: "search",
+        playbackUrl: item.previewUrl,
+        remoteSourceUrl: item.previewUrl,
+        fileName: `${item.title}.mp3`,
+        fileSize: 0,
+        catalogItemId: item.id,
         sourceMetadata: {
           title: item.title,
           artist: item.artist,
@@ -332,7 +494,7 @@ export default function HomePageClient() {
       <div className="relative z-10 flex min-h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={1} />
 
-        <section className="relative mt-6 flex flex-1 items-center justify-center rounded-[42px] border border-[#9f6f45]/75 bg-[#261f2a]/45 px-10 py-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <section className="relative mt-2 flex flex-1 items-center justify-center rounded-[42px] border border-[#9f6f45]/75 bg-[#261f2a]/45 px-10 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
           <div className="absolute inset-0 overflow-hidden rounded-[42px]">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_34%,rgba(255,211,138,0.28),transparent_22%),radial-gradient(circle_at_50%_76%,rgba(255,167,77,0.2),transparent_30%),linear-gradient(180deg,rgba(30,25,38,0.08),rgba(18,15,27,0.42))]" />
             <div className="absolute left-[8%] right-[8%] top-[44%] h-px bg-[#f0b45e]/18" />
@@ -366,7 +528,7 @@ export default function HomePageClient() {
             <div className="absolute bottom-[12%] right-[12%] h-20 w-20 rotate-45 border border-[#efb263]/12 bg-black/18" />
           </div>
 
-          <div className="relative flex min-h-[610px] w-full max-w-[1240px] flex-col items-center justify-end">
+          <div className="relative flex min-h-[550px] w-full max-w-[1240px] flex-col items-center justify-end">
             <div className="absolute top-1 h-[430px] w-[760px] rounded-full bg-[#ffbd68]/16 blur-3xl" />
             <div className="absolute top-[58px] h-[300px] w-[940px] rounded-[50%] border border-[#f3b66e]/12 bg-[#7d604a]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" />
             <div className="absolute top-[100px] h-[380px] w-[980px] rounded-[50%] bg-[radial-gradient(ellipse_at_center,rgba(255,194,106,0.18),rgba(128,88,67,0.14)_44%,transparent_72%)]" />
@@ -385,8 +547,63 @@ export default function HomePageClient() {
             </div>
             <div className="absolute top-[388px] h-[126px] w-[820px] rounded-[50%] border border-[#e1a763]/35 bg-[#85664d]/36 shadow-[0_30px_90px_rgba(0,0,0,0.4)]" />
             <div className="absolute top-[418px] h-[68px] w-[720px] rounded-[50%] bg-[#f5b75e]/18 blur-md" />
-            <div className="relative z-10 w-full max-w-[820px] pb-8">
+            <div className="relative z-10 w-full max-w-[820px] pb-2">
               <p className="mb-4 text-center text-sm text-[#ffe0ad]/78">{copy.productHint}</p>
+              {studyMode === false && !selectedPath && (
+                <div className="mb-3">
+                  <p className="text-center font-serif text-2xl font-semibold text-[#ffe5bd]">{copy.pathTitle}</p>
+                  <p className="mb-4 mt-1 text-center text-xs text-[#c9ad91]">{copy.pathIntro}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["A", "B"] as ListeningPath[]).map((path) => {
+                      const pathCopy = copy.paths[path];
+                      return (
+                        <button
+                          key={path}
+                          type="button"
+                          disabled={analyzing}
+                          onClick={() => {
+                            setSelectedPath(path);
+                            setActiveInputMode(null);
+                            sessionStorage.setItem("listeningPath", path);
+                            sessionStorage.setItem("interactiveCondition", CONDITION_BY_PATH[path]);
+                          }}
+                          className="group min-h-[118px] border border-[#d7a66d]/40 bg-[#211c27]/82 px-6 py-4 text-left text-[#d6bd9f] transition hover:-translate-y-1 hover:border-[#ffd083]/76 hover:bg-[#352936] hover:shadow-[0_18px_40px_rgba(0,0,0,0.28)]"
+                        >
+                          <span className="block text-xs font-semibold text-[#d6ae7f]">{pathCopy.title}</span>
+                          <span className="mt-1 block text-lg font-semibold text-[#ffe5bd]">{pathCopy.label}</span>
+                          <span className="mt-2 block text-xs leading-relaxed text-current/72">{pathCopy.description}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {(studyMode === true || selectedPath) && (
+                <>
+              {studyMode === false && selectedPath && (
+                <div className="mb-3 flex items-center justify-between border-b border-[#d7a66d]/28 pb-2">
+                  <div>
+                    <span className="text-[10px] text-[#aa8b6d]">{copy.selectedPath}</span>
+                    <p className="text-sm font-semibold text-[#ffe2b6]">
+                      {copy.paths[selectedPath].title} · {copy.paths[selectedPath].label}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={analyzing}
+                    onClick={() => {
+                      setSelectedPath(null);
+                      setActiveInputMode(null);
+                      sessionStorage.removeItem("listeningPath");
+                      sessionStorage.removeItem("interactiveCondition");
+                    }}
+                    className="border-b border-[#b98b61]/52 pb-0.5 text-xs text-[#d2b08d] transition hover:border-[#ffd083] hover:text-[#ffe2b6]"
+                  >
+                    {copy.changePath}
+                  </button>
+                </div>
+              )}
+              <p className="mb-2 text-center text-xs text-[#d8bb9a]">{copy.audioEntryTitle}</p>
               <div className="grid grid-cols-3 gap-3">
                 {INPUT_MODES.map((mode) => {
                   const active = activeInputMode === mode;
@@ -413,16 +630,16 @@ export default function HomePageClient() {
               </div>
 
               {activeInputMode && (
-                <div className="mt-4 rounded-[24px] border border-[#d0a06c]/44 bg-[#211b25]/84 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_18px_58px_rgba(0,0,0,0.28)] backdrop-blur">
+                <div className="mt-3 rounded-[20px] border border-[#d0a06c]/44 bg-[#211b25]/84 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_18px_58px_rgba(0,0,0,0.28)] backdrop-blur">
                   {activeInputMode === "examples" && (
                     <div>
-                      <div className="mb-3 flex items-end justify-between gap-4">
+                      <div className="mb-2 flex items-end justify-between gap-4">
                         <div>
-                          <h2 className="text-lg font-semibold text-[#ffe7c4]">{copy.examplesTitle}</h2>
-                          <p className="mt-1 text-xs text-[#c9ad91]">{copy.examplesDesc}</p>
+                          <h2 className="text-base font-semibold text-[#ffe7c4]">{copy.examplesTitle}</h2>
+                          <p className="mt-0.5 text-[11px] text-[#c9ad91]">{copy.examplesDesc}</p>
                         </div>
                       </div>
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
                         {audioCatalog.map((item) => (
                           <CatalogItemCard
                             key={item.id}
@@ -525,6 +742,8 @@ export default function HomePageClient() {
                   )}
                 </div>
               )}
+                </>
+              )}
 
               {error && <p className="mt-3 text-center text-sm text-[#ffd2c7]">{error}</p>}
             </div>
@@ -537,7 +756,7 @@ export default function HomePageClient() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            <span>{copy.analyzing}</span>
+            <span>{analysisServiceReady ? copy.analyzing : copy.wakingAnalyzer}</span>
           </div>
         )}
       </div>
@@ -641,7 +860,7 @@ function CatalogItemCard({
 
   return (
     <div
-      className="flex min-h-[156px] flex-col rounded-[18px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition hover:border-[#ffd083]/62 hover:bg-[#211925]/86"
+      className="flex h-[136px] min-h-0 flex-col rounded-[14px] border border-[#d0a06c]/36 bg-[#18131f]/72 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition hover:border-[#ffd083]/62 hover:bg-[#211925]/86"
       onMouseEnter={(event) => void playCardPreview(event.currentTarget)}
       onMouseMove={(event) => void playCardPreview(event.currentTarget)}
       onMouseLeave={(event) => pauseCardPreview(event.currentTarget)}
@@ -650,31 +869,31 @@ function CatalogItemCard({
       onBlur={(event) => pauseCardPreview(event.currentTarget)}
     >
       <div className="min-w-0 flex-1">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="rounded-full border border-[#ffd083]/55 bg-[#ffd083]/16 px-2.5 py-1 text-xs font-semibold text-[#ffe1a5]">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="rounded-full border border-[#ffd083]/55 bg-[#ffd083]/16 px-2 py-0.5 text-[10px] font-semibold text-[#ffe1a5]">
             {primaryTag}
           </span>
-          <span className="whitespace-nowrap text-[11px] text-[#d7b58f]">
+          <span className="whitespace-nowrap text-[10px] text-[#d7b58f]">
             {formatDuration(item.durationSeconds)}
           </span>
         </div>
-        <h3 className="truncate text-sm font-semibold text-[#ffe7c4]" title={item.name}>{item.name}</h3>
-        <p className="mt-1 truncate text-xs text-[#c9ad91]" title={item.artist}>{item.artist}</p>
-        <div className="mt-2 flex flex-wrap gap-1">
+        <h3 className="truncate text-xs font-semibold text-[#ffe7c4]" title={item.name}>{item.name}</h3>
+        <p className="mt-0.5 truncate text-[10px] text-[#c9ad91]" title={item.artist}>{item.artist}</p>
+        <div className="mt-1 flex flex-nowrap gap-1 overflow-hidden">
           {secondaryTags.slice(0, 3).map((tag) => (
-            <span key={tag} className="rounded-full bg-[#f0bc72]/12 px-2 py-0.5 text-[11px] text-[#f3c98e]">
+            <span key={tag} className="shrink-0 rounded-full bg-[#f0bc72]/12 px-1.5 py-0.5 text-[9px] text-[#f3c98e]">
               {tag}
             </span>
           ))}
         </div>
       </div>
-      <div className="mt-2 flex flex-col gap-2">
+      <div className="mt-1 flex flex-col gap-1">
         <MiniAudioPreview item={item} copy={copy} />
         <button
           type="button"
           disabled={disabled}
           onClick={() => onSelect(item)}
-          className={`h-8 rounded-full border text-xs font-semibold transition ${
+          className={`h-6 rounded-full border text-[10px] font-semibold transition ${
             disabled
               ? "cursor-not-allowed border-[#d0a06c]/25 bg-[#2b2430]/65 text-[#b99b78]"
               : "cursor-pointer border-[#ffd083] bg-[#ffd083] text-[#2c2028] shadow-[0_0_24px_rgba(255,194,103,0.32)] hover:bg-[#ffe0a6]"
@@ -708,7 +927,7 @@ function MiniAudioPreview({
   };
 
   return (
-    <div className="rounded-full border border-[#d0a06c]/28 bg-[#100d15]/62 px-2 py-1">
+    <div className="rounded-full border border-[#d0a06c]/28 bg-[#100d15]/62 px-2 py-0.5">
       <audio
         ref={audioRef}
         preload="metadata"

@@ -25,6 +25,7 @@ export interface ScoredLabel {
 export type SourceReferenceKind =
   | "music-analysis"
   | "musician-message"
+  | "guide-message"
   | "user-message"
   | "facilitator-subtitle"
   | "system";

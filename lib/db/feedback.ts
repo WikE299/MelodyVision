@@ -14,7 +14,7 @@ export interface FeedbackRecord {
 
 export async function insertFeedback(record: FeedbackRecord) {
   const database = await getDatabase();
-  database
+  await database
     .prepare(`
       INSERT INTO generation_feedback (
         id,

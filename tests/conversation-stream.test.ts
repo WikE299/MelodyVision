@@ -106,6 +106,36 @@ test("conversation validation rejects inconsistent streaming ownership", () => {
   );
 });
 
+test("conversation validation accepts reflective musicians and rejects an empty selection", () => {
+  const state = createConversationState({
+    trialId: "trial-single",
+    sessionId: "session-single",
+    musicProfileId: "music-single",
+    condition: "single_agent",
+    guideId: "co_creation_guide",
+    selectedMusicianIds: ["boya"],
+  }, runtime());
+  assert.equal(parseConversationState(state).condition, "single_agent");
+  assert.throws(
+    () => parseConversationState({
+      ...state,
+      turnPolicy: { ...state.turnPolicy, userMayGenerateEarly: true },
+    }),
+    /cannot generate early/
+  );
+  assert.throws(
+    () => createConversationState({
+      trialId: "trial-empty",
+      sessionId: "session-empty",
+      musicProfileId: "music-empty",
+      condition: "single_agent",
+      guideId: "co_creation_guide",
+      selectedMusicianIds: [],
+    }),
+    /1-4 unique musicians/
+  );
+});
+
 test("NDJSON reader handles JSON events split across byte chunks", async () => {
   const expected: ConversationStreamEvent[] = [
     { type: "meta", speakerId: "abing", speakerName: "阿炳" },

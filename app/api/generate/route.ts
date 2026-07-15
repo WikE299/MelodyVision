@@ -7,6 +7,7 @@ import {
   buildPromptDirectorInput,
   buildPromptDirectorInstruction,
   buildPromptDirectorRepairInstruction,
+  getPromptDirectorUserSourceIds,
   PromptDirectorBrief,
   PromptDirectorInput,
 } from "@/lib/prompts/image-gen";
@@ -14,11 +15,29 @@ import { callPromptDirector, callPromptDirectorRepair, PromptDirectorResult } fr
 import { characters } from "@/lib/characters";
 import { buildVisualPresetPrompt } from "@/lib/prompts/visual-presets";
 import { insertGenerationRun } from "@/lib/db/generation-runs";
-import type { ConversationState, MusicProfile, VisualBrief } from "@/lib/contracts";
+import {
+  isGenerationRole,
+  isInteractiveCondition,
+  type ConversationState,
+  type GenerationRole,
+  type InteractiveCondition,
+  type MusicProfile,
+  type VisualBrief,
+} from "@/lib/contracts";
 import { parseConversationState } from "@/lib/conversation";
 import { parseVisualBrief } from "@/lib/visual-brief";
+import {
+  completeBaselineJob,
+  consumeBaselineJobLease,
+  failBaselineJob,
+  getStudyTrial,
+  updateStudyTrial,
+} from "@/lib/db/study-trials";
+import { usesSupabaseDatabase } from "@/lib/db";
+import { persistGeneratedImage } from "@/lib/storage/generated-images";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 interface CommentInput {
   characterId: string;
@@ -46,7 +65,7 @@ interface DashScopeResponse {
 }
 
 interface SavedImage {
-  localPath: string;
+  storagePath: string;
   publicUrl: string;
   bytes: number;
   contentType: string;
@@ -79,6 +98,22 @@ const LANDSCAPE_FORMAT_CONSTRAINT =
 function getConfiguredImageSize(): string {
   const configured = process.env.IMAGE_SIZE?.trim();
   return configured && /^\d+\*\d+$/.test(configured) ? configured : DEFAULT_IMAGE_SIZE;
+}
+
+function getGenerationModelConfig() {
+  return {
+    promptDirectorModel: process.env.LLM_IMAGE_PROMPT_MODEL || process.env.LLM_MODEL || "mimo-v2.5-pro",
+    imageModel: process.env.IMAGE_MODEL || "wan2.7-image",
+    imageSize: getConfiguredImageSize(),
+    promptDirectorMaxRepairs: PROMPT_DIRECTOR_MAX_REPAIRS,
+    promptDirectorTemperature: 0.55,
+    promptDirectorRepairTemperature: 0.35,
+    promptDirectorMaxTokens: 5000,
+    imageGenerationMaxAttempts: 2,
+    promptExtend: false,
+    watermark: false,
+    imageCount: 1,
+  };
 }
 
 function appendLandscapeFormatConstraint(prompt: string): string {
@@ -482,7 +517,11 @@ function validatePromptDirectorBrief(
   if (!hasText(input.userNote) && hasText(brief.userNoteTrace) && brief.userNoteTrace !== "none") {
     warnings.push("userNoteTrace should be none when userNote is empty");
   }
-  if (!hasSourceMappings(brief.sourceMappings)) {
+  if (input.generationRole === "direct_baseline") {
+    if (!Array.isArray(brief.sourceMappings) || brief.sourceMappings.length > 0) {
+      errors.push("Direct baseline sourceMappings must be empty");
+    }
+  } else if (!hasSourceMappings(brief.sourceMappings)) {
     errors.push("sourceMappings must contain characterId, speaker, and visualTranslation");
   } else {
     const mappingIds = brief.sourceMappings.map((mapping) => mapping.characterId);
@@ -507,30 +546,30 @@ function validatePromptDirectorBrief(
       errors.push(`sourceMappings contains duplicate characterIds: ${duplicateIds.join(", ")}`);
     }
   }
-  const resonantInputIds = input.comments
-    .filter((comment) => comment.userResonance || comment.weight > 1)
-    .map((comment) => comment.characterId);
-  if (resonantInputIds.length > 0) {
+  if (input.generationRole !== "direct_baseline" && input.comments.length > 0) {
     if (!hasWeightingRationale(brief.weightingRationale)) {
-      errors.push("weightingRationale must explain resonant comment weights");
+      errors.push("weightingRationale must trace every comment weight");
     } else {
-      const rationaleIds = new Set(brief.weightingRationale.map((item) => item.characterId));
-      const missingRationaleIds = resonantInputIds.filter((characterId) => !rationaleIds.has(characterId));
-      if (missingRationaleIds.length > 0) {
-        errors.push(`weightingRationale missing resonant characterIds: ${missingRationaleIds.join(", ")}`);
-      }
+      const rationaleIds = brief.weightingRationale.map((item) => item.characterId);
+      const expectedIds = input.comments.map((comment) => comment.characterId);
+      const duplicateIds = rationaleIds.filter((characterId, index) => rationaleIds.indexOf(characterId) !== index);
+      const missingIds = expectedIds.filter((characterId) => !rationaleIds.includes(characterId));
+      const extraIds = rationaleIds.filter((characterId) => !expectedIds.includes(characterId));
+      const changedWeights = input.comments
+        .filter((comment) => brief.weightingRationale?.find((item) => item.characterId === comment.characterId)?.weight !== comment.weight)
+        .map((comment) => comment.characterId);
+      if (duplicateIds.length > 0) errors.push(`weightingRationale contains duplicate characterIds: ${duplicateIds.join(", ")}`);
+      if (missingIds.length > 0) errors.push(`weightingRationale missing characterIds: ${missingIds.join(", ")}`);
+      if (extraIds.length > 0) errors.push(`weightingRationale contains unknown characterIds: ${extraIds.join(", ")}`);
+      if (changedWeights.length > 0) errors.push(`weightingRationale changed weights for: ${changedWeights.join(", ")}`);
     }
-  } else if (!hasWeightingRationale(brief.weightingRationale)) {
-    warnings.push("weightingRationale is missing");
   }
   if (!hasStringItems(brief.mustInclude)) {
     errors.push("mustInclude must contain at least one item");
   }
 
   if (input.coCreation) {
-    const expectedUserSourceIds = input.coCreation.sources
-      .filter((source) => source.kind === "user-message")
-      .map((source) => source.id);
+    const expectedUserSourceIds = getPromptDirectorUserSourceIds(input.coCreation);
     if (!hasUserSourceMappings(brief.userSourceMappings)) {
       errors.push("userSourceMappings must trace every user message");
     } else {
@@ -686,38 +725,14 @@ async function runPromptDirectorLoop(
   };
 }
 
-function getImageExtension(contentType: string): string {
-  if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
-  if (contentType.includes("webp")) return "webp";
-  return "png";
-}
-
 async function saveGeneratedImage(imageUrl: string, runId: string): Promise<SavedImage> {
-  const response = await fetch(imageUrl);
-
-  if (!response.ok) {
-    throw new Error(`Failed to download generated image: ${response.status}`);
-  }
-
-  const contentType = response.headers.get("content-type") || "image/png";
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const extension = getImageExtension(contentType);
-  const fileName = `${runId}.${extension}`;
-  const directory = path.join(process.cwd(), "public", "generated");
-  const localPath = path.join(directory, fileName);
-
-  await mkdir(directory, { recursive: true });
-  await writeFile(localPath, bytes);
-
-  return {
-    localPath,
-    publicUrl: `/generated/${fileName}`,
-    bytes: bytes.length,
-    contentType,
-  };
+  return persistGeneratedImage(imageUrl, runId);
 }
 
 async function writeGenerationRunLog(runId: string, log: unknown) {
+  if (usesSupabaseDatabase()) {
+    return `database:generation_runs/${runId}`;
+  }
   const directory = path.join(process.cwd(), "logs", "generation-runs");
   const localPath = path.join(directory, `${runId}.json`);
 
@@ -857,7 +872,7 @@ function validateCoCreationContext(input: {
         throw new Error(`VisualBrief source is malformed: ${field}`);
       }
       if (
-        ["user-message", "musician-message", "facilitator-subtitle"].includes(source.kind) &&
+        ["user-message", "musician-message", "guide-message", "facilitator-subtitle"].includes(source.kind) &&
         !messageIds.has(source.sourceId)
       ) {
         throw new Error(`VisualBrief source does not resolve: ${field}`);
@@ -873,10 +888,17 @@ export async function POST(request: NextRequest) {
   const runId = randomUUID();
   const startedAt = new Date();
   const timings: Record<string, number> = {};
+  let baselineTrialId = "";
+  let primaryCoCreatedTrialId = "";
 
   try {
     const body = await request.json();
     const { comments, presets, musicAnalysis } = body;
+    const generationRole: GenerationRole = isGenerationRole(body.generationRole)
+      ? body.generationRole
+      : "co_created";
+    const trialId = typeof body.trialId === "string" ? body.trialId.trim() : "";
+    baselineTrialId = generationRole === "direct_baseline" ? trialId : "";
     let effectiveUserNote = typeof body.userNote === "string" ? body.userNote : "";
     const commentWeights = normalizeCommentWeights(body.commentWeights);
     const promptOverride =
@@ -891,16 +913,40 @@ export async function POST(request: NextRequest) {
       typeof body.sessionId === "string" && body.sessionId.trim()
         ? body.sessionId.trim()
         : runId;
+    let condition: InteractiveCondition = isInteractiveCondition(body.condition)
+      ? body.condition
+      : "multi_agent";
     let selectedCharacters: string[] = Array.isArray(body.selectedCharacters)
       ? body.selectedCharacters.filter((characterId: unknown): characterId is string => typeof characterId === "string")
       : [];
     let normalizedComments = normalizeComments(comments, commentWeights);
-    const hasCoCreationPayload = body.visualBrief !== undefined || body.conversationState !== undefined || body.musicProfile !== undefined;
+    const hasCoCreationPayload = generationRole === "co_created" && (
+      body.visualBrief !== undefined || body.conversationState !== undefined
+    );
     let conversationState: ConversationState | null = null;
     let visualBrief: VisualBrief | null = null;
     let musicProfile: MusicProfile | null = null;
 
-    if (hasCoCreationPayload) {
+    if (generationRole === "direct_baseline") {
+      if (!trialId) return Response.json({ error: "Direct baseline requires trialId" }, { status: 400 });
+      if (promptOverride || negativePromptOverride) {
+        return Response.json({ error: "Direct baseline does not accept prompt overrides" }, { status: 400 });
+      }
+      const trial = await getStudyTrial(trialId);
+      if (!trial) return Response.json({ error: "Trial not found" }, { status: 404 });
+      condition = trial.condition;
+      musicProfile = parseMusicProfile(body.musicProfile);
+      if (!musicProfile || musicProfile.id !== trial.musicProfileId) {
+        return Response.json({ error: "Direct baseline requires the trial MusicProfile" }, { status: 409 });
+      }
+      const baselineLease = typeof body.baselineLease === "string" ? body.baselineLease : "";
+      if (!await consumeBaselineJobLease(trialId, baselineLease)) {
+        return Response.json({ error: "Direct baseline job was already claimed or completed" }, { status: 409 });
+      }
+      effectiveUserNote = "";
+      normalizedComments = [];
+      selectedCharacters = [];
+    } else if (hasCoCreationPayload) {
       try {
         conversationState = parseConversationState(body.conversationState);
       } catch (error) {
@@ -923,11 +969,29 @@ export async function POST(request: NextRequest) {
           { status: 409 }
         );
       }
+      if (trialId) {
+        const trial = await getStudyTrial(trialId);
+        if (
+          !trial ||
+          conversationState.trialId !== trialId ||
+          trial.condition !== conversationState.condition ||
+          trial.musicProfileId !== conversationState.musicProfileId
+        ) {
+          return Response.json({ error: "Trial context does not match the co-created generation" }, { status: 409 });
+        }
+        if (!trial.coCreatedRunId) {
+          primaryCoCreatedTrialId = trialId;
+          await updateStudyTrial({ id: trialId, status: "generating" });
+        }
+      }
 
       selectedCharacters = [...conversationState.selectedMusicianIds];
+      condition = conversationState.condition;
       const latestMusicianMessages = new Map<string, string>();
       for (const message of conversationState.messages) {
-        if (message.role === "musician") latestMusicianMessages.set(message.speakerId, message.content);
+        if (message.role === "musician" || message.role === "guide") {
+          latestMusicianMessages.set(message.speakerId, message.content);
+        }
       }
       normalizedComments = selectedCharacters
         .filter((characterId) => latestMusicianMessages.has(characterId))
@@ -990,7 +1054,7 @@ export async function POST(request: NextRequest) {
           usage: imageResult.usage,
           remoteUrl: imageResult.remoteImageUrl,
           localUrl: savedImage.publicUrl,
-          localPath: savedImage.localPath,
+          storagePath: savedImage.storagePath,
           bytes: savedImage.bytes,
           contentType: savedImage.contentType,
         },
@@ -1000,6 +1064,9 @@ export async function POST(request: NextRequest) {
       await insertGenerationRun({
         id: runId,
         sessionId,
+        trialId,
+        generationRole,
+        condition,
         createdAt: startedAt.toISOString(),
         selectedCharacters,
         presets,
@@ -1019,11 +1086,23 @@ export async function POST(request: NextRequest) {
         imageSize: imageResult.imageSize,
         imageRequestId: imageResult.requestId || "",
         timings,
+        modelConfig: getGenerationModelConfig(),
+        runLog,
         logPath,
       });
 
+      if (trialId) {
+        if (generationRole === "direct_baseline") {
+          await completeBaselineJob(trialId, runId);
+        } else if (primaryCoCreatedTrialId) {
+          await updateStudyTrial({ id: trialId, coCreatedRunId: runId, status: "evaluating" });
+        }
+      }
+
       return Response.json({
         runId,
+        trialId,
+        generationRole,
         sessionId,
         imageUrl: savedImage.publicUrl,
         remoteImageUrl: imageResult.remoteImageUrl,
@@ -1038,11 +1117,12 @@ export async function POST(request: NextRequest) {
         requestId: imageResult.requestId,
         usage: imageResult.usage,
         logPath,
+        logRef: logPath,
         timings,
       });
     }
 
-    if (normalizedComments.length === 0) {
+    if (generationRole === "co_created" && normalizedComments.length === 0) {
       return Response.json({ error: "Comments required" }, { status: 400 });
     }
 
@@ -1052,7 +1132,8 @@ export async function POST(request: NextRequest) {
       presets || {},
       effectiveUserNote,
       musicAnalysis,
-      { musicProfile, visualBrief, conversationState }
+      { musicProfile, visualBrief, conversationState },
+      generationRole
     );
     const promptDirectorInstruction = buildPromptDirectorInstruction(promptDirectorInput);
 
@@ -1145,7 +1226,7 @@ export async function POST(request: NextRequest) {
         usage: imageResult.usage,
         remoteUrl: imageResult.remoteImageUrl,
         localUrl: savedImage.publicUrl,
-        localPath: savedImage.localPath,
+        storagePath: savedImage.storagePath,
         bytes: savedImage.bytes,
         contentType: savedImage.contentType,
       },
@@ -1155,6 +1236,9 @@ export async function POST(request: NextRequest) {
     await insertGenerationRun({
       id: runId,
       sessionId,
+      trialId,
+      generationRole,
+      condition,
       createdAt: startedAt.toISOString(),
       selectedCharacters,
       presets,
@@ -1174,11 +1258,24 @@ export async function POST(request: NextRequest) {
       imageSize: imageResult.imageSize,
       imageRequestId: imageResult.requestId || "",
       timings,
+      modelConfig: getGenerationModelConfig(),
+      runLog,
       logPath,
     });
 
+
+    if (trialId) {
+      if (generationRole === "direct_baseline") {
+        await completeBaselineJob(trialId, runId);
+      } else if (primaryCoCreatedTrialId) {
+        await updateStudyTrial({ id: trialId, coCreatedRunId: runId, status: "evaluating" });
+      }
+    }
+
     return Response.json({
       runId,
+      trialId,
+      generationRole,
       sessionId,
       imageUrl: savedImage.publicUrl,
       remoteImageUrl: imageResult.remoteImageUrl,
@@ -1199,9 +1296,19 @@ export async function POST(request: NextRequest) {
       requestId: imageResult.requestId,
       usage: imageResult.usage,
       logPath,
+      logRef: logPath,
       timings,
     });
   } catch (error) {
+    if (baselineTrialId) {
+      await failBaselineJob(
+        baselineTrialId,
+        error instanceof Error ? error.message : String(error)
+      ).catch(() => undefined);
+    }
+    if (primaryCoCreatedTrialId) {
+      await updateStudyTrial({ id: primaryCoCreatedTrialId, status: "interacting" }).catch(() => undefined);
+    }
     timings.totalMs = Date.now() - startedAt.getTime();
     await writeGenerationRunLog(runId, {
       runId,

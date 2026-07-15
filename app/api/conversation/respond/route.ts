@@ -4,6 +4,8 @@ import { runFacilitatorAgent } from "@/lib/agents/facilitator";
 import { getMusicianAgentProfile } from "@/lib/agents/musicians";
 import { runVisualScribeAgent } from "@/lib/agents/visual-scribe";
 import {
+  continueReflectiveListening,
+  createReflectivePlan,
   parseConversationState,
   recordUserMessage,
   scheduleMusicianTurn,
@@ -24,7 +26,7 @@ export async function POST(request: NextRequest) {
     if (!isMeaningfulUserInput(content)) {
       return Response.json({ error: "Please add a little of your own image before sending" }, { status: 400 });
     }
-    if (state.selectedMusicianIds.some((id) => !getCharacterById(id))) {
+    if (state.condition === "multi_agent" && state.selectedMusicianIds.some((id) => !getCharacterById(id))) {
       return Response.json({ error: "Conversation contains an unknown musician" }, { status: 400 });
     }
 
@@ -43,6 +45,7 @@ export async function POST(request: NextRequest) {
       },
     };
     await insertVisualBriefVersion({
+      trialId: state.trialId,
       sessionId: state.sessionId,
       brief: visualBriefResult.brief,
       meta: {
@@ -62,6 +65,19 @@ export async function POST(request: NextRequest) {
       return Response.json({
         state: stateWithBrief,
         facilitatorPlan: null,
+        visualBrief: visualBriefResult.brief,
+      });
+    }
+
+    if (state.condition === "single_agent") {
+      const nextState = continueReflectiveListening(stateWithBrief);
+      const facilitatorPlan = createReflectivePlan(nextState);
+      await insertConversationSnapshot(nextState, "user-message-scheduled").catch((error) => {
+        console.error("User message snapshot failed:", error);
+      });
+      return Response.json({
+        state: nextState,
+        facilitatorPlan,
         visualBrief: visualBriefResult.brief,
       });
     }

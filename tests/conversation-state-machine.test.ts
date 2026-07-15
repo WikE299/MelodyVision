@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  continueReflectiveListening,
   createConversationState,
   recordMusicianMessage,
+  recordReflectiveComment,
   recordUserMessage,
   requestGeneration,
   requestUserTurn,
   scheduleMusicianTurn,
+  startReflectiveListening,
 } from "../lib/conversation/index.ts";
 import {
   createDeterministicFacilitatorPlan,
@@ -126,7 +129,7 @@ test("speaker eligibility favors musicians with fewer turns and avoids immediate
   assert.match(nextPlan.userInvitation, /动起来|靠近|散开|上升/);
 });
 
-test("the third completed user round converges and the final response becomes ready to generate", () => {
+test("the fourth completed user round converges and the final response becomes ready to generate", () => {
   const runtime = testRuntime();
   let state = createConversationState({
     sessionId: "session-1",
@@ -134,37 +137,97 @@ test("the third completed user round converges and the final response becomes re
     selectedMusicianIds: ["boya"],
   }, runtime);
 
-  for (let round = 1; round <= 3; round += 1) {
+  for (let round = 1; round <= 4; round += 1) {
     const plan = createDeterministicFacilitatorPlan({ state, musicianNames });
     state = scheduleMusicianTurn(state, plan, runtime);
     state = recordMusicianMessage(state, { speakerId: "boya", content: `第${round}轮回应。` }, runtime);
-    if (round < 3) {
+    if (round < 4) {
       state = recordUserMessage(state, `第${round}轮用户表达。`, runtime);
     } else {
-      state = recordUserMessage(state, "第三轮用户表达。", runtime);
+      state = recordUserMessage(state, "第四轮用户表达。", runtime);
       const finalPlan = createDeterministicFacilitatorPlan({ state, musicianNames });
       state = scheduleMusicianTurn(state, finalPlan, runtime);
       state = recordMusicianMessage(state, { speakerId: "boya", content: "最后回应。" }, runtime);
     }
   }
 
-  assert.equal(state.completedUserRounds, 3);
+  assert.equal(state.completedUserRounds, 4);
   assert.equal(state.phase, "ready");
   assert.equal(state.status, "ready-to-generate");
 
   state = recordUserMessage(state, "生成前再补充一处颜色。", runtime);
-  assert.equal(state.completedUserRounds, 3);
+  assert.equal(state.completedUserRounds, 4);
   assert.equal(state.phase, "ready");
   assert.equal(state.status, "ready-to-generate");
   assert.deepEqual(getEligibleSpeakerIds(state), []);
   assert.throws(() => requestUserTurn(state, undefined, runtime), /no longer has/);
 });
 
-test("generation can be requested early without completing all rounds", () => {
+test("generation cannot be requested before all four rounds", () => {
   const runtime = testRuntime();
-  const state = requestGeneration(createFourPersonState(), runtime);
-  assert.equal(state.phase, "ready");
+  assert.throws(
+    () => requestGeneration(createFourPersonState(), runtime),
+    /not ready to generate/
+  );
+});
+
+test("multi-agent conversations may generate early only after two user rounds", () => {
+  const runtime = testRuntime();
+  let state = createConversationState({
+    sessionId: "session-early",
+    musicProfileId: "music-early",
+    selectedMusicianIds: ["boya"],
+    turnPolicy: { userMayGenerateEarly: true },
+  }, runtime);
+
+  assert.throws(() => requestGeneration(state, runtime), /not ready to generate/);
+  for (let round = 1; round <= 2; round += 1) {
+    const plan = createDeterministicFacilitatorPlan({ state, musicianNames });
+    state = scheduleMusicianTurn(state, plan, runtime);
+    state = recordMusicianMessage(state, { speakerId: "boya", content: `第${round}轮回应。` }, runtime);
+    state = recordUserMessage(state, `第${round}轮用户表达。`, runtime);
+  }
+
+  const ready = requestGeneration(state, runtime);
+  assert.equal(ready.status, "ready-to-generate");
+  assert.equal(ready.completedUserRounds, 2);
+});
+
+test("reflective listening records independent musician comments and four user notes", () => {
+  const runtime = testRuntime();
+  let state = createConversationState({
+    trialId: "trial-single",
+    sessionId: "session-single",
+    musicProfileId: "music-single",
+    selectedMusicianIds: ["boya", "beethoven"],
+    condition: "single_agent",
+    guideId: "co_creation_guide",
+  }, runtime);
+
+  state = startReflectiveListening(state, runtime);
+  state = recordReflectiveComment(state, {
+    speakerId: "boya",
+    content: "我听见声音在空处缓慢展开，像远山之间留下的一线回声。",
+  }, runtime);
+  state = recordReflectiveComment(state, {
+    speakerId: "beethoven",
+    content: "短小的力量不断向前推进，画面的重心因此持续移动。",
+  }, runtime);
+
+  for (let round = 1; round <= 4; round += 1) {
+    state = recordUserMessage(state, `第${round}轮用户画面。`, runtime);
+    state = continueReflectiveListening(state, runtime);
+  }
+
+  assert.equal(state.completedUserRounds, 4);
   assert.equal(state.status, "ready-to-generate");
+  assert.equal(state.messages.filter((message) => message.role === "guide").length, 0);
+  assert.equal(state.messages.filter((message) => message.role === "musician").length, 2);
+  assert.equal(state.messages.filter((message) => message.role === "user").length, 4);
+  assert.throws(
+    () => recordReflectiveComment(state, { speakerId: "boya", content: "重复点评。" }, runtime),
+    /already contributed/
+  );
 });
 
 test("facilitator model plans are constrained to eligible speakers", async () => {

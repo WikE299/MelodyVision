@@ -1,5 +1,6 @@
 import { callLLM, type LLMResponse } from "../../llm.ts";
 import type { ConversationState } from "../../contracts/conversation-state.ts";
+import { goalForCompletedRounds, ROUND_GUIDANCE } from "../../conversation/round-protocol.ts";
 import {
   FACILITATOR_PROFILE_VERSION,
   type FacilitatorInput,
@@ -43,30 +44,8 @@ export function getEligibleSpeakerIds(state: ConversationState): string[] {
   return fresh.length > 0 ? fresh : byFewestTurns;
 }
 
-const GOAL_GUIDANCE: Record<FacilitatorGoal, { question: string; starters: string[] }> = {
-  "subject-space": {
-    question: "先别急着说完整故事：这段音乐里，你最先看见了什么？它在哪里？",
-    starters: ["我最先看见的是……", "它像是在……", "周围是一片……"],
-  },
-  "motion-composition": {
-    question: "让画面动起来：它正在靠近、散开、上升，还是停在原地？",
-    starters: ["它正在……", "画面从……向……", "最有力量的部分在……"],
-  },
-  "light-color-material": {
-    question: "再靠近一点：这里的光、颜色或触感，最像什么？",
-    starters: ["光从……照进来", "颜色更接近……", "它摸起来像……"],
-  },
-  "meaning-constraints": {
-    question: "最后留下一点属于你的东西：什么必须保留，什么不该出现？",
-    starters: ["我希望一定保留……", "它对我来说像……", "画面里不要出现……"],
-  },
-};
-
 function nextGoal(input: FacilitatorInput): FacilitatorGoal {
-  if (input.state.completedUserRounds === 0) return "subject-space";
-  if (input.state.completedUserRounds === 1) return "motion-composition";
-  if (input.state.completedUserRounds === 2) return "light-color-material";
-  return "meaning-constraints";
+  return goalForCompletedRounds(input.state.completedUserRounds);
 }
 
 function stageSubtitleFor(
@@ -90,7 +69,7 @@ export function createDeterministicFacilitatorPlan(input: FacilitatorInput): Fac
   );
   const speakerIds = eligible.slice(0, count);
   const currentGoal = nextGoal(input);
-  const guidance = GOAL_GUIDANCE[currentGoal];
+  const guidance = ROUND_GUIDANCE[currentGoal];
 
   return {
     speakerIds,
@@ -115,7 +94,7 @@ export function buildFacilitatorPrompt(input: FacilitatorInput, eligibleIds: str
   }).join("\n");
   const recent = recentMusicianIds(input.state);
   const currentGoal = nextGoal(input);
-  const guidance = GOAL_GUIDANCE[currentGoal];
+  const guidance = ROUND_GUIDANCE[currentGoal];
   const briefSummary = input.visualBrief
     ? Object.entries(input.visualBrief.fields).map(([key, field]) =>
         `${key}: ${field.status}${field.value ? ` = ${Array.isArray(field.value) ? field.value.join(" / ") : field.value}` : ""}`

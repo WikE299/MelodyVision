@@ -57,18 +57,24 @@ export async function callLLM(params: {
   userMessage: string;
   temperature?: number;
   maxTokens?: number;
+  signal?: AbortSignal;
 }): Promise<LLMResponse> {
-  const { systemPrompt, userMessage, temperature = 0.7, maxTokens = 2000 } = params;
-
-  const response = await client.chat.completions.create({
+  const { systemPrompt, userMessage, temperature = 0.7, maxTokens = 2000, signal } = params;
+  const request = {
     model: MODEL,
     max_tokens: maxTokens,
     temperature,
+    thinking: { type: "disabled" as const },
     messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: userMessage },
     ],
-  });
+  };
+
+  const response = await client.chat.completions.create(
+    request,
+    signal ? { signal } : undefined
+  );
 
   const choice = response.choices[0];
 
@@ -92,17 +98,19 @@ export async function* streamLLM(params: LLMStreamRequest): AsyncGenerator<LLMSt
     maxTokens = 2000,
     signal,
   } = params;
+  const request = {
+    model: MODEL,
+    max_tokens: maxTokens,
+    temperature,
+    stream: true as const,
+    thinking: { type: "disabled" as const },
+    messages: [
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: userMessage },
+    ],
+  };
   const stream = await client.chat.completions.create(
-    {
-      model: MODEL,
-      max_tokens: maxTokens,
-      temperature,
-      stream: true,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-    },
+    request,
     signal ? { signal } : undefined
   );
 
@@ -118,19 +126,22 @@ export async function* streamLLM(params: LLMStreamRequest): AsyncGenerator<LLMSt
 }
 
 export async function callPromptDirector(systemPrompt: string): Promise<PromptDirectorResult> {
-  const response = await client.chat.completions.create({
+  const request = {
     model: IMAGE_PROMPT_MODEL,
     max_tokens: 5000,
     temperature: 0.55,
+    thinking: { type: "disabled" as const },
+    response_format: { type: "json_object" as const },
     messages: [
-      { role: "system", content: systemPrompt },
+      { role: "system" as const, content: systemPrompt },
       {
-        role: "user",
+        role: "user" as const,
         content:
           "Create the structured image prompt brief now. Return valid JSON only, no markdown.",
       },
     ],
-  });
+  };
+  const response = await client.chat.completions.create(request);
 
   const choice = response.choices[0];
 
@@ -151,19 +162,22 @@ export async function callPromptDirector(systemPrompt: string): Promise<PromptDi
 export async function callPromptDirectorRepair(
   systemPrompt: string
 ): Promise<PromptDirectorResult> {
-  const response = await client.chat.completions.create({
+  const request = {
     model: IMAGE_PROMPT_MODEL,
     max_tokens: 5000,
     temperature: 0.35,
+    thinking: { type: "disabled" as const },
+    response_format: { type: "json_object" as const },
     messages: [
-      { role: "system", content: systemPrompt },
+      { role: "system" as const, content: systemPrompt },
       {
-        role: "user",
+        role: "user" as const,
         content:
           "Repair the structured image prompt brief according to the validation errors. Return valid JSON only, no markdown.",
       },
     ],
-  });
+  };
+  const response = await client.chat.completions.create(request);
 
   const choice = response.choices[0];
 
@@ -199,15 +213,17 @@ export async function callLLMForImagePrompt(
   ];
 
   for (const request of requests) {
-    const response = await client.chat.completions.create({
+    const completionRequest = {
       model: IMAGE_PROMPT_MODEL,
       max_tokens: request.maxTokens,
       temperature: 0.45,
+      thinking: { type: "disabled" as const },
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: request.userMessage },
+        { role: "system" as const, content: systemPrompt },
+        { role: "user" as const, content: request.userMessage },
       ],
-    });
+    };
+    const response = await client.chat.completions.create(completionRequest);
 
     const choice = response.choices[0];
     const content = choice?.message.content || "";

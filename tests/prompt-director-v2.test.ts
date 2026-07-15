@@ -13,6 +13,7 @@ import { runVisualScribeAgent } from "../lib/agents/visual-scribe/index.ts";
 import {
   buildPromptDirectorInput,
   buildPromptDirectorInstruction,
+  getPromptDirectorUserSourceIds,
 } from "../lib/prompts/image-gen.ts";
 
 function runtime() {
@@ -21,6 +22,21 @@ function runtime() {
     createId: () => `prompt-v2-${++id}`,
     now: () => "2026-07-11T00:00:00.000Z",
   };
+}
+
+function createMusicProfile(id: string): MusicProfile {
+  return {
+    schemaVersion: "2.0.0",
+    id,
+    audio: { name: "test", sourceKind: "upload", durationSeconds: 45 },
+    rhythm: { bpm: { value: 72, confidence: 0.8, evidenceIds: [] }, beatStrength: { value: 0.5, confidence: 0.8, evidenceIds: [] }, onsetDensity: { value: "sparse", confidence: 0.8, evidenceIds: [] } },
+    tonality: { key: { value: "D", confidence: 0.6, evidenceIds: [] }, mode: { value: "minor", confidence: 0.6, evidenceIds: [] }, harmonicStability: { value: 0.7, confidence: 0.7, evidenceIds: [] } },
+    dynamics: { averageEnergy: { value: 0.4, confidence: 0.8, evidenceIds: [] }, dynamicComplexity: { value: 0.6, confidence: 0.8, evidenceIds: [] } },
+    timbre: { brightness: { value: 0.3, confidence: 0.8, evidenceIds: [] }, warmth: { value: 0.6, confidence: 0.8, evidenceIds: [] }, roughness: { value: 0.2, confidence: 0.8, evidenceIds: [] }, noisiness: { value: 0.1, confidence: 0.8, evidenceIds: [] } },
+    sections: [],
+    semantics: { moods: [], genres: [], instruments: [], textures: [], motions: [], spaces: [] },
+    warnings: [],
+  } as unknown as MusicProfile;
 }
 
 test("Version 2 prompt input preserves VisualBrief fields and exact source references", async () => {
@@ -64,18 +80,7 @@ test("Version 2 prompt input preserves VisualBrief fields and exact source refer
       }),
     })
   );
-  const musicProfile = {
-    schemaVersion: "2.0.0",
-    id: "music-prompt-v2",
-    audio: { name: "test", sourceKind: "upload", durationSeconds: 45 },
-    rhythm: { bpm: { value: 72, confidence: 0.8, evidenceIds: [] }, beatStrength: { value: 0.5, confidence: 0.8, evidenceIds: [] }, onsetDensity: { value: "sparse", confidence: 0.8, evidenceIds: [] } },
-    tonality: { key: { value: "D", confidence: 0.6, evidenceIds: [] }, mode: { value: "minor", confidence: 0.6, evidenceIds: [] }, harmonicStability: { value: 0.7, confidence: 0.7, evidenceIds: [] } },
-    dynamics: { averageEnergy: { value: 0.4, confidence: 0.8, evidenceIds: [] }, dynamicComplexity: { value: 0.6, confidence: 0.8, evidenceIds: [] } },
-    timbre: { brightness: { value: 0.3, confidence: 0.8, evidenceIds: [] }, warmth: { value: 0.6, confidence: 0.8, evidenceIds: [] }, roughness: { value: 0.2, confidence: 0.8, evidenceIds: [] }, noisiness: { value: 0.1, confidence: 0.8, evidenceIds: [] } },
-    sections: [],
-    semantics: { moods: [], genres: [], instruments: [], textures: [], motions: [], spaces: [] },
-    warnings: [],
-  } as unknown as MusicProfile;
+  const musicProfile = createMusicProfile("music-prompt-v2");
 
   const input = buildPromptDirectorInput(
     characters,
@@ -88,7 +93,7 @@ test("Version 2 prompt input preserves VisualBrief fields and exact source refer
   const subject = input.coCreation?.visualBrief.fields.find((field) => field.field === "subject");
   const subjectSource = scribe.brief.fields.subject.sources[0];
 
-  assert.equal(input.coCreation?.musicProfile?.id, musicProfile.id);
+  assert.equal(input.musicProfile?.id, musicProfile.id);
   assert.equal(subject?.status, "confirmed");
   assert.deepEqual(subject?.sourceIds, [subjectSource.id]);
   assert.equal(
@@ -99,6 +104,7 @@ test("Version 2 prompt input preserves VisualBrief fields and exact source refer
     input.coCreation?.sources.find((source) => source.id === userMessage.id)?.kind,
     "user-message"
   );
+  assert.deepEqual(getPromptDirectorUserSourceIds(input.coCreation!), [userMessage.id]);
 
   const instruction = buildPromptDirectorInstruction(input);
   assert.match(instruction, /coCreation\.visualBrief is the authoritative visual plan/);
@@ -106,4 +112,33 @@ test("Version 2 prompt input preserves VisualBrief fields and exact source refer
   assert.match(instruction, /independent primary evidence/);
   assert.match(instruction, new RegExp(subjectSource.id));
   assert.match(instruction, /深蓝色的河/);
+});
+
+test("direct baseline prompt input contains music evidence and no co-creation data", () => {
+  const musicProfile = createMusicProfile("music-baseline-v2");
+  const input = buildPromptDirectorInput(
+    characters,
+    [],
+    { style: "自动", mood: "自动", tone: "自动" },
+    "",
+    {
+      analysisEngine: "rich",
+      description: "节奏逐渐推进，音色由暗转亮。",
+      energy: "中等",
+      brightness: "明亮",
+      segments: [{ energy: "舒缓", brightness: "柔和", motion: "流动", texture: "延展" }],
+    },
+    { musicProfile },
+    "direct_baseline"
+  );
+
+  assert.equal(input.generationRole, "direct_baseline");
+  assert.deepEqual(input.comments, []);
+  assert.equal(input.userNote, "");
+  assert.equal(input.musicProfile?.id, musicProfile.id);
+  assert.equal(input.coCreation, undefined);
+  const instruction = buildPromptDirectorInstruction(input);
+  assert.match(instruction, /music-only reference condition/);
+  assert.match(instruction, /sourceMappings.*must be empty/);
+  assert.doesNotMatch(instruction, /Treat these co-created fields as authoritative/);
 });

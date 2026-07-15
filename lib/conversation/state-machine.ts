@@ -5,6 +5,7 @@ import {
   type ConversationTurnPolicy,
 } from "../contracts/conversation-state.ts";
 import { VERSION_2_SCHEMA_VERSION } from "../contracts/shared.ts";
+import type { InteractiveCondition } from "../contracts/study-trial.ts";
 
 export interface ConversationRuntime {
   now?: () => string;
@@ -13,9 +14,12 @@ export interface ConversationRuntime {
 
 export interface CreateConversationStateInput {
   id?: string;
+  trialId?: string;
   sessionId: string;
   musicProfileId: string;
   selectedMusicianIds: string[];
+  condition?: InteractiveCondition;
+  guideId?: string;
   turnPolicy?: Partial<ConversationTurnPolicy>;
 }
 
@@ -60,11 +64,20 @@ function assertSelectedMusicians(ids: string[]) {
   return uniqueIds;
 }
 
+function conversationParticipants(input: CreateConversationStateInput) {
+  const condition = input.condition || "multi_agent";
+  const selectedMusicianIds = assertSelectedMusicians(input.selectedMusicianIds);
+  if (condition === "single_agent" && !input.guideId?.trim()) {
+    throw new Error("Reflective listening requires a guide identity");
+  }
+  return { condition, selectedMusicianIds };
+}
+
 export function createConversationState(
   input: CreateConversationStateInput,
   runtime?: ConversationRuntime
 ): ConversationState {
-  const selectedMusicianIds = assertSelectedMusicians(input.selectedMusicianIds);
+  const { condition, selectedMusicianIds } = conversationParticipants(input);
   const { now, createId } = runtimeValues(runtime);
   const timestamp = now();
   const turnPolicy = {
@@ -75,9 +88,12 @@ export function createConversationState(
   return {
     schemaVersion: VERSION_2_SCHEMA_VERSION,
     id: input.id || createId(),
+    trialId: input.trialId || input.sessionId,
     sessionId: input.sessionId,
     musicProfileId: input.musicProfileId,
+    condition,
     selectedMusicianIds,
+    ...(condition === "single_agent" ? { guideId: input.guideId!.trim() } : {}),
     phase: "opening",
     status: "idle",
     turnOwner: "system",
@@ -108,6 +124,9 @@ export function scheduleMusicianTurn(
   turn: FacilitatedMusicianTurn,
   runtime?: ConversationRuntime
 ): ConversationState {
+  if (state.condition !== "multi_agent") {
+    throw new Error("Musician turns are only available in the multi-agent condition");
+  }
   if (state.turnOwner !== "system" || state.status !== "idle") {
     throw new Error("A musician turn can only be scheduled while the system owns an idle turn");
   }
@@ -161,6 +180,128 @@ export function scheduleMusicianTurn(
   }
 
   return nextState;
+}
+
+export function scheduleGuideTurn(
+  state: ConversationState,
+  turn: { speakerId: string; stageSubtitle: string; userInvitation: string },
+  runtime?: ConversationRuntime
+): ConversationState {
+  if (
+    state.condition !== "single_agent" ||
+    state.turnOwner !== "system" ||
+    state.status !== "idle" ||
+    !state.guideId ||
+    turn.speakerId !== state.guideId
+  ) {
+    throw new Error("A guide turn can only be scheduled for the active single-agent guide");
+  }
+
+  let nextState: ConversationState = {
+    ...state,
+    status: "streaming-guide",
+    turnOwner: "guide",
+    activeSpeakerIds: [state.guideId],
+    queuedSpeakerIds: [state.guideId],
+    facilitator: {
+      ...state.facilitator,
+      pendingQuestion: turn.userInvitation,
+    },
+  };
+  if (turn.stageSubtitle.trim()) {
+    nextState = appendMessage(nextState, {
+      role: "facilitator",
+      speakerId: "facilitator",
+      content: turn.stageSubtitle.trim(),
+      presentation: "stage-subtitle",
+      sources: [],
+    }, runtime);
+  }
+  return nextState;
+}
+
+export function startReflectiveListening(
+  state: ConversationState,
+  runtime?: ConversationRuntime
+): ConversationState {
+  if (
+    state.condition !== "single_agent" ||
+    state.status !== "idle" ||
+    state.turnOwner !== "system"
+  ) {
+    throw new Error("Reflective listening can only start from an idle reflective state");
+  }
+  const { now } = runtimeValues(runtime);
+  return {
+    ...state,
+    phase: "opening",
+    status: "awaiting-user",
+    turnOwner: "user",
+    activeSpeakerIds: [],
+    queuedSpeakerIds: [],
+    updatedAt: now(),
+  };
+}
+
+export function recordReflectiveComment(
+  state: ConversationState,
+  input: { speakerId: string; content: string },
+  runtime?: ConversationRuntime
+): ConversationState {
+  if (
+    state.condition !== "single_agent" ||
+    !state.selectedMusicianIds.includes(input.speakerId)
+  ) {
+    throw new Error("Reflective comment speaker is not part of this listening session");
+  }
+  if (!input.content.trim()) throw new Error("Reflective comment cannot be empty");
+  if (state.messages.some((message) => message.role === "musician" && message.speakerId === input.speakerId)) {
+    throw new Error("This musician already contributed a reflective comment");
+  }
+
+  const nextState = appendMessage(state, {
+    role: "musician",
+    speakerId: input.speakerId,
+    content: input.content.trim(),
+    presentation: "speech-bubble",
+    sources: [],
+  }, runtime);
+  const lastMessageId = nextState.messages.at(-1)?.id;
+  return {
+    ...nextState,
+    musicianMemory: {
+      ...nextState.musicianMemory,
+      [input.speakerId]: {
+        ...nextState.musicianMemory[input.speakerId],
+        musicianId: input.speakerId,
+        publicTurnCount: 1,
+        lastMessageId,
+      },
+    },
+  };
+}
+
+export function continueReflectiveListening(
+  state: ConversationState,
+  runtime?: ConversationRuntime
+): ConversationState {
+  if (state.condition !== "single_agent") {
+    throw new Error("Only reflective listening uses the reflective continuation");
+  }
+  if (state.status !== "idle" || state.turnOwner !== "system") {
+    throw new Error("Reflective continuation requires a completed user note");
+  }
+  const { now } = runtimeValues(runtime);
+  const ready = state.completedUserRounds >= state.turnPolicy.maxUserRounds;
+  return {
+    ...state,
+    phase: ready ? "ready" : "exploration",
+    status: ready ? "ready-to-generate" : "awaiting-user",
+    turnOwner: "user",
+    activeSpeakerIds: [],
+    queuedSpeakerIds: [],
+    updatedAt: now(),
+  };
 }
 
 export function recordMusicianMessage(
@@ -246,6 +387,48 @@ export function recordMusicianMessage(
       askedQuestions: reachedRoundLimit
         ? nextState.facilitator.askedQuestions
         : [...nextState.facilitator.askedQuestions, invitation],
+    },
+  };
+}
+
+export function recordGuideMessage(
+  state: ConversationState,
+  input: { speakerId: string; content: string },
+  runtime?: ConversationRuntime
+): ConversationState {
+  if (
+    state.condition !== "single_agent" ||
+    state.turnOwner !== "guide" ||
+    state.status !== "streaming-guide" ||
+    state.guideId !== input.speakerId ||
+    !state.queuedSpeakerIds.includes(input.speakerId)
+  ) {
+    throw new Error("Guide does not currently own a scheduled turn");
+  }
+  if (!input.content.trim()) throw new Error("Guide message cannot be empty");
+
+  const withMessage = appendMessage(state, {
+    role: "guide",
+    speakerId: input.speakerId,
+    content: input.content.trim(),
+    presentation: "speech-bubble",
+    sources: [],
+  }, runtime);
+  const reachedRoundLimit = withMessage.completedUserRounds >= withMessage.turnPolicy.maxUserRounds;
+  const question = withMessage.facilitator.pendingQuestion;
+  return {
+    ...withMessage,
+    phase: reachedRoundLimit ? "ready" : "exploration",
+    status: reachedRoundLimit ? "ready-to-generate" : "awaiting-user",
+    turnOwner: "user",
+    activeSpeakerIds: [],
+    queuedSpeakerIds: [],
+    facilitator: {
+      ...withMessage.facilitator,
+      pendingQuestion: undefined,
+      askedQuestions: reachedRoundLimit || !question
+        ? withMessage.facilitator.askedQuestions
+        : [...withMessage.facilitator.askedQuestions, question],
     },
   };
 }
@@ -363,7 +546,10 @@ export function requestGeneration(
   state: ConversationState,
   runtime?: Pick<ConversationRuntime, "now">
 ): ConversationState {
-  if (!state.turnPolicy.userMayGenerateEarly && state.phase !== "ready") {
+  const mayGenerateEarly =
+    state.turnPolicy.userMayGenerateEarly &&
+    state.completedUserRounds >= 2;
+  if (!mayGenerateEarly && state.phase !== "ready") {
     throw new Error("Conversation is not ready to generate");
   }
   return {

@@ -112,12 +112,21 @@ export async function GET(request: Request) {
   }
 
   const params = buildJamendoParams(request);
-  const res = await fetch(`${JAMENDO_TRACKS_URL}?${params.toString()}`, {
-    headers: {
-      Accept: "application/json",
-    },
-    next: { revalidate: 86400 },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${JAMENDO_TRACKS_URL}?${params.toString()}`, {
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? `Jamendo search failed: ${error.message}` : "Jamendo search failed", results: [] },
+      { status: 502 }
+    );
+  }
 
   if (!res.ok) {
     return Response.json(

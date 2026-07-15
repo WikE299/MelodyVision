@@ -3,6 +3,7 @@ import type {
   SourceReference,
   Version2SchemaVersion,
 } from "./shared";
+import type { InteractiveCondition } from "./study-trial";
 
 export type ConversationPhase =
   | "preparing"
@@ -15,6 +16,7 @@ export type ConversationPhase =
 export type ConversationStatus =
   | "idle"
   | "streaming-musician"
+  | "streaming-guide"
   | "awaiting-user"
   | "updating-brief"
   | "ready-to-generate"
@@ -22,8 +24,8 @@ export type ConversationStatus =
   | "completed"
   | "failed";
 
-export type ConversationTurnOwner = "system" | "musicians" | "user";
-export type ConversationMessageRole = "musician" | "user" | "facilitator";
+export type ConversationTurnOwner = "system" | "musicians" | "guide" | "user";
+export type ConversationMessageRole = "musician" | "guide" | "user" | "facilitator";
 export type ConversationMessagePresentation = "speech-bubble" | "stage-subtitle";
 
 export interface ConversationTurnPolicy {
@@ -37,9 +39,9 @@ export interface ConversationTurnPolicy {
 export const DEFAULT_CONVERSATION_TURN_POLICY: ConversationTurnPolicy = {
   maxConsecutiveMusicianMessages: 2,
   maxMusiciansPerResponse: 2,
-  maxUserRounds: 3,
+  maxUserRounds: 4,
   userMayInterrupt: true,
-  userMayGenerateEarly: true,
+  userMayGenerateEarly: false,
 };
 
 export interface ConversationMessage {
@@ -83,9 +85,12 @@ export interface VisualBriefReference {
 export interface ConversationState {
   schemaVersion: Version2SchemaVersion;
   id: string;
+  trialId: string;
   sessionId: string;
   musicProfileId: string;
+  condition: InteractiveCondition;
   selectedMusicianIds: string[];
+  guideId?: string;
   phase: ConversationPhase;
   status: ConversationStatus;
   turnOwner: ConversationTurnOwner;

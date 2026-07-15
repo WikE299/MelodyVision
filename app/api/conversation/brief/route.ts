@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       fallback: result.fallback,
       validationErrors: result.validationErrors,
     };
-    await insertVisualBriefVersion({ sessionId: state.sessionId, brief: result.brief, meta }).catch((error) => {
+    await insertVisualBriefVersion({ trialId: state.trialId, sessionId: state.sessionId, brief: result.brief, meta }).catch((error) => {
       console.error("VisualBrief persistence failed:", error);
     });
 

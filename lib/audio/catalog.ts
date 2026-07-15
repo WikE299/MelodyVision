@@ -242,3 +242,7 @@ export function searchAudioCatalog(query: string): AudioCatalogItem[] {
     return haystack.includes(normalizedQuery);
   });
 }
+
+export function getAudioPlaybackUrl(item: AudioCatalogItem): string {
+  return `/api/audio/preset/${encodeURIComponent(item.id)}`;
+}

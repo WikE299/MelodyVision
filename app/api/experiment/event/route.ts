@@ -13,6 +13,9 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Invalid interaction event" }, { status: 400 });
     }
     await insertInteractionEvent({
+      trialId: body.payload && typeof body.payload === "object" && "trialId" in body.payload
+        ? String((body.payload as { trialId?: unknown }).trialId || "")
+        : "",
       sessionId,
       eventType: eventType.slice(0, 100),
       page: page.slice(0, 100),

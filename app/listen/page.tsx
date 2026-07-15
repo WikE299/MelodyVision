@@ -13,12 +13,14 @@ import type {
   ConversationState,
   MusicProfile,
   SourceReference,
+  StudyTrial,
   VisualBrief,
   VisualBriefFieldStatus,
 } from "@/lib/contracts";
 import type { FacilitatorPlan } from "@/lib/agents/facilitator";
 import { readConversationStream } from "@/lib/conversation";
 import { isMeaningfulUserInput } from "@/lib/conversation/user-input";
+import { ensureStudyTrial, startDirectBaseline } from "@/lib/experiment-trial-client";
 
 const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
 
@@ -57,20 +59,29 @@ const COPY = {
     guideTip: "点击音乐家听点评，点亮共鸣或补充自己的听感。",
     roomTitle: "共同画面",
     roomSubtitle: "和音乐家一起，把听见的音乐慢慢聊成一幅画",
+    singleRoomSubtitle: "跟随共创引导，把听见的音乐慢慢聊成一幅画",
     facilitator: "共创引导",
     openChat: "展开聊天室",
     closeChat: "收起聊天室",
     nextSpeakerWaiting: "下一位音乐家正在等你",
+    nextGuideWaiting: "共创引导正在等你开启这一轮",
     waitingTurn: "音乐家正在说话。你也可以随时写下听感并加入对话。",
     starterLabel: "可以从这里开始",
     generateHint: "先补充一处你自己的画面，音乐家的听法才会真正和你汇合。",
     inputNeedsDetail: "在起句后补充一点自己的画面，再发送。",
     userNoteFailed: "这句话没有送达，请稍后重试。",
     continueListening: "继续共同聆听",
+    pathA: "聆听路径 A",
+    pathB: "聆听路径 B",
+    reflectiveTip: "点击音乐家听取独立点评，再写下属于你自己的画面。",
+    journalTitle: "画面札记",
+    journalProgress: "已完成",
+    hearAtLeastOne: "至少听取一位音乐家的点评，才能让画面汇合。",
     generateEarly: "用当前线索提前生成",
     startMusic: "触碰水晶，让音乐回到房间",
     visualRecorded: "刚刚记下你的画面",
     returnToGuides: "返回选择音乐家",
+    returnToStart: "返回首页",
     changeGuidesConfirm: "更换音乐家会重置当前的共同聆听记录，确定返回吗？",
     goalLabels: {
       "subject-space": "看见什么",
@@ -116,20 +127,29 @@ const COPY = {
     guideTip: "Tap a musician to hear their take, mark resonance, or add your own note.",
     roomTitle: "Shared Image",
     roomSubtitle: "Talk with the musicians and gradually shape the image you hear",
+    singleRoomSubtitle: "Follow the co-creation guide and gradually shape the image you hear",
     facilitator: "Co-creation guide",
     openChat: "Open conversation",
     closeChat: "Close conversation",
     nextSpeakerWaiting: "The next musician is ready",
+    nextGuideWaiting: "The co-creation guide is ready for this round",
     waitingTurn: "A musician is speaking. You can still add your own listening note at any time.",
     starterLabel: "You could begin here",
     generateHint: "Add one image of your own so the musicians' views can meet yours.",
     inputNeedsDetail: "Add a little of your own image after the starter before sending.",
     userNoteFailed: "Your note did not send. Please try again.",
     continueListening: "Continue Listening Together",
+    pathA: "Listening Path A",
+    pathB: "Listening Path B",
+    reflectiveTip: "Hear an independent perspective, then record the image that belongs to you.",
+    journalTitle: "Image Notes",
+    journalProgress: "Completed",
+    hearAtLeastOne: "Hear at least one musician before bringing the image together.",
     generateEarly: "Generate from Current Cues",
     startMusic: "Touch the crystal and bring the music back into the room",
     visualRecorded: "Your visual cue is now recorded",
     returnToGuides: "Change musicians",
+    returnToStart: "Back to start",
     changeGuidesConfirm: "Changing musicians will reset this shared listening session. Return anyway?",
     goalLabels: {
       "subject-space": "What appears",
@@ -169,13 +189,27 @@ function getInitialListenState() {
     };
   }
 
-  const ids = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
   const src = sessionStorage.getItem("audioSrc") || sessionStorage.getItem("audioObjectUrl") || "";
-  const comments = JSON.parse(sessionStorage.getItem("comments") || "{}");
+  let ids: string[] = [];
+  let comments: Record<string, string> = {};
   let conversationState: ConversationState | null = null;
   let visualBrief: VisualBrief | null = null;
   let resonantCharacterIds: string[] = [];
   let facilitatorPlan: FacilitatorPlan | null = null;
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
+    ids = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    ids = [];
+  }
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem("comments") || "{}");
+    comments = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, string>
+      : {};
+  } catch {
+    comments = {};
+  }
   try {
     conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
   } catch {
@@ -198,7 +232,9 @@ function getInitialListenState() {
   }
   if (conversationState) {
     for (const message of conversationState.messages) {
-      if (message.role === "musician") comments[message.speakerId] = message.content;
+      if (message.role === "musician" || message.role === "guide") {
+        comments[message.speakerId] = message.content;
+      }
     }
   }
 
@@ -247,6 +283,7 @@ function sourceSummary(
   for (const source of sources) {
     if (source.kind === "user-message") names.add(copy.sourceUser);
     if (source.kind === "music-analysis") names.add(copy.sourceMusic);
+    if (source.kind === "guide-message") names.add(copy.facilitator);
     if (source.kind === "musician-message") {
       const message = state?.messages.find((item) => item.id === source.sourceId);
       const character = selectedChars.find((item) => item.id === message?.speakerId);
@@ -437,6 +474,117 @@ function GuideFigure({
   );
 }
 
+function ReflectiveGuideFigure({
+  character,
+  active,
+  open,
+  loading,
+  streaming,
+  comment,
+  stageOffset,
+  onOpen,
+  language,
+}: {
+  character: Character;
+  active: boolean;
+  open: boolean;
+  loading: boolean;
+  streaming: boolean;
+  comment: string;
+  stageOffset: string;
+  onOpen: () => void;
+  language: Language;
+}) {
+  const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
+    name: character.name,
+  };
+  return (
+    <div className={`pointer-events-none group absolute z-40 flex w-[clamp(154px,12vw,194px)] flex-col items-center text-center ${stageOffset}`}>
+      {!open && (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="pointer-events-auto absolute left-1/2 top-[-20px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/94 px-3.5 py-2 shadow-[0_0_26px_rgba(255,208,131,0.46)] transition hover:-translate-y-1 hover:bg-[#fff1d6]"
+          aria-label={language === "zh" ? `听${label.name}说` : `Hear ${label.name}`}
+        >
+          {[0, 1, 2].map((dot) => (
+            <span key={dot} className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#5b3e31]" style={{ animationDelay: `${dot * 140}ms`, animationDuration: "900ms" }} />
+          ))}
+        </button>
+      )}
+      <div className={`absolute bottom-[40px] h-[clamp(42px,5vw,64px)] w-[clamp(150px,11.5vw,204px)] rounded-[50%] border transition duration-300 ${active ? "border-[#ffd481] bg-[#ffc267]/28 shadow-[0_0_38px_rgba(255,194,103,0.86),0_22px_38px_rgba(0,0,0,0.45)]" : "border-[#b9895d]/46 bg-black/28 shadow-[0_22px_48px_rgba(0,0,0,0.42)]"}`} />
+      <button
+        type="button"
+        onClick={onOpen}
+        className={`pointer-events-auto relative z-10 mb-1 flex h-[clamp(186px,22vh,254px)] items-end justify-center outline-none transition duration-300 ${active ? "scale-[1.055] drop-shadow-[0_0_24px_rgba(255,218,145,0.74)]" : "drop-shadow-[0_24px_24px_rgba(0,0,0,0.46)] group-hover:scale-[1.025]"}`}
+      >
+        <Image src={`/characters/stage/${character.id}.png`} alt={label.name} width={512} height={512} priority className={`h-auto max-h-[clamp(194px,23vh,266px)] object-contain ${FIGURE_STYLE[character.id] || "w-[clamp(164px,11vw,214px)]"}`} />
+      </button>
+      <div className={`relative z-20 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[#ffe8c9] backdrop-blur ${active ? "border-[#ffc976]/80 bg-[#654531]/72" : "border-[#a47b5a]/38 bg-[#2f2832]/68"}`}>
+        <span className={`h-2.5 w-2.5 rounded-full ${loading || streaming ? "bg-[#ffbd62]" : comment ? "bg-[#8dd28b]" : "bg-[#9b908d]"}`} />
+        <p className="text-sm font-semibold">{label.name}</p>
+      </div>
+    </div>
+  );
+}
+
+function ReflectiveCommentCard({
+  character,
+  loading,
+  streaming,
+  comment,
+  resonant,
+  onClose,
+  onToggleResonance,
+  language,
+}: {
+  character: Character;
+  loading: boolean;
+  streaming: boolean;
+  comment: string;
+  resonant: boolean;
+  onClose: () => void;
+  onToggleResonance: () => void;
+  language: Language;
+}) {
+  const copy = COPY[language];
+  const label = characterUi[language][character.id as keyof typeof characterUi.zh] || {
+    name: character.name,
+  };
+
+  return (
+    <article className="pointer-events-auto relative h-[112px] min-w-0 border border-[#f2bd7d]/74 bg-[#ffe0bd]/96 px-3 py-2.5 text-left text-[#322534] shadow-[0_16px_34px_rgba(0,0,0,0.3)]">
+      <p className="truncate pr-14 text-xs font-semibold">{label.name}</p>
+      {!loading && (
+        <>
+          <button
+            type="button"
+            onClick={onToggleResonance}
+            className={`absolute right-9 top-2 flex h-6 w-6 items-center justify-center rounded-full border transition ${resonant ? "border-[#8b5e2f]/62 bg-[#5b3e31] text-[#ffe6c3]" : "border-[#9a7458]/40 bg-[#fff0d7] text-[#76513d] hover:bg-white"}`}
+            aria-label={resonant ? copy.resonated : copy.resonate}
+            title={resonant ? copy.resonated : copy.resonate}
+          >
+            ✦
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-[#9a7458]/40 bg-[#fff0d7] text-[#5b3e31] transition hover:bg-white"
+            aria-label={copy.closeComment}
+            title={copy.closeComment}
+          >
+            ×
+          </button>
+        </>
+      )}
+      <p className="mt-1.5 max-h-[4.35em] overflow-y-auto pr-1 text-xs font-medium leading-[1.45]">
+        {loading ? copy.listening : comment}
+        {streaming && <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-[#5b3e31]/70" />}
+      </p>
+    </article>
+  );
+}
+
 function ConversationEntry({
   role,
   speakerId,
@@ -471,7 +619,9 @@ function ConversationEntry({
   }
 
   const character = selectedChars.find((item) => item.id === speakerId);
-  const label = character
+  const label = role === "guide"
+    ? language === "zh" ? "共创引导" : "Co-creation guide"
+    : character
     ? characterUi[language][character.id as keyof typeof characterUi.zh]?.name || character.name
     : language === "zh" ? "我" : "Me";
   const isUser = role === "user";
@@ -480,6 +630,11 @@ function ConversationEntry({
       {!isUser && character && (
         <div className="flex h-9 w-9 shrink-0 items-end justify-center overflow-hidden rounded-full border border-[#bd8b5d]/44 bg-[#332a35]">
           <Image src={`/characters/stage/${character.id}.png`} alt="" width={72} height={72} className="h-12 w-12 object-contain object-bottom" />
+        </div>
+      )}
+      {!isUser && role === "guide" && (
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#bd8b5d]/44 bg-[#332a35] text-[#ffd083]">
+          ✦
         </div>
       )}
       <div className={`relative max-w-[82%] rounded-[14px] px-3.5 py-2.5 text-sm leading-relaxed ${
@@ -528,8 +683,11 @@ export default function ListenPage() {
   const [resonantComments, setResonantComments] = useState<Set<string>>(
     new Set(initialState.resonantCharacterIds)
   );
-  const [activeCharacterId, setActiveCharacterId] = useState<string>(selectedChars[0]?.id || "");
+  const [activeCharacterId, setActiveCharacterId] = useState<string>(
+    selectedChars[0]?.id || ""
+  );
   const [userNote, setUserNote] = useState("");
+  const [pendingUserMessage, setPendingUserMessage] = useState<{ id: string; content: string } | null>(null);
   const [submittingUserNote, setSubmittingUserNote] = useState(false);
   const [userNoteError, setUserNoteError] = useState("");
   const [showPlayerControls, setShowPlayerControls] = useState(false);
@@ -550,22 +708,48 @@ export default function ListenPage() {
   const activeStreamSpeakerRef = useRef("");
   const allCommentsRef = useRef(initialState.comments);
   const visualBriefRefRef = useRef(initialState.conversationState?.visualBriefRef || null);
+  const baselineRecoveryAttemptedRef = useRef(false);
+  const trialRecoveryRef = useRef<Promise<StudyTrial | null> | null>(null);
+  const reflectiveTimerRef = useRef<number | null>(null);
+  const isReflective = conversationState?.condition === "single_agent";
 
   useEffect(() => {
-    if (selectedChars.length === 0 || !conversationState) {
+    if (!conversationState) {
+      router.push("/");
+      return;
+    }
+    if (selectedChars.length === 0) {
       router.push("/select");
     }
   }, [conversationState, router, selectedChars.length]);
 
   useEffect(() => {
+    if (baselineRecoveryAttemptedRef.current) return;
+    baselineRecoveryAttemptedRef.current = true;
+    try {
+      const trial = JSON.parse(sessionStorage.getItem("studyTrial") || "null") as StudyTrial | null;
+      const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
+      const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "null") as Record<string, unknown> | null;
+      if (trial && musicProfile && musicAnalysis) {
+        void startDirectBaseline({ trial, musicProfile, musicAnalysis }).catch((error) => {
+          console.warn("Baseline recovery did not complete:", error);
+        });
+      }
+    } catch {
+      // The trial can still continue; the result page exposes a controlled retry.
+    }
+  }, []);
+
+  useEffect(() => {
     const container = chatScrollRef.current;
     if (!container) return;
     container.scrollTop = container.scrollHeight;
-  }, [conversationState?.messages.length, streaming, visibleComments]);
+  }, [conversationState?.messages.length, pendingUserMessage, streaming, visibleComments]);
 
   useEffect(() => () => {
     streamGenerationRef.current += 1;
     turnAbortRef.current?.abort();
+    if (reflectiveTimerRef.current !== null) window.clearTimeout(reflectiveTimerRef.current);
     turnAbortRef.current = null;
     turnInFlightRef.current = false;
     activeStreamSpeakerRef.current = "";
@@ -638,6 +822,33 @@ export default function ListenPage() {
     sessionStorage.setItem("conversationState", JSON.stringify(mergedState));
   }, []);
 
+  const ensureActiveTrial = useCallback(async (state: ConversationState) => {
+    if (trialRecoveryRef.current) return trialRecoveryRef.current;
+    const recovery = (async () => {
+      const storedTrial = JSON.parse(sessionStorage.getItem("studyTrial") || "null") as StudyTrial | null;
+      if (!storedTrial && state.trialId === state.sessionId) return null;
+      if (!storedTrial || storedTrial.id !== state.trialId) {
+        throw new Error("当前实验会话已失效，请返回首页重新开始");
+      }
+      const result = await ensureStudyTrial(storedTrial);
+      sessionStorage.setItem("studyTrial", JSON.stringify(result.trial));
+      sessionStorage.setItem("studyTrialId", result.trial.id);
+      if (result.recovered) {
+        recordExperimentEvent("trial-recovered", "/listen", {
+          trialId: result.trial.id,
+          condition: result.trial.condition,
+        });
+      }
+      return result.trial;
+    })();
+    trialRecoveryRef.current = recovery;
+    try {
+      return await recovery;
+    } finally {
+      trialRecoveryRef.current = null;
+    }
+  }, []);
+
   const clearTurnIndicators = useCallback((speakerId: string) => {
     setLoading((prev) => {
       const next = new Set(prev);
@@ -666,6 +877,14 @@ export default function ListenPage() {
     setVisibleComments((prev) => ({ ...prev, [speakerId]: "" }));
     setLoading((prev) => new Set(prev).add(speakerId));
     setStreaming((prev) => new Set(prev).add(speakerId));
+    recordExperimentEvent("guided-turn-started", "/listen", {
+      trialId: state.trialId,
+      condition: state.condition,
+      conversationId: state.id,
+      speakerId,
+      role: state.condition === "single_agent" ? "guide" : "musician",
+      round: state.completedUserRounds + 1,
+    });
 
     try {
       const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}");
@@ -702,6 +921,15 @@ export default function ListenPage() {
           });
           activeStreamSpeakerRef.current = "";
           persistConversationState(event.state);
+          recordExperimentEvent("guided-turn-completed", "/listen", {
+            trialId: event.state.trialId,
+            condition: event.state.condition,
+            conversationId: event.state.id,
+            speakerId,
+            role: event.state.condition === "single_agent" ? "guide" : "musician",
+            round: event.state.completedUserRounds + 1,
+            characterCount: event.comment.length,
+          });
         } else if (event.type === "error") {
           streamError = event.message;
         }
@@ -728,10 +956,95 @@ export default function ListenPage() {
     if (allComments[charId]) setRevealed((prev) => new Set(prev).add(charId));
   };
 
+  const stopReflectiveStreaming = useCallback(() => {
+    if (reflectiveTimerRef.current !== null) {
+      window.clearTimeout(reflectiveTimerRef.current);
+      reflectiveTimerRef.current = null;
+    }
+    setStreaming(new Set());
+  }, []);
+
+  const streamReflectiveComment = useCallback((charId: string, text: string) => {
+    stopReflectiveStreaming();
+    setVisibleComments((prev) => ({ ...prev, [charId]: "" }));
+    setStreaming(new Set([charId]));
+    let index = 0;
+    const step = () => {
+      index = Math.min(text.length, index + 1);
+      setVisibleComments((prev) => ({ ...prev, [charId]: text.slice(0, index) }));
+      if (index >= text.length) {
+        reflectiveTimerRef.current = null;
+        setStreaming(new Set());
+        return;
+      }
+      const pause = /[，。！？,.!?]/.test(text[index - 1] || "") ? 110 : 42;
+      reflectiveTimerRef.current = window.setTimeout(step, pause);
+    };
+    reflectiveTimerRef.current = window.setTimeout(step, 160);
+  }, [stopReflectiveStreaming]);
+
+  const handleReflectiveReveal = async (charId: string) => {
+    if (!conversationState || !isReflective || loading.size > 0) return;
+    setActiveCharacterId(charId);
+    setRevealed((current) => new Set(current).add(charId));
+    if (allComments[charId]) {
+      stopReflectiveStreaming();
+      setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] }));
+      return;
+    }
+
+    setLoading(new Set([charId]));
+    setVisibleComments((prev) => ({ ...prev, [charId]: "" }));
+    try {
+      const response = await fetch("/api/conversation/reflection/comment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationState,
+          speakerId: charId,
+          musicAnalysis: JSON.parse(sessionStorage.getItem("musicAnalysis") || "{}"),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Reflective comment failed");
+      const comment = String(data.comment || "");
+      persistConversationState(data.state as ConversationState);
+      setAllComments((prev) => {
+        const next = { ...prev, [charId]: comment };
+        allCommentsRef.current = next;
+        sessionStorage.setItem("comments", JSON.stringify(next));
+        return next;
+      });
+      streamReflectiveComment(charId, comment);
+      recordExperimentEvent("reflective-comment-opened", "/listen", {
+        trialId: conversationState.trialId,
+        condition: conversationState.condition,
+        conversationId: conversationState.id,
+        musicianId: charId,
+        characterCount: comment.length,
+      });
+    } catch (error) {
+      console.error(error);
+      setVisibleComments((prev) => ({ ...prev, [charId]: copy.failed }));
+    } finally {
+      setLoading(new Set());
+    }
+  };
+
+  const handleReflectiveClose = (charId: string) => {
+    stopReflectiveStreaming();
+    setVisibleComments((prev) => ({ ...prev, [charId]: allComments[charId] || prev[charId] || "" }));
+    setRevealed((current) => {
+      const next = new Set(current);
+      next.delete(charId);
+      return next;
+    });
+  };
+
   const handleSpeakerPrompt = (charId: string) => {
     if (
       !conversationState ||
-      conversationState.status !== "streaming-musician" ||
+      !["streaming-musician", "streaming-guide"].includes(conversationState.status) ||
       conversationState.queuedSpeakerIds[0] !== charId ||
       turnInFlightRef.current
     ) {
@@ -773,7 +1086,7 @@ export default function ListenPage() {
 
   const handleSubmitUserNote = async () => {
     const content = userNote.trim();
-    if (!content || !conversationState || submittingUserNote) return;
+    if (!content || !conversationState || submittingUserNote || (isReflective && loading.size > 0)) return;
     if (!isMeaningfulUserInput(content)) {
       setUserNoteError(copy.inputNeedsDetail);
       return;
@@ -781,6 +1094,8 @@ export default function ListenPage() {
 
     setSubmittingUserNote(true);
     setUserNoteError("");
+    setPendingUserMessage({ id: crypto.randomUUID(), content });
+    setUserNote("");
     cancelActiveTurn();
     try {
       const response = await fetch("/api/conversation/respond", {
@@ -797,7 +1112,10 @@ export default function ListenPage() {
       if (!response.ok) throw new Error(data.error || "Conversation response failed");
       persistConversationState(data.state as ConversationState);
       recordExperimentEvent("user-message-submitted", "/listen", {
+        trialId: conversationState.trialId,
+        condition: conversationState.condition,
         conversationId: conversationState.id,
+        completedRound: (data.state as ConversationState).completedUserRounds,
         characterCount: content.length,
       });
       if (data.facilitatorPlan) {
@@ -808,11 +1126,21 @@ export default function ListenPage() {
         const nextBrief = data.visualBrief as VisualBrief;
         setVisualBrief(nextBrief);
         sessionStorage.setItem("visualBrief", JSON.stringify(nextBrief));
+        recordExperimentEvent("visual-brief-updated", "/listen", {
+          trialId: conversationState.trialId,
+          condition: conversationState.condition,
+          conversationId: conversationState.id,
+          version: nextBrief.version,
+          completedRound: (data.state as ConversationState).completedUserRounds,
+          readiness: nextBrief.readiness.ready,
+        });
       }
-      setUserNote("");
+      setPendingUserMessage(null);
       setFailedSpeakerId("");
     } catch (error) {
       console.error(error);
+      setPendingUserMessage(null);
+      setUserNote(content);
       setUserNoteError(error instanceof Error ? error.message : copy.userNoteFailed);
     } finally {
       setSubmittingUserNote(false);
@@ -830,6 +1158,8 @@ export default function ListenPage() {
       }
       sessionStorage.setItem("resonantComments", JSON.stringify([...next]));
       recordExperimentEvent("resonance-toggled", "/listen", {
+        trialId: conversationState?.trialId,
+        condition: conversationState?.condition,
         musicianId: charId,
         selected,
       });
@@ -879,12 +1209,24 @@ export default function ListenPage() {
     setGenerationProgress(6);
     setGenerationError("");
     recordExperimentEvent("generation-started", "/listen", {
+      trialId: conversationState.trialId,
+      condition: conversationState.condition,
       conversationId: conversationState.id,
       musicianCount: conversationState.selectedMusicianIds.length,
       resonantMusicianIds: [...resonantComments],
     });
 
     try {
+      const activeTrial = await ensureActiveTrial(conversationState);
+      const musicProfileForBaseline = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
+      const musicAnalysisForBaseline = JSON.parse(sessionStorage.getItem("musicAnalysis") || "null") as Record<string, unknown> | null;
+      if (activeTrial && musicProfileForBaseline && musicAnalysisForBaseline) {
+        void startDirectBaseline({
+          trial: activeTrial,
+          musicProfile: musicProfileForBaseline,
+          musicAnalysis: musicAnalysisForBaseline,
+        }).catch((error) => console.warn("Recovered baseline did not complete:", error));
+      }
       const stateResponse = await fetch("/api/conversation/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -929,6 +1271,9 @@ export default function ListenPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          trialId: activeTrial?.id,
+          generationRole: "co_created",
+          condition: generationContext.state.condition,
           sessionId,
           selectedCharacters: generationContext.state.selectedMusicianIds,
           comments: commentList,
@@ -954,11 +1299,14 @@ export default function ListenPage() {
       sessionStorage.setItem("generatedRemoteImageUrl", data.remoteImageUrl || "");
       sessionStorage.setItem("generatedImagePrompt", data.prompt || "");
       sessionStorage.setItem("generatedNegativePrompt", data.negativePrompt || "");
+      sessionStorage.setItem("coCreatedRunId", data.runId || "");
       sessionStorage.setItem("experimentSessionId", data.sessionId || sessionId);
       sessionStorage.setItem(
         "imageGenerationMeta",
         JSON.stringify({
           runId: data.runId,
+          trialId: data.trialId || activeTrial?.id || "",
+          generationRole: data.generationRole || "co_created",
           sessionId: data.sessionId || sessionId,
           provider: data.provider,
           model: data.model,
@@ -972,9 +1320,22 @@ export default function ListenPage() {
         })
       );
       setGenerationProgress(100);
+      recordExperimentEvent("generation-completed", "/listen", {
+        trialId: generationContext.state.trialId,
+        condition: generationContext.state.condition,
+        generationRole: "co_created",
+        runId: data.runId,
+        timings: data.timings,
+      });
       router.push("/result");
     } catch (error) {
       console.error(error);
+      recordExperimentEvent("generation-failed", "/listen", {
+        trialId: conversationState.trialId,
+        condition: conversationState.condition,
+        generationRole: "co_created",
+        error: error instanceof Error ? error.message : String(error),
+      });
       setGenerationError(error instanceof Error ? error.message : copy.generationFailed);
       setGenerating(false);
       setGenerationProgress(0);
@@ -999,7 +1360,26 @@ export default function ListenPage() {
       "right-[11%] bottom-[22px] translate-x-1/2",
     ],
   };
-  const stageSlots = stageSlotsByCount[Math.min(selectedChars.length, 4)] || stageSlotsByCount[4];
+  const reflectiveStageSlotsByCount: Record<number, string[]> = {
+    1: ["left-[24%] bottom-[168px] -translate-x-1/2"],
+    2: [
+      "left-[24%] bottom-[168px] -translate-x-1/2",
+      "right-[24%] bottom-[168px] translate-x-1/2",
+    ],
+    3: [
+      "left-[15%] bottom-[158px] -translate-x-1/2",
+      "left-[32%] bottom-[200px] -translate-x-1/2",
+      "right-[15%] bottom-[158px] translate-x-1/2",
+    ],
+    4: [
+      "left-[13%] bottom-[154px] -translate-x-1/2",
+      "left-[31%] bottom-[200px] -translate-x-1/2",
+      "right-[31%] bottom-[200px] translate-x-1/2",
+      "right-[13%] bottom-[154px] translate-x-1/2",
+    ],
+  };
+  const activeStageSlots = isReflective ? reflectiveStageSlotsByCount : stageSlotsByCount;
+  const stageSlots = activeStageSlots[Math.min(selectedChars.length, 4)] || activeStageSlots[4];
   const conversationMessages = conversationState?.messages || [];
   const latestMessage = conversationMessages.at(-1);
   const hasUserContribution = conversationMessages.some((message) => message.role === "user");
@@ -1008,9 +1388,23 @@ export default function ListenPage() {
     visualFields.includes("space") || visualFields.includes("composition")
   );
   const visualBriefReady = Boolean(visualBrief?.readiness.ready);
-  const canGenerateEarly = hasUserContribution && hasVisualAnchor;
-  const waitingForNextMusician = Boolean(
-    conversationState?.status === "streaming-musician" && conversationState.queuedSpeakerIds.length > 0
+  const conversationReady = Boolean(
+    conversationState?.status === "ready-to-generate" ||
+    conversationState?.phase === "ready"
+  );
+  const generationReady = isReflective ? conversationReady : conversationReady || visualBriefReady;
+  const reflectiveCanGenerate = generationReady && Object.keys(allComments).length > 0;
+  const canGenerateEarly = Boolean(
+    conversationState?.condition === "multi_agent" &&
+    conversationState.turnPolicy.userMayGenerateEarly &&
+    conversationState.completedUserRounds >= 2 &&
+    conversationState.completedUserRounds < conversationState.turnPolicy.maxUserRounds &&
+    hasUserContribution &&
+    hasVisualAnchor
+  );
+  const waitingForNextAgent = Boolean(
+    ["streaming-musician", "streaming-guide"].includes(conversationState?.status || "") &&
+    conversationState?.queuedSpeakerIds.length
   );
   const timelineMessages = latestMessage?.role === "facilitator" &&
     latestMessage.content === facilitatorPlan?.userInvitation
@@ -1044,6 +1438,9 @@ export default function ListenPage() {
           >
             ←
           </button>
+          <div className="pointer-events-none absolute left-14 top-3 z-[99] border border-[#9f6f45]/45 bg-[#211c26]/82 px-3 py-2 text-[11px] font-semibold text-[#f5d3a8]">
+            {isReflective ? copy.pathA : copy.pathB}
+          </div>
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
             {audioSrc && (
               <audio
@@ -1079,7 +1476,7 @@ export default function ListenPage() {
             <div className="pointer-events-none absolute bottom-[-126px] left-1/2 h-[430px] w-[1120px] -translate-x-1/2 rounded-[50%] border border-[#d09a62]/30 bg-[#6f5949]/18 shadow-[0_30px_120px_rgba(0,0,0,0.52),inset_0_18px_52px_rgba(255,186,98,0.07)]" />
             <div className="pointer-events-none absolute bottom-[-68px] left-1/2 h-[310px] w-[850px] -translate-x-1/2 rounded-[50%] border border-[#bd8756]/24" />
 
-            {!showPlayerControls && (
+            {!showPlayerControls && !(isReflective && revealed.size > 0) && (
               <VisualBriefTrace
                 brief={visualBrief}
                 state={conversationState}
@@ -1129,7 +1526,50 @@ export default function ListenPage() {
             )}
 
             <div className="absolute inset-x-0 bottom-0 top-[74px]">
-              {selectedChars.map((character, index) => (
+              {isReflective && revealed.size > 0 && (
+                <div
+                  className={`pointer-events-none absolute inset-x-4 top-0 z-[86] grid gap-2.5 ${
+                    selectedChars.length === 1
+                      ? "grid-cols-1"
+                      : selectedChars.length === 2
+                        ? "grid-cols-2"
+                        : selectedChars.length === 3
+                          ? "grid-cols-3"
+                          : "grid-cols-4"
+                  }`}
+                >
+                  {selectedChars.map((character) => revealed.has(character.id) ? (
+                    <ReflectiveCommentCard
+                      key={character.id}
+                      character={character}
+                      loading={loading.has(character.id)}
+                      streaming={streaming.has(character.id)}
+                      comment={visibleComments[character.id] || ""}
+                      resonant={resonantComments.has(character.id)}
+                      onClose={() => handleReflectiveClose(character.id)}
+                      onToggleResonance={() => toggleResonance(character.id)}
+                      language={language}
+                    />
+                  ) : (
+                    <div key={character.id} aria-hidden="true" />
+                  ))}
+                </div>
+              )}
+
+              {selectedChars.map((character, index) => isReflective ? (
+                <ReflectiveGuideFigure
+                  key={character.id}
+                  character={character}
+                  active={character.id === activeCharacterId}
+                  open={revealed.has(character.id)}
+                  loading={loading.has(character.id)}
+                  streaming={streaming.has(character.id)}
+                  comment={visibleComments[character.id] || ""}
+                  stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
+                  onOpen={() => void handleReflectiveReveal(character.id)}
+                  language={language}
+                />
+              ) : (
                 <GuideFigure
                   key={character.id}
                   character={character}
@@ -1150,11 +1590,11 @@ export default function ListenPage() {
                 />
               ))}
 
-              <div className="absolute bottom-[78px] left-1/2 z-30 h-[clamp(238px,19vw,300px)] w-[clamp(238px,19vw,300px)] -translate-x-1/2">
+              <div className={`absolute left-1/2 z-30 h-[clamp(238px,19vw,300px)] w-[clamp(238px,19vw,300px)] -translate-x-1/2 ${isReflective ? "bottom-[176px]" : "bottom-[78px]"}`}>
                 <button
                   type="button"
                   onClick={togglePlay}
-                  className="group/crystal absolute inset-0 flex cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#ffd083]"
+                  className="group/crystal absolute left-1/2 top-[26px] flex h-[190px] w-[210px] -translate-x-1/2 cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#ffd083]"
                   aria-label={isPlaying ? copy.pause : copy.play}
                 >
                   <div className={`absolute inset-3 rounded-full bg-[#ffc267]/18 blur-2xl transition duration-500 ${isPlaying ? "scale-125 opacity-100" : "scale-95 opacity-45 group-hover/crystal:scale-110 group-hover/crystal:opacity-85"}`} />
@@ -1192,19 +1632,78 @@ export default function ListenPage() {
                 </button>
               </div>
               {!isPlaying && !hasUserContribution && (
-                <p className="pointer-events-none absolute bottom-[42px] left-1/2 z-20 w-[min(260px,64%)] -translate-x-1/2 text-center text-xs font-medium tracking-[0.06em] text-[#f0cf9f]/86">
+                <p className={`pointer-events-none absolute left-1/2 z-20 w-[min(280px,64%)] -translate-x-1/2 text-center text-xs font-medium tracking-[0.06em] text-[#f0cf9f]/86 ${isReflective ? "bottom-[156px]" : "bottom-[42px]"}`}>
                   {copy.startMusic}
                 </p>
               )}
             </div>
 
+            {isReflective && (
+              <div className="absolute bottom-3 left-1/2 z-[92] w-[min(720px,78vw)] -translate-x-1/2 border border-[#b9895d]/52 bg-[#211c26]/94 px-5 py-3 shadow-[0_18px_58px_rgba(0,0,0,0.38)] backdrop-blur">
+                <div className="flex items-center justify-between gap-5">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-3">
+                      <p className="font-serif text-base font-semibold text-[#ffe3bd]">{copy.journalTitle}</p>
+                      <span className="text-[10px] tracking-[0.08em] text-[#b89574]">
+                        {copy.journalProgress} {conversationState?.completedUserRounds || 0} / 4
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs font-medium text-[#e5c39e]">
+                      {generationReady ? facilitatorPlan?.stageSubtitle : facilitatorPlan?.userInvitation || copy.reflectiveTip}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5" aria-label={`${copy.journalProgress} ${conversationState?.completedUserRounds || 0} / 4`}>
+                    {[0, 1, 2, 3].map((index) => (
+                      <span key={index} className={`h-1.5 w-8 ${index < (conversationState?.completedUserRounds || 0) ? "bg-[#efb96f]" : "bg-[#725a49]/58"}`} />
+                    ))}
+                  </div>
+                </div>
+                {!generationReady ? (
+                  <>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                      {facilitatorPlan?.sentenceStarters?.slice(0, 3).map((starter) => (
+                        <button key={starter} type="button" onClick={() => setUserNote(starter)} disabled={loading.size > 0 || submittingUserNote} className="border-b border-[#9f7655]/45 py-0.5 text-[11px] text-[#cdb092] transition hover:border-[#ffd18a] hover:text-[#ffe3bd] disabled:opacity-40">
+                          {starter}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 border border-[#8c6a50]/48 bg-[#17141b]/76 px-3 py-2">
+                      <textarea
+                        value={userNote}
+                        onChange={(event) => {
+                          setUserNote(event.target.value);
+                          setUserNoteError("");
+                        }}
+                        disabled={loading.size > 0 || submittingUserNote}
+                        placeholder={copy.feelingPlaceholder}
+                        rows={1}
+                        className="h-7 min-w-0 flex-1 resize-none bg-transparent text-sm leading-7 text-[#ffe3bd] outline-none placeholder:text-[#927c69] disabled:opacity-45"
+                      />
+                      <button type="button" onClick={handleSubmitUserNote} disabled={!userNote.trim() || submittingUserNote || loading.size > 0} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35" aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}>
+                        ↑
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button type="button" onClick={handleContinue} disabled={!reflectiveCanGenerate || generating} className="mt-3 flex h-11 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:opacity-40">
+                    {copy.generate}
+                  </button>
+                )}
+                {Object.keys(allComments).length === 0 && <p className="mt-1.5 text-[10px] text-[#b99b80]">{copy.hearAtLeastOne}</p>}
+                {userNoteError && <p className="mt-1.5 text-xs text-[#efb6a5]">{userNoteError}</p>}
+                {generationError && <p className="mt-1.5 text-xs text-[#efb6a5]">{generationError}</p>}
+              </div>
+            )}
+
             {audioError && (
-              <p className="absolute bottom-5 left-1/2 z-[75] w-[min(520px,82%)] -translate-x-1/2 text-center text-xs text-[#efb6a5]">
+              <p className={`absolute left-1/2 z-[95] w-[min(520px,82%)] -translate-x-1/2 text-center text-xs text-[#efb6a5] ${isReflective ? "bottom-[154px]" : "bottom-5"}`}>
                 {audioError}
               </p>
             )}
           </div>
 
+          {!isReflective && (
+            <>
           <aside className={`absolute inset-y-0 right-0 z-[90] min-h-0 shrink-0 overflow-hidden bg-[#1d1923]/94 shadow-[-24px_0_60px_rgba(0,0,0,0.28)] backdrop-blur transition-[width,opacity,border-color] duration-500 lg:relative lg:inset-auto lg:bg-[#1d1923]/88 lg:shadow-none ${
             chatOpen
               ? "w-[min(430px,92vw)] border-l border-[#9f6f45]/42 opacity-100 lg:w-[min(430px,34vw)]"
@@ -1213,7 +1712,9 @@ export default function ListenPage() {
             <div className="flex h-full min-w-[360px] flex-col">
             <header className="relative shrink-0 border-b border-[#9f6f45]/30 px-5 pb-3 pt-4">
               <p className="font-serif text-xl font-semibold text-[#ffe3bd]">{copy.roomTitle}</p>
-              <p className="mt-1 text-xs leading-relaxed text-[#c9aa8c]">{copy.roomSubtitle}</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#c9aa8c]">
+                {copy.roomSubtitle}
+              </p>
               <button
                 type="button"
                 onClick={() => setChatOpen(false)}
@@ -1241,6 +1742,19 @@ export default function ListenPage() {
                   language={language}
                 />
               ))}
+              {pendingUserMessage && (
+                <div className="opacity-90">
+                  <ConversationEntry
+                    key={pendingUserMessage.id}
+                    role="user"
+                    speakerId="user"
+                    content={pendingUserMessage.content}
+                    selectedChars={selectedChars}
+                    language={language}
+                  />
+                  <p className="mb-3 text-right text-[10px] text-[#c6a17d]">{copy.visualRecorded}…</p>
+                </div>
+              )}
               {[...streaming].map((speakerId) => (
                 <ConversationEntry
                   key={`streaming-${speakerId}`}
@@ -1255,8 +1769,8 @@ export default function ListenPage() {
             </div>
 
             <div className="shrink-0 border-t border-[#9f6f45]/32 bg-[#211c26]/96 px-4 py-3">
-              {conversationState?.status === "streaming-musician" &&
-                conversationState.queuedSpeakerIds.length > 0 &&
+              {["streaming-musician", "streaming-guide"].includes(conversationState?.status || "") &&
+                (conversationState?.queuedSpeakerIds.length || 0) > 0 &&
                 streaming.size === 0 &&
                 loading.size === 0 && (
                   <button
@@ -1325,17 +1839,17 @@ export default function ListenPage() {
               )}
               <button
                 type="button"
-                onClick={visualBriefReady ? handleContinue : () => setChatOpen(false)}
+                onClick={generationReady ? handleContinue : () => setChatOpen(false)}
                 disabled={
-                  visualBriefReady
+                  generationReady
                     ? generating
-                    : !waitingForNextMusician
+                    : !waitingForNextAgent
                 }
                 className="mt-2 flex h-12 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 px-5 text-sm font-semibold text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.26)] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61]"
               >
-                {visualBriefReady ? copy.generate : copy.continueListening}
+                {generationReady ? copy.generate : copy.continueListening}
               </button>
-              {!visualBriefReady && canGenerateEarly && (
+              {!generationReady && canGenerateEarly && (
                 <button
                   type="button"
                   onClick={handleContinue}
@@ -1359,6 +1873,8 @@ export default function ListenPage() {
             >
               ←
             </button>
+          )}
+            </>
           )}
 
           {generating && (

@@ -25,6 +25,7 @@ export interface AudioReference {
   name: string;
   sourceKind: AudioSourceKind;
   durationSeconds: number;
+  byteSize?: number;
   mimeType?: string;
   contentHash?: string;
   catalogItemId?: string;

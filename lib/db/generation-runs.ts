@@ -1,8 +1,12 @@
-import { getDatabase, toJson } from "./index";
+import { getDatabase, toJson } from "./index.ts";
+import type { GenerationRole, InteractiveCondition } from "../contracts/study-trial.ts";
 
 export interface GenerationRunRecord {
   id: string;
   sessionId: string;
+  trialId?: string;
+  generationRole?: GenerationRole;
+  condition?: InteractiveCondition;
   createdAt: string;
   selectedCharacters: string[];
   presets: unknown;
@@ -22,16 +26,21 @@ export interface GenerationRunRecord {
   imageSize: string;
   imageRequestId: string;
   timings: unknown;
+  modelConfig?: unknown;
+  runLog?: unknown;
   logPath: string;
 }
 
 export async function insertGenerationRun(record: GenerationRunRecord) {
   const database = await getDatabase();
-  database
+  await database
     .prepare(`
       INSERT INTO generation_runs (
         id,
         session_id,
+        trial_id,
+        generation_role,
+        condition,
         created_at,
         selected_characters_json,
         presets_json,
@@ -51,12 +60,17 @@ export async function insertGenerationRun(record: GenerationRunRecord) {
         image_size,
         image_request_id,
         timings_json,
+        model_config_json,
+        run_log_json,
         log_path
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       record.id,
       record.sessionId,
+      record.trialId || "",
+      record.generationRole || "co_created",
+      record.condition || "multi_agent",
       record.createdAt,
       toJson(record.selectedCharacters),
       toJson(record.presets),
@@ -76,6 +90,37 @@ export async function insertGenerationRun(record: GenerationRunRecord) {
       record.imageSize,
       record.imageRequestId,
       toJson(record.timings),
+      toJson(record.modelConfig || {}),
+      toJson(record.runLog || {}),
       record.logPath
     );
+}
+
+export async function getGenerationRunResult(id: string) {
+  const database = await getDatabase();
+  const row = (await database.prepare(`
+    SELECT id, trial_id, generation_role, condition, image_url, remote_image_url,
+           final_image_prompt, negative_prompt, image_model, image_size, timings_json
+    FROM generation_runs WHERE id = ?
+  `).all(id))[0];
+  if (!row) return null;
+  return {
+    runId: String(row.id),
+    trialId: String(row.trial_id || ""),
+    generationRole: String(row.generation_role || "legacy"),
+    condition: String(row.condition || "legacy"),
+    imageUrl: String(row.image_url || ""),
+    remoteImageUrl: String(row.remote_image_url || ""),
+    prompt: String(row.final_image_prompt || ""),
+    negativePrompt: String(row.negative_prompt || ""),
+    imageModel: String(row.image_model || ""),
+    imageSize: String(row.image_size || ""),
+    timings: (() => {
+      try {
+        return JSON.parse(String(row.timings_json || "{}"));
+      } catch {
+        return {};
+      }
+    })(),
+  };
 }

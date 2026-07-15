@@ -6,12 +6,14 @@ import type {
   VisualBriefFieldKey,
   VisualBriefFieldStatus,
 } from "../contracts/index.ts";
+import type { GenerationRole } from "../contracts/study-trial.ts";
 import {
   buildVisualPresetPrompt,
   type VisualPresetPrompt,
 } from "./visual-presets.ts";
 
 export interface PromptDirectorInput {
+  generationRole: GenerationRole;
   comments: Array<{
     characterId: string;
     speaker: string;
@@ -43,22 +45,24 @@ export interface PromptDirectorInput {
     semanticCandidates?: unknown;
     analysisWarnings?: unknown;
   };
+  musicProfile: PromptDirectorMusicProfile | null;
   visualPreset: VisualPresetPrompt;
   coCreation?: PromptDirectorCoCreationContext;
 }
 
+export interface PromptDirectorMusicProfile {
+  id: string;
+  audio: MusicProfile["audio"];
+  rhythm: Pick<MusicProfile["rhythm"], "bpm" | "beatStrength" | "onsetDensity">;
+  tonality: Pick<MusicProfile["tonality"], "key" | "mode" | "harmonicStability">;
+  dynamics: Pick<MusicProfile["dynamics"], "averageEnergy" | "dynamicComplexity">;
+  timbre: MusicProfile["timbre"];
+  sections: Array<Pick<MusicProfile["sections"][number], "id" | "phase" | "energy" | "brightness" | "onsetDensity" | "dynamicTrend" | "motions" | "textures">>;
+  semantics: MusicProfile["semantics"];
+  warnings: MusicProfile["warnings"];
+}
+
 export interface PromptDirectorCoCreationContext {
-  musicProfile: {
-    id: string;
-    audio: MusicProfile["audio"];
-    rhythm: Pick<MusicProfile["rhythm"], "bpm" | "beatStrength" | "onsetDensity">;
-    tonality: Pick<MusicProfile["tonality"], "key" | "mode" | "harmonicStability">;
-    dynamics: Pick<MusicProfile["dynamics"], "averageEnergy" | "dynamicComplexity">;
-    timbre: MusicProfile["timbre"];
-    sections: Array<Pick<MusicProfile["sections"][number], "id" | "phase" | "energy" | "brightness" | "onsetDensity" | "dynamicTrend" | "motions" | "textures">>;
-    semantics: MusicProfile["semantics"];
-    warnings: MusicProfile["warnings"];
-  } | null;
   visualBrief: {
     id: string;
     version: number;
@@ -78,6 +82,16 @@ export interface PromptDirectorCoCreationContext {
     speakerId?: string;
     excerpt: string;
   }>;
+}
+
+export function getPromptDirectorUserSourceIds(
+  coCreation: PromptDirectorCoCreationContext
+): string[] {
+  return [...new Set(
+    coCreation.sources
+      .filter((source) => source.kind === "user-message")
+      .map((source) => source.sourceId)
+  )];
 }
 
 export interface PromptDirectorBrief {
@@ -195,7 +209,8 @@ export function buildPromptDirectorInput(
     musicProfile?: MusicProfile | null;
     visualBrief?: VisualBrief | null;
     conversationState?: ConversationState | null;
-  }
+  },
+  generationRole: GenerationRole = "co_created"
 ): PromptDirectorInput {
   const commentSummary = comments.map((comment) => {
     const character = characters.find((ch) => ch.id === comment.characterId);
@@ -234,11 +249,58 @@ export function buildPromptDirectorInput(
     : {};
 
   return {
+    generationRole,
     comments: commentSummary,
     userNote: userNote || "",
     musicAnalysis: musicContext,
+    musicProfile: buildPromptDirectorMusicProfile(coCreation?.musicProfile),
     visualPreset: buildVisualPresetPrompt(presets),
     coCreation: buildPromptDirectorCoCreationContext(coCreation),
+  };
+}
+
+function buildPromptDirectorMusicProfile(
+  musicProfile?: MusicProfile | null
+): PromptDirectorMusicProfile | null {
+  if (!musicProfile) return null;
+
+  return {
+    id: musicProfile.id,
+    audio: musicProfile.audio,
+    rhythm: {
+      bpm: musicProfile.rhythm.bpm,
+      beatStrength: musicProfile.rhythm.beatStrength,
+      onsetDensity: musicProfile.rhythm.onsetDensity,
+    },
+    tonality: {
+      key: musicProfile.tonality.key,
+      mode: musicProfile.tonality.mode,
+      harmonicStability: musicProfile.tonality.harmonicStability,
+    },
+    dynamics: {
+      averageEnergy: musicProfile.dynamics.averageEnergy,
+      dynamicComplexity: musicProfile.dynamics.dynamicComplexity,
+    },
+    timbre: musicProfile.timbre,
+    sections: musicProfile.sections.slice(0, 8).map((section) => ({
+      id: section.id,
+      phase: section.phase,
+      energy: section.energy,
+      brightness: section.brightness,
+      onsetDensity: section.onsetDensity,
+      dynamicTrend: section.dynamicTrend,
+      motions: section.motions.slice(0, 3),
+      textures: section.textures.slice(0, 3),
+    })),
+    semantics: {
+      moods: musicProfile.semantics.moods.slice(0, 5),
+      genres: musicProfile.semantics.genres.slice(0, 5),
+      instruments: musicProfile.semantics.instruments.slice(0, 5),
+      textures: musicProfile.semantics.textures.slice(0, 5),
+      motions: musicProfile.semantics.motions.slice(0, 5),
+      spaces: musicProfile.semantics.spaces.slice(0, 5),
+    },
+    warnings: musicProfile.warnings,
   };
 }
 
@@ -291,49 +353,7 @@ function buildPromptDirectorCoCreationContext(
     });
   }
 
-  const musicProfile = input?.musicProfile
-    ? {
-        id: input.musicProfile.id,
-        audio: input.musicProfile.audio,
-        rhythm: {
-          bpm: input.musicProfile.rhythm.bpm,
-          beatStrength: input.musicProfile.rhythm.beatStrength,
-          onsetDensity: input.musicProfile.rhythm.onsetDensity,
-        },
-        tonality: {
-          key: input.musicProfile.tonality.key,
-          mode: input.musicProfile.tonality.mode,
-          harmonicStability: input.musicProfile.tonality.harmonicStability,
-        },
-        dynamics: {
-          averageEnergy: input.musicProfile.dynamics.averageEnergy,
-          dynamicComplexity: input.musicProfile.dynamics.dynamicComplexity,
-        },
-        timbre: input.musicProfile.timbre,
-        sections: input.musicProfile.sections.slice(0, 8).map((section) => ({
-          id: section.id,
-          phase: section.phase,
-          energy: section.energy,
-          brightness: section.brightness,
-          onsetDensity: section.onsetDensity,
-          dynamicTrend: section.dynamicTrend,
-          motions: section.motions.slice(0, 3),
-          textures: section.textures.slice(0, 3),
-        })),
-        semantics: {
-          moods: input.musicProfile.semantics.moods.slice(0, 5),
-          genres: input.musicProfile.semantics.genres.slice(0, 5),
-          instruments: input.musicProfile.semantics.instruments.slice(0, 5),
-          textures: input.musicProfile.semantics.textures.slice(0, 5),
-          motions: input.musicProfile.semantics.motions.slice(0, 5),
-          spaces: input.musicProfile.semantics.spaces.slice(0, 5),
-        },
-        warnings: input.musicProfile.warnings,
-      }
-    : null;
-
   return {
-    musicProfile,
     visualBrief: {
       id: visualBrief.id,
       version: visualBrief.version,
@@ -355,7 +375,7 @@ export function buildPromptDirectorInstruction(input: PromptDirectorInput): stri
     ? `
 Version 2 co-creation rules:
 - coCreation.visualBrief is the authoritative visual plan. Do not replace it with a new concept.
-- Every coCreation.sources item with kind=user-message is independent primary evidence. Preserve each exact source id once in userSourceMappings even if the Visual Scribe did not promote it into a VisualBrief field.
+- Every distinct sourceId among coCreation.sources items with kind=user-message is independent primary evidence. Preserve each exact sourceId once in userSourceMappings even if the Visual Scribe did not promote it into a VisualBrief field.
 - Preserve every present VisualBrief field in visualBriefMappings exactly once, including its field, status, and sourceIds.
 - sourceIds in visualBriefMappings must be copied exactly from that field. Never invent or remove a source.
 - A confirmed field, especially one backed by a user-message source, uses primary priority and must control the focal subject, personal meaning, composition, palette, or lighting as applicable.
@@ -363,7 +383,17 @@ Version 2 co-creation rules:
 - A suggested field may enrich secondary detail. A conflicted field must remain visibly unresolved rather than being silently collapsed.
 - mustInclude and mustAvoid are hard constraints. personalMeaning is the emotional center.
 - MusicProfile supplies motion, density, dynamics, timbre, and structural evidence. It cannot override confirmed user fields.
+- Keep every input comment exactly once in weightingRationale and copy its numeric weight exactly. Never promote an unselected resonance weight.
 - The legacy comments and userNote below are supporting context for source interpretation; do not use them to contradict the VisualBrief.
+`
+    : "";
+  const baselineRules = input.generationRole === "direct_baseline"
+    ? `
+Direct baseline rules:
+- This is a music-only reference condition. Use musicProfile and musicAnalysis as the only semantic sources.
+- comments, userNote, coCreation, resonance, and visual presets chosen through dialogue are unavailable by design. Do not infer or fabricate them.
+- Return empty arrays for sourceMappings, userSourceMappings, visualBriefMappings, and weightingRationale.
+- Build a concrete visual subject from rhythm, dynamics, timbre, structure, motion, and texture evidence in musicProfile and musicAnalysis.
 `
     : "";
 
@@ -371,11 +401,12 @@ Version 2 co-creation rules:
 
 Your job is to act as a visual creative director and reliability agent. First build a concise visual plan that faithfully translates the source material, then write the image-generation prompt. The selected visual preset provides production constraints, not a reusable scene template.
 ${coCreationRules}
+${baselineRules}
 
 Hard rules:
-1. User note has the highest priority for personal meaning.
-2. Every musician comment must influence the visual plan. Do not drop any speaker, and preserve each characterId exactly in sourceMappings.
-3. Treat comment.weight as the user's co-creation signal. Comments with userResonance=true or higher weight must have stronger influence on coreEmotion, visualSubject, composition, or the main focal tension. Lower-weight comments should still shape secondary materials, lighting, edges, atmosphere, or supporting symbols.
+1. In co-created runs, user note has the highest priority for personal meaning. In direct baseline runs, use only musicProfile and musicAnalysis.
+2. In co-created runs, every musician or guide comment must influence the visual plan. Do not drop any speaker, and preserve each characterId exactly in sourceMappings. In direct baseline runs sourceMappings must be empty.
+3. In co-created runs, treat comment.weight as the user's co-creation signal. This rule does not apply to direct baseline runs.
 4. Convert phrases into drawable visual terms: subject, setting, objects, motion, texture, palette, lighting, atmosphere, composition. Do not simply quote or summarize the comments.
 5. Audio analysis may guide motion, density, contrast, brightness, material texture, rhythm contour, and visual tension. If musicAnalysis.degraded=true, treat it only as an approximate low-level signal and rely primarily on musician comments and the user note. If it is rich, semanticCandidates are still low-weight hypotheses and may be ignored when they conflict with signal evidence. Never treat a tonalityCandidate as a verified musical fact.
 6. Treat visualPreset.stylePrompt, moodPrompt, and tonePrompt as hard production constraints. Integrate them into finalPrompt naturally. "自动" means you must make a deliberate choice from this specific source material, not reuse a default.
@@ -389,9 +420,10 @@ Hard rules:
 14. Do not default to mountains, rivers, mist, bamboo, moonlight, bridges, or generic tranquil landscapes unless those motifs are directly justified by the inputs.
 15. The medium describes how the image is made; it must not dictate what the image depicts. An ink painting does not automatically require a landscape.
 16. Commit to one clear focal subject and one distinctive compositional idea. Avoid generic collections of poetic motifs.
-17. finalPrompt must be a true composite of music traits, musician comments, user note, and user resonance weights. If userNote is empty, userNoteTrace must say "none".
+17. finalPrompt must faithfully compose every source available for the current generationRole. If userNote is empty, userNoteTrace must say "none".
 18. If detailed audio evidence exists, at least one concrete visual decision must come from the strongest phase or a salient change.
 19. Return valid JSON only.
+20. Keep exclusions out of finalPrompt. Put forbidden subjects and visible text constraints in negativePrompt only; finalPrompt itself must not contain the words used to name those exclusions.
 
 Input:
 ${JSON.stringify(input, null, 2)}
@@ -410,7 +442,7 @@ Return this exact JSON shape:
   ],
   "userSourceMappings": [
     {
-      "sourceId": "exact id of a coCreation source whose kind is user-message",
+      "sourceId": "exact sourceId of a coCreation source whose kind is user-message",
       "priority": "primary",
       "visualTranslation": "specific drawable contribution from this user message"
     }
@@ -427,7 +459,7 @@ Return this exact JSON shape:
   "weightingRationale": [
     {
       "characterId": "exact characterId from input",
-      "weight": 1.8,
+      "weight": 1,
       "reason": "why this input has this influence, including whether userResonance is true",
       "visualImpact": "how the weight changes subject, composition, lighting, material, or atmosphere"
     }
@@ -477,11 +509,11 @@ Repair the output. Return the same JSON shape only.
 Do not explain.
 Keep every input characterId exactly once in sourceMappings.
 When Version 2 coCreation input exists, keep every present VisualBrief field exactly once in visualBriefMappings with the exact status and sourceIds.
-Keep every coCreation user-message source exactly once in userSourceMappings with primary priority.
+Keep every distinct sourceId from coCreation user-message sources exactly once in userSourceMappings with primary priority.
 Use constraint priority for mustInclude and mustAvoid, primary for other confirmed fields, and supporting for suggested or conflicted fields.
 Make userNoteTrace concrete when userNote is present.
 Do not remove any musician's influence.
-Preserve the weighting hierarchy from comment.weight and userResonance.
+Keep every input comment exactly once in weightingRationale and copy comment.weight exactly.
 Do not include forbidden meta words in finalPrompt.
 Do not include any people or visible text in finalPrompt.`;
 }

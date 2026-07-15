@@ -3,11 +3,12 @@ import type {
   ConversationState,
 } from "../contracts/conversation-state.ts";
 import { VERSION_2_SCHEMA_VERSION } from "../contracts/shared.ts";
+import { isInteractiveCondition } from "../contracts/study-trial.ts";
 
 const PHASES = new Set(["preparing", "opening", "exploration", "convergence", "ready", "complete"]);
-const STATUSES = new Set(["idle", "streaming-musician", "awaiting-user", "updating-brief", "ready-to-generate", "generating", "completed", "failed"]);
-const TURN_OWNERS = new Set(["system", "musicians", "user"]);
-const ROLES = new Set(["musician", "user", "facilitator"]);
+const STATUSES = new Set(["idle", "streaming-musician", "streaming-guide", "awaiting-user", "updating-brief", "ready-to-generate", "generating", "completed", "failed"]);
+const TURN_OWNERS = new Set(["system", "musicians", "guide", "user"]);
+const ROLES = new Set(["musician", "guide", "user", "facilitator"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -17,7 +18,7 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function isMessage(value: unknown, selectedIds: Set<string>): value is ConversationMessage {
+function isMessage(value: unknown, selectedIds: Set<string>, guideId?: string): value is ConversationMessage {
   if (!isRecord(value)) return false;
   if (
     typeof value.id !== "string" ||
@@ -31,7 +32,9 @@ function isMessage(value: unknown, selectedIds: Set<string>): value is Conversat
   ) {
     return false;
   }
-  return value.role !== "musician" || selectedIds.has(value.speakerId);
+  if (value.role === "musician") return selectedIds.has(value.speakerId);
+  if (value.role === "guide") return Boolean(guideId) && value.speakerId === guideId;
+  return true;
 }
 
 export function parseConversationState(value: unknown): ConversationState {
@@ -44,6 +47,11 @@ export function parseConversationState(value: unknown): ConversationState {
   }
   const selectedMusicianIds = value.selectedMusicianIds;
   const selectedSet = new Set(selectedMusicianIds);
+  if (!isInteractiveCondition(value.condition)) {
+    throw new Error("conversationState condition is invalid");
+  }
+  const condition = value.condition;
+  const guideId = typeof value.guideId === "string" ? value.guideId : undefined;
   if (!isRecord(value.turnPolicy)) {
     throw new Error("conversationState turnPolicy is invalid");
   }
@@ -57,21 +65,26 @@ export function parseConversationState(value: unknown): ConversationState {
     Number(policy.maxMusiciansPerResponse) > 2 ||
     !Number.isInteger(policy.maxUserRounds) ||
     Number(policy.maxUserRounds) < 1 ||
-    Number(policy.maxUserRounds) > 3 ||
+    Number(policy.maxUserRounds) > 4 ||
     typeof policy.userMayInterrupt !== "boolean" ||
     typeof policy.userMayGenerateEarly !== "boolean"
   ) {
     throw new Error("conversationState turnPolicy exceeds supported limits");
   }
+  if (condition === "single_agent" && policy.userMayGenerateEarly) {
+    throw new Error("Single-agent conversations cannot generate early");
+  }
   if (
     selectedSet.size !== selectedMusicianIds.length ||
     selectedMusicianIds.length < 1 ||
-    selectedMusicianIds.length > 4
+    selectedMusicianIds.length > 4 ||
+    (condition === "single_agent" && !guideId)
   ) {
     throw new Error("conversationState requires 1-4 unique musicians");
   }
   if (
     typeof value.id !== "string" ||
+    typeof value.trialId !== "string" ||
     typeof value.sessionId !== "string" ||
     typeof value.musicProfileId !== "string" ||
     typeof value.phase !== "string" ||
@@ -82,13 +95,13 @@ export function parseConversationState(value: unknown): ConversationState {
     !TURN_OWNERS.has(value.turnOwner) ||
     !isStringArray(value.activeSpeakerIds) ||
     !isStringArray(value.queuedSpeakerIds) ||
-    value.activeSpeakerIds.some((id) => !selectedSet.has(id)) ||
-    value.queuedSpeakerIds.some((id) => !selectedSet.has(id)) ||
+    value.activeSpeakerIds.some((id) => !selectedSet.has(id) && id !== guideId) ||
+    value.queuedSpeakerIds.some((id) => !selectedSet.has(id) && id !== guideId) ||
     new Set(value.queuedSpeakerIds).size !== value.queuedSpeakerIds.length ||
     value.queuedSpeakerIds.length > Number(policy.maxMusiciansPerResponse) ||
     !Array.isArray(value.messages) ||
     value.messages.length > 100 ||
-    !value.messages.every((message) => isMessage(message, selectedSet)) ||
+    !value.messages.every((message) => isMessage(message, selectedSet, guideId)) ||
     !isRecord(value.musicianMemory) ||
     !isRecord(value.facilitator) ||
     !Number.isInteger(value.completedUserRounds) ||
@@ -105,7 +118,8 @@ export function parseConversationState(value: unknown): ConversationState {
   }
   if (
     (value.status === "streaming-musician") !== (value.turnOwner === "musicians") ||
-    (value.status === "streaming-musician" && value.queuedSpeakerIds.length === 0)
+    (value.status === "streaming-guide") !== (value.turnOwner === "guide") ||
+    (["streaming-musician", "streaming-guide"].includes(value.status as string) && value.queuedSpeakerIds.length === 0)
   ) {
     throw new Error("conversationState turn ownership is inconsistent");
   }

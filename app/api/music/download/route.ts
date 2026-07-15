@@ -18,7 +18,10 @@ function getJamendoClientId() {
 }
 
 function safeFilename(value: string) {
-  return value.replace(/[^\p{L}\p{N}\s._-]/gu, "").trim() || "jamendo-track";
+  return value
+    .normalize("NFKD")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "jamendo-track";
 }
 
 async function getTrack(id: string) {
@@ -31,7 +34,8 @@ async function getTrack(id: string) {
   });
   const res = await fetch(`${JAMENDO_TRACKS_URL}?${params.toString()}`, {
     headers: { Accept: "application/json" },
-    next: { revalidate: 86400 },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) return null;
   const data = (await res.json()) as JamendoResponse;
@@ -49,7 +53,15 @@ export async function GET(request: Request) {
     return Response.json({ error: "id is required" }, { status: 400 });
   }
 
-  const track = await getTrack(id);
+  let track: JamendoTrack | null;
+  try {
+    track = await getTrack(id);
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? `Track lookup failed: ${error.message}` : "Track lookup failed" },
+      { status: 502 }
+    );
+  }
   if (!track) {
     return Response.json({ error: "Track not found" }, { status: 404 });
   }
@@ -57,16 +69,31 @@ export async function GET(request: Request) {
     return Response.json({ error: "Track download is not allowed" }, { status: 403 });
   }
 
-  const audioRes = await fetch(track.audiodownload, {
-    headers: { Accept: "audio/mpeg,audio/*" },
-  });
-  if (!audioRes.ok || !audioRes.body) {
+  let audioRes: Response;
+  try {
+    audioRes = await fetch(track.audiodownload, {
+      headers: { Accept: "audio/mpeg,audio/*" },
+      signal: AbortSignal.timeout(45_000),
+    });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? `Audio download failed: ${error.message}` : "Audio download failed" },
+      { status: 502 }
+    );
+  }
+  if (!audioRes.ok) {
     return Response.json({ error: `Audio download failed with ${audioRes.status}` }, { status: 502 });
   }
 
-  return new Response(audioRes.body, {
+  const audio = new Uint8Array(await audioRes.arrayBuffer());
+  if (audio.byteLength < 1024) {
+    return Response.json({ error: "Downloaded audio is empty or invalid" }, { status: 502 });
+  }
+
+  return new Response(audio, {
     headers: {
       "Content-Type": "audio/mpeg",
+      "Content-Length": String(audio.byteLength),
       "Content-Disposition": `attachment; filename="${safeFilename(track.name || id)}.mp3"`,
       "Cache-Control": "private, max-age=3600",
     },

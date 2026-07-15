@@ -7,11 +7,18 @@ import {
   isUsableConversationTurn,
   normalizeMusicianComment,
 } from "@/lib/agents/musicians";
+import {
+  buildSingleGuideConversationPrompt,
+  isUsableSingleGuideMessage,
+  normalizeSingleGuideMessage,
+  SINGLE_GUIDE_ID,
+} from "@/lib/agents/single-guide";
 import { streamLLM } from "@/lib/llm";
 import { formatMusicContext } from "@/lib/prompts/system";
 import {
   encodeConversationStreamEvent,
   parseConversationState,
+  recordGuideMessage,
   recordMusicianMessage,
 } from "@/lib/conversation";
 import { insertConversationSnapshot } from "@/lib/db/research-data";
@@ -51,16 +58,24 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as Record<string, unknown>;
     state = parseConversationState(body.conversationState);
-    if (state.turnOwner !== "musicians" || state.status !== "streaming-musician") {
-      return Response.json({ error: "No musician turn is currently scheduled" }, { status: 409 });
+    const isSingle = state.condition === "single_agent";
+    if (
+      (isSingle && (state.turnOwner !== "guide" || state.status !== "streaming-guide")) ||
+      (!isSingle && (state.turnOwner !== "musicians" || state.status !== "streaming-musician"))
+    ) {
+      return Response.json({ error: "No conversational turn is currently scheduled" }, { status: 409 });
     }
 
     const speakerId = state.queuedSpeakerIds[0];
-    const profile = getMusicianAgentProfile(speakerId);
-    if (!speakerId || !profile || !getCharacterById(speakerId)) {
-      return Response.json({ error: "Scheduled musician is invalid" }, { status: 400 });
+    const profile = isSingle ? null : getMusicianAgentProfile(speakerId);
+    if (
+      !speakerId ||
+      (isSingle && speakerId !== SINGLE_GUIDE_ID) ||
+      (!isSingle && (!profile || !getCharacterById(speakerId)))
+    ) {
+      return Response.json({ error: "Scheduled speaker is invalid" }, { status: 400 });
     }
-    if (state.selectedMusicianIds.some((id) => !getMusicianAgentProfile(id))) {
+    if (!isSingle && state.selectedMusicianIds.some((id) => !getMusicianAgentProfile(id))) {
       return Response.json({ error: "Conversation contains an unknown musician" }, { status: 400 });
     }
 
@@ -68,12 +83,15 @@ export async function POST(request: NextRequest) {
       state.selectedMusicianIds.map((id) => [id, getCharacterById(id)!.name])
     );
     const musicContext = formatMusicContext(body.musicAnalysis || {});
-    const systemPrompt = buildMusicianConversationPrompt({
-      profile,
-      musicContext,
-      conversationState: state,
-      musicianNames,
-    });
+    const displayName = isSingle ? "共创引导" : profile!.displayName;
+    const systemPrompt = isSingle
+      ? buildSingleGuideConversationPrompt({ state, musicContext })
+      : buildMusicianConversationPrompt({
+          profile: profile!,
+          musicContext,
+          conversationState: state,
+          musicianNames,
+        });
     const encoder = (event: Parameters<typeof encodeConversationStreamEvent>[0]) =>
       encodeConversationStreamEvent(event);
 
@@ -82,18 +100,18 @@ export async function POST(request: NextRequest) {
         controller.enqueue(encoder({
           type: "meta",
           speakerId,
-          speakerName: profile.displayName,
+          speakerName: displayName,
         }));
 
         let rawContent = "";
         let model = "unknown";
-        const visibleFilter = createInitialTextFilter(profile.displayName);
+        const visibleFilter = createInitialTextFilter(displayName);
 
         try {
           for await (const delta of streamLLM({
             systemPrompt,
             userMessage: "请继续当前共同对话，只输出你这一轮公开说出的正文。",
-            temperature: profile.temperature,
+            temperature: isSingle ? 0.65 : profile!.temperature,
             maxTokens: 1400,
             signal: request.signal,
           })) {
@@ -110,13 +128,20 @@ export async function POST(request: NextRequest) {
             controller.enqueue(encoder({ type: "delta", speakerId, delta: remaining }));
           }
 
-          const comment = normalizeMusicianComment(rawContent, profile.displayName);
-          if (!isUsableConversationTurn(comment)) {
-            throw new Error("Musician returned an empty or incomplete streamed turn");
+          const comment = isSingle
+            ? normalizeSingleGuideMessage(rawContent)
+            : normalizeMusicianComment(rawContent, profile!.displayName);
+          const usable = isSingle
+            ? isUsableSingleGuideMessage(comment)
+            : isUsableConversationTurn(comment);
+          if (!usable) {
+            throw new Error("Agent returned an empty or incomplete streamed turn");
           }
-          const nextState = recordMusicianMessage(state, { speakerId, content: comment });
-          await insertConversationSnapshot(nextState, "musician-turn-completed").catch((error) => {
-            console.error("Musician turn snapshot failed:", error);
+          const nextState = isSingle
+            ? recordGuideMessage(state, { speakerId, content: comment })
+            : recordMusicianMessage(state, { speakerId, content: comment });
+          await insertConversationSnapshot(nextState, isSingle ? "guide-turn-completed" : "musician-turn-completed").catch((error) => {
+            console.error("Conversation turn snapshot failed:", error);
           });
           controller.enqueue(encoder({
             type: "complete",

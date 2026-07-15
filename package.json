@@ -2,12 +2,14 @@
   "name": "melody-vision",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "dev:full": "node scripts/dev-full.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "audio:clips": "node scripts/create-audio-clips.mjs",
     "audio:evaluate:meyda": "node --experimental-strip-types scripts/evaluate-meyda.mjs",
     "test:audio-adapter": "node --experimental-strip-types --test tests/music-profile-adapter.test.ts",
@@ -21,6 +23,7 @@
     "meyda": "^5.6.3",
     "next": "16.2.6",
     "openai": "^6.42.0",
+    "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },

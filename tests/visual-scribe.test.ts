@@ -107,7 +107,7 @@ test("visual scribe repairs a confirmed field that lacks user evidence", async (
   assert.equal(result.fallback, false);
 });
 
-test("visual scribe falls back without inventing fields after repeated invalid sources", async () => {
+test("visual scribe falls back to traceable user evidence after repeated invalid sources", async () => {
   const { state, musicianMessage, userMessage } = scribeFixture();
   const invalid = validDraft(musicianMessage.id, userMessage.id);
   invalid.fields.lighting.sourceIds = ["invented-message"];
@@ -118,8 +118,35 @@ test("visual scribe falls back without inventing fields after repeated invalid s
 
   assert.equal(result.fallback, true);
   assert.equal(result.brief.version, 1);
-  assert.equal(result.brief.fields.subject.status, "missing");
+  assert.equal(result.brief.fields.subject.status, "confirmed");
+  assert.equal(result.brief.fields.subject.value, userMessage.content);
+  assert.equal(result.brief.fields.subject.sources[0].sourceId, userMessage.id);
   assert.match(result.validationErrors.join(" "), /unknown sourceIds/);
+});
+
+test("visual scribe fallback backfills earlier user rounds after a stale empty brief", async () => {
+  const fixture = scribeFixture();
+  const clock = runtime();
+  let state = scheduleMusicianTurn(fixture.state, {
+    speakerIds: ["boya"],
+    stageSubtitle: "继续听动势。",
+    userInvitation: "它怎样移动？",
+  }, clock);
+  state = recordMusicianMessage(state, {
+    speakerId: "boya",
+    content: "道路正在向远处收紧。",
+  }, clock);
+  state = recordUserMessage(state, "道路从左下向右上快速抬升。", clock);
+
+  const result = await runVisualScribeAgent(
+    { conversationState: state, musicContext: "动态逐渐增强。" },
+    async () => ({ content: "not-json", model: "test-model" })
+  );
+
+  assert.equal(result.fallback, true);
+  assert.equal(result.brief.fields.subject.status, "confirmed");
+  assert.equal(result.brief.fields.composition.status, "confirmed");
+  assert.equal(result.brief.fields.motion.status, "confirmed");
 });
 
 test("music analysis alone cannot create a visual subject", () => {

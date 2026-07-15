@@ -1,3 +1,12 @@
+---
+title: MelodyVision Audio Analysis
+colorFrom: gray
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # MelodyVision Audio Analysis Service
 
 This service implements the Version 2 `MusicProfile` analyzer introduced in `V2-02` and connected to the application in `V2-04`.
@@ -40,17 +49,20 @@ curl -X POST http://127.0.0.1:8001/analyze \
   -F "file=@../../public/preset-audio/clips/bach-cello-prelude-clip.mp3"
 ```
 
-From the repository root, `npm run dev:full` starts both this service and Next.js after the virtual environment is ready. The normal product flow requires this service; set `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` only for visual-only local development.
+From the repository root, `npm run dev:full` starts both this service and Next.js after the virtual environment is ready. For a predictable local startup it defaults to `CLAP_DISABLED=1` and `CLAP_PRELOAD=0`; set `CLAP_DISABLED=0 CLAP_PRELOAD=1` explicitly after the CLAP model is cached when semantic evaluation is needed. The normal product flow requires this service; set `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` only for visual-only local development.
 
 ## Application integration
 
-The Next.js `/api/analyze` route proxies uploads to this service. Configure the server-only environment variable:
+Local development can proxy through Next.js. The Vercel deployment sends uploads directly from the browser to this service to avoid the serverless request-size limit. Configure:
 
 ```text
 AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
+NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://your-space.hf.space
 ```
 
-The browser runs Meyda in parallel for realtime animation features. The product flow stops when this service is unavailable unless `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is set explicitly. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
+Set `AUDIO_ANALYSIS_ALLOWED_ORIGINS` in the Space settings to the comma-separated production and local origins. Search results use `POST /analyze-remote`; that endpoint only accepts Jamendo HTTPS hosts and never retains the downloaded audio.
+
+The browser does not run Meyda alongside a successful rich analysis request. Meyda is started only when this service fails and `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is explicitly enabled, which avoids blocking the page on long uploads. The product flow otherwise stops with a visible error when this service is unavailable. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
 
 ## Run from the command line
 

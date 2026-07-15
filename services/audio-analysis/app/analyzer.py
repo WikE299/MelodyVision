@@ -182,6 +182,7 @@ class MusicAnalyzer:
             "name": original_name or audio_path.name,
             "sourceKind": source_kind,
             "durationSeconds": round(duration, 3),
+            "byteSize": audio_path.stat().st_size,
             "contentHash": content_hash,
         }
         if mime_type:

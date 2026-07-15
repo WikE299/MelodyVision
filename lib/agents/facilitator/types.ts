@@ -1,13 +1,10 @@
 import type { ConversationState } from "../../contracts/conversation-state.ts";
 import type { VisualBrief } from "../../contracts/visual-brief.ts";
+import type { ConversationRoundGoal } from "../../conversation/round-protocol.ts";
 
 export const FACILITATOR_PROFILE_VERSION = "2.2.0" as const;
 
-export type FacilitatorGoal =
-  | "subject-space"
-  | "motion-composition"
-  | "light-color-material"
-  | "meaning-constraints";
+export type FacilitatorGoal = ConversationRoundGoal;
 
 export interface FacilitatorInput {
   state: ConversationState;

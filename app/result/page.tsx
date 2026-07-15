@@ -6,10 +6,13 @@ import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
 import { getExperimentSessionId } from "@/lib/experiment-session";
 import { recordExperimentEvent } from "@/lib/experiment-events";
+import { startDirectBaseline } from "@/lib/experiment-trial-client";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 import type {
   ConversationState,
+  GenerationRole,
   MusicProfile,
+  StudyTrial,
   VisualBrief,
   VisualBriefFieldKey,
 } from "@/lib/contracts";
@@ -58,6 +61,14 @@ interface DebugInfo {
   remoteImageUrl: string;
 }
 
+interface BaselineResult {
+  runId: string;
+  imageUrl: string;
+  prompt: string;
+  imageModel: string;
+  imageSize: string;
+}
+
 interface FeedbackState {
   musicMatchScore: number;
   commentMatchScore: number;
@@ -65,6 +76,10 @@ interface FeedbackState {
   selectedReasons: string[];
   freeText: string;
 }
+
+type StudyPhase = "artwork" | "comparison" | "revealed";
+type RatingKey = "musicMatchScore" | "imaginationMatchScore" | "agencyScore" | "ownershipScore";
+type BlindChoice = "A" | "B" | "tie";
 
 const FEEDBACK_REASONS = {
   zh: ["很准确", "情绪对", "风格不对", "太抽象", "不像音乐", "画面好看"],
@@ -135,7 +150,30 @@ const COPY = {
     startOverTip: "清空当前流程，回到首页",
     replayTitle: "共同聆听的回声",
     you: "你",
+    facilitator: "共创引导",
     overview: "查看生成依据",
+    studyEvaluationTitle: "先只看这幅共同完成的画",
+    studyEvaluationIntro: "请根据此刻的真实感受逐项评分，完成前不会展示另一幅作品或生成依据。",
+    imaginationMatch: "贴近我的想象",
+    agency: "我影响了这幅画",
+    ownership: "这像是我们的共同作品",
+    continueComparison: "提交并查看盲测对比",
+    comparisonTitle: "比较作品 A 与作品 B",
+    comparisonIntro: "两幅作品使用同一段音乐和同一套生成模型，暂不展示生成方式。",
+    comparisonMusic: "哪幅更贴近音乐",
+    comparisonAesthetic: "哪幅画面表现更好",
+    comparisonOverall: "总体更喜欢哪幅",
+    same: "差不多",
+    comparisonReason: "简单说说你判断的原因",
+    submitComparison: "提交比较",
+    baselinePending: "参照作品仍在生成，请稍候",
+    baselineFailed: "参照作品生成失败",
+    retryBaseline: "重新生成参照作品",
+    evaluationError: "评价保存失败，请稍后重试",
+    revealCoCreated: "共同完成的作品",
+    revealBaseline: "直接生成的参照作品",
+    viewCoCreated: "共创作品",
+    viewBaseline: "参照作品",
   },
   en: {
     audioName: "Music",
@@ -200,7 +238,30 @@ const COPY = {
     startOverTip: "Clear this flow and return home",
     replayTitle: "Echoes from the shared listening",
     you: "You",
+    facilitator: "Co-creation guide",
     overview: "View generation rationale",
+    studyEvaluationTitle: "First, consider only the artwork you co-created",
+    studyEvaluationIntro: "Rate your immediate response before the reference artwork or generation rationale is revealed.",
+    imaginationMatch: "Matches what I imagined",
+    agency: "I influenced this artwork",
+    ownership: "This feels like our shared work",
+    continueComparison: "Submit and open blind comparison",
+    comparisonTitle: "Compare Artwork A and Artwork B",
+    comparisonIntro: "Both use the same music and generation models. Their sources remain hidden for now.",
+    comparisonMusic: "Which better matches the music",
+    comparisonAesthetic: "Which has stronger visual quality",
+    comparisonOverall: "Which do you prefer overall",
+    same: "About the same",
+    comparisonReason: "Briefly explain your choice",
+    submitComparison: "Submit comparison",
+    baselinePending: "The reference artwork is still generating",
+    baselineFailed: "Reference generation failed",
+    retryBaseline: "Retry reference generation",
+    evaluationError: "Evaluation could not be saved. Please try again.",
+    revealCoCreated: "Co-created artwork",
+    revealBaseline: "Direct-generation reference",
+    viewCoCreated: "Co-created",
+    viewBaseline: "Reference",
   },
 };
 
@@ -218,6 +279,7 @@ function getInitialResultState() {
       visualBrief: null as VisualBrief | null,
       conversationState: null as ConversationState | null,
       musicProfile: null as MusicProfile | null,
+      studyTrial: null as StudyTrial | null,
       generatedTime: "",
     };
   }
@@ -236,6 +298,7 @@ function getInitialResultState() {
   const visualBrief = JSON.parse(sessionStorage.getItem("visualBrief") || "null") as VisualBrief | null;
   const conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
   const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
+  const studyTrial = JSON.parse(sessionStorage.getItem("studyTrial") || "null") as StudyTrial | null;
   const usePreviewData = !imageUrl && window.location.search.includes("page05-gallery-result");
 
   return {
@@ -264,6 +327,7 @@ function getInitialResultState() {
     visualBrief,
     conversationState,
     musicProfile,
+    studyTrial,
     generatedTime: new Date().toLocaleString("zh-CN", {
       month: "2-digit",
       day: "2-digit",
@@ -294,12 +358,81 @@ function briefFieldText(
   return value || fallback;
 }
 
+function ScoreRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (score: number) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs text-[#d7b99b]">{label}</p>
+      <div className="grid grid-cols-5 gap-1.5">
+        {[1, 2, 3, 4, 5].map((score) => (
+          <button
+            key={score}
+            type="button"
+            onClick={() => onChange(score)}
+            aria-pressed={value === score}
+            className={`h-8 border text-xs font-semibold transition ${
+              value === score
+                ? "border-[#ffd083] bg-[#ffd083] text-[#2b2230]"
+                : "border-[#8f6b52]/44 bg-[#211b25] text-[#c8aa8e] hover:border-[#ffd083]/70"
+            }`}
+          >
+            {score}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BlindChoiceRow({
+  label,
+  value,
+  sameLabel,
+  onChange,
+}: {
+  label: string;
+  value: BlindChoice | null;
+  sameLabel: string;
+  onChange: (choice: BlindChoice) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs text-[#d7b99b]">{label}</p>
+      <div className="grid grid-cols-3 gap-1.5">
+        {(["A", "B", "tie"] as BlindChoice[]).map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            onClick={() => onChange(choice)}
+            aria-pressed={value === choice}
+            className={`h-8 border text-xs font-semibold transition ${
+              value === choice
+                ? "border-[#ffd083] bg-[#ffd083] text-[#2b2230]"
+                : "border-[#8f6b52]/44 bg-[#211b25] text-[#c8aa8e] hover:border-[#ffd083]/70"
+            }`}
+          >
+            {choice === "tie" ? sameLabel : choice}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ResultPage() {
   const router = useRouter();
   const { language } = useLanguage();
   const copy = COPY[language];
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const resultViewRecordedRef = useRef(false);
+  const comparisonExposureRecordedRef = useRef(false);
   const mounted = useHydrated();
   const [initialState] = useState(getInitialResultState);
   const [imageUrl, setImageUrl] = useState<string | null>(initialState.imageUrl);
@@ -313,6 +446,7 @@ export default function ResultPage() {
   const [visualBrief] = useState(initialState.visualBrief);
   const [conversationState] = useState(initialState.conversationState);
   const [musicProfile] = useState(initialState.musicProfile);
+  const [studyTrial, setStudyTrial] = useState(initialState.studyTrial);
   const [generatedTime] = useState(initialState.generatedTime);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -332,6 +466,29 @@ export default function ResultPage() {
     freeText: "",
   });
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [studyPhase, setStudyPhase] = useState<StudyPhase>(initialState.studyTrial ? "artwork" : "revealed");
+  const [baselineStatus, setBaselineStatus] = useState<"pending" | "running" | "completed" | "failed">("pending");
+  const [baselineResult, setBaselineResult] = useState<BaselineResult | null>(null);
+  const [studyRatings, setStudyRatings] = useState<Record<RatingKey, number | null>>({
+    musicMatchScore: null,
+    imaginationMatchScore: null,
+    agencyScore: null,
+    ownershipScore: null,
+  });
+  const [comparison, setComparison] = useState<{
+    musicMatchChoice: BlindChoice | null;
+    aestheticChoice: BlindChoice | null;
+    overallChoice: BlindChoice | null;
+    reason: string;
+  }>({
+    musicMatchChoice: null,
+    aestheticChoice: null,
+    overallChoice: null,
+    reason: "",
+  });
+  const [studySaving, setStudySaving] = useState(false);
+  const [studyError, setStudyError] = useState("");
+  const [resultArtworkRole, setResultArtworkRole] = useState<GenerationRole>("co_created");
 
   useEffect(() => {
     if (!imageUrl) {
@@ -342,8 +499,78 @@ export default function ResultPage() {
     resultViewRecordedRef.current = true;
     recordExperimentEvent("result-viewed", "/result", {
       runId: initialState.debugInfo?.meta?.runId || null,
+      trialId: initialState.studyTrial?.id || null,
+      condition: initialState.studyTrial?.condition || null,
     });
-  }, [imageUrl, initialState.debugInfo?.meta?.runId, router]);
+  }, [imageUrl, initialState.debugInfo?.meta?.runId, initialState.studyTrial?.condition, initialState.studyTrial?.id, router]);
+
+  const studyTrialId = studyTrial?.id;
+
+  useEffect(() => {
+    if (!studyTrialId) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const refresh = async () => {
+      try {
+        const [baselineResponse, evaluationResponse] = await Promise.all([
+          fetch(`/api/experiment/baseline?trialId=${encodeURIComponent(studyTrialId)}`, { cache: "no-store" }),
+          fetch(`/api/experiment/evaluation?trialId=${encodeURIComponent(studyTrialId)}`, { cache: "no-store" }),
+        ]);
+        const baselineData = await baselineResponse.json();
+        const evaluationData = await evaluationResponse.json();
+        if (!active) return;
+        if (baselineResponse.ok) {
+          if (baselineData.trial) {
+            setStudyTrial(baselineData.trial as StudyTrial);
+            sessionStorage.setItem("studyTrial", JSON.stringify(baselineData.trial));
+          }
+          setBaselineStatus(baselineData.job?.status || "pending");
+          setBaselineResult(baselineData.result || null);
+        }
+        if (evaluationResponse.ok) {
+          if (evaluationData.comparison) {
+            setStudyPhase("revealed");
+          } else if (evaluationData.artwork) {
+            setStudyPhase("comparison");
+            setStudyRatings({
+              musicMatchScore: Number(evaluationData.artwork.music_match_score),
+              imaginationMatchScore: Number(evaluationData.artwork.imagination_match_score),
+              agencyScore: Number(evaluationData.artwork.agency_score),
+              ownershipScore: Number(evaluationData.artwork.ownership_score),
+            });
+          }
+        }
+        if (active && baselineData.job?.status !== "completed" && baselineData.job?.status !== "failed") {
+          timer = setTimeout(refresh, 2500);
+        }
+      } catch {
+        if (active) timer = setTimeout(refresh, 3500);
+      }
+    };
+
+    void refresh();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [studyTrialId]);
+
+  useEffect(() => {
+    if (
+      !studyTrialId ||
+      studyPhase !== "comparison" ||
+      baselineStatus !== "completed" ||
+      !baselineResult?.imageUrl ||
+      comparisonExposureRecordedRef.current
+    ) return;
+    comparisonExposureRecordedRef.current = true;
+    recordExperimentEvent("paired-comparison-exposed", "/result", {
+      trialId: studyTrialId,
+      condition: studyTrial?.condition,
+      comparisonOrder: studyTrial?.comparisonOrder,
+    });
+  }, [baselineResult?.imageUrl, baselineStatus, studyPhase, studyTrial?.comparisonOrder, studyTrial?.condition, studyTrialId]);
 
   const playResultAudio = useCallback(async () => {
     const audio = audioRef.current;
@@ -406,6 +633,9 @@ export default function ResultPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          trialId: studyTrial?.id,
+          generationRole: "co_created",
+          condition: studyTrial?.condition || conversationState?.condition || "multi_agent",
           sessionId,
           selectedCharacters: characterIds,
           comments: commentList,
@@ -506,6 +736,104 @@ export default function ResultPage() {
     }
   };
 
+  const submitArtworkEvaluation = async () => {
+    if (!studyTrial || studySaving || Object.values(studyRatings).some((value) => value === null)) return;
+    setStudySaving(true);
+    setStudyError("");
+    try {
+      const response = await fetch("/api/experiment/evaluation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage: "artwork",
+          trialId: studyTrial.id,
+          ...studyRatings,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || copy.evaluationError);
+      setStudyPhase("comparison");
+      recordExperimentEvent("artwork-evaluation-submitted", "/result", {
+        trialId: studyTrial.id,
+        condition: studyTrial.condition,
+      });
+    } catch (error) {
+      setStudyError(error instanceof Error ? error.message : copy.evaluationError);
+    } finally {
+      setStudySaving(false);
+    }
+  };
+
+  const blindChoiceToRole = (choice: BlindChoice | null): GenerationRole | "tie" | null => {
+    if (!choice || choice === "tie") return choice;
+    const leftRole: GenerationRole = studyTrial?.comparisonOrder === "co_created_left"
+      ? "co_created"
+      : "direct_baseline";
+    if (choice === "A") return leftRole;
+    return leftRole === "co_created" ? "direct_baseline" : "co_created";
+  };
+
+  const submitComparison = async () => {
+    if (
+      !studyTrial ||
+      !comparison.musicMatchChoice ||
+      !comparison.aestheticChoice ||
+      !comparison.overallChoice ||
+      studySaving
+    ) return;
+    setStudySaving(true);
+    setStudyError("");
+    try {
+      const response = await fetch("/api/experiment/evaluation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage: "comparison",
+          trialId: studyTrial.id,
+          musicMatchChoice: blindChoiceToRole(comparison.musicMatchChoice),
+          aestheticChoice: blindChoiceToRole(comparison.aestheticChoice),
+          overallChoice: blindChoiceToRole(comparison.overallChoice),
+          reason: comparison.reason,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || copy.evaluationError);
+      setStudyPhase("revealed");
+      recordExperimentEvent("paired-comparison-submitted", "/result", {
+        trialId: studyTrial.id,
+        condition: studyTrial.condition,
+        comparisonOrder: studyTrial.comparisonOrder,
+      });
+    } catch (error) {
+      setStudyError(error instanceof Error ? error.message : copy.evaluationError);
+    } finally {
+      setStudySaving(false);
+    }
+  };
+
+  const retryBaseline = async () => {
+    if (!studyTrial || !musicProfile || studySaving) return;
+    setStudySaving(true);
+    setStudyError("");
+    setBaselineStatus("running");
+    try {
+      const result = await startDirectBaseline({
+        trial: studyTrial,
+        musicProfile,
+        musicAnalysis: (debugInfo?.musicAnalysis || {}) as Record<string, unknown>,
+      });
+      if (result?.imageUrl) {
+        setBaselineResult(result as BaselineResult);
+        setBaselineStatus("completed");
+      }
+    } catch (error) {
+      setBaselineStatus("failed");
+      setStudyError(error instanceof Error ? error.message : copy.baselineFailed);
+    } finally {
+      setStudySaving(false);
+    }
+  };
+
   if (!mounted || !imageUrl) return null;
 
   const characters = getCharactersByIds(characterIds);
@@ -524,7 +852,7 @@ export default function ResultPage() {
   ) || [];
   const hasRationale = userRationale.length + briefRationale.length + musicianRationale.length > 0;
   const replayMessages = conversationState?.messages
-    .filter((message) => (message.role === "musician" || message.role === "user") && message.content.trim())
+    .filter((message) => (["musician", "guide", "user"].includes(message.role)) && message.content.trim())
     .map((message) => {
       const speakerCharacter = characters.find((character) => character.id === message.speakerId);
       return {
@@ -533,7 +861,9 @@ export default function ResultPage() {
           ? copy.you
           : speakerCharacter
             ? getCharacterView(speakerCharacter, language).name
-            : message.speakerId,
+            : message.role === "guide"
+              ? copy.facilitator
+              : message.speakerId,
         content: message.content,
         role: message.role,
       };
@@ -552,6 +882,20 @@ export default function ResultPage() {
     danmakuMessages.filter((_, index) => index % 2 === 0),
     danmakuMessages.filter((_, index) => index % 2 === 1),
   ].filter((lane) => lane.length > 0);
+  const studyLocked = Boolean(studyTrial && studyPhase !== "revealed");
+  const coCreatedIsLeft = studyTrial?.comparisonOrder !== "baseline_left";
+  const leftComparisonImage = coCreatedIsLeft ? imageUrl : baselineResult?.imageUrl;
+  const rightComparisonImage = coCreatedIsLeft ? baselineResult?.imageUrl : imageUrl;
+  const comparisonReady = studyPhase === "comparison" && baselineStatus === "completed" && Boolean(baselineResult?.imageUrl);
+  const canSwitchPairedArtwork = Boolean(
+    studyTrial?.condition === "single_agent" &&
+    studyPhase === "revealed" &&
+    baselineStatus === "completed" &&
+    baselineResult?.imageUrl
+  );
+  const displayedResultImage = canSwitchPairedArtwork && resultArtworkRole === "direct_baseline"
+    ? baselineResult?.imageUrl || imageUrl
+    : imageUrl;
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#111019] text-[#f8dfbb]">
@@ -562,7 +906,7 @@ export default function ResultPage() {
         <FlowHeader activeStep={4} compact />
         <section className="relative mt-2 min-h-0 flex-1 overflow-hidden rounded-[20px] border border-[#9f6f45]/46 bg-[#1d1923]/34 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
 
-          <div className="absolute right-5 top-4 z-50 flex gap-3">
+          {!studyLocked && <div className="absolute right-5 top-4 z-50 flex gap-3">
               <div className="group relative">
                 <button
                   type="button"
@@ -599,9 +943,9 @@ export default function ResultPage() {
                   {copy.save}
                 </span>
               </div>
-          </div>
+          </div>}
 
-          <button
+          {!studyLocked && <button
             type="button"
             onClick={() => {
               setShowOverview(true);
@@ -614,25 +958,175 @@ export default function ResultPage() {
             className="absolute left-5 top-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-[#ffd083]/42 bg-[#1f1923]/78 text-lg text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.34)] backdrop-blur transition hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
           >
             ↗
-          </button>
+          </button>}
 
           {regenerateError && (
             <p className="absolute left-1/2 top-16 z-50 -translate-x-1/2 text-xs text-[#ff9f9f]">{regenerateError}</p>
           )}
 
-          <div className="absolute inset-x-6 bottom-[96px] top-[56px] flex items-center justify-center xl:top-3">
-            <div className="relative flex h-full w-full items-center justify-center">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imageUrl}
-                alt={copy.imageAlt}
-                className="block max-h-full max-w-full rounded-[6px] object-contain shadow-[0_34px_110px_rgba(0,0,0,0.62),0_0_45px_rgba(255,187,91,0.16)] ring-1 ring-[#efbd77]/38"
-                onLoad={playResultAudio}
-              />
-            </div>
+          <div className={`absolute bottom-[96px] top-[56px] flex items-center justify-center xl:top-3 ${studyLocked ? "left-6 right-[338px]" : "inset-x-6"}`}>
+            {comparisonReady ? (
+              <div className="grid h-full w-full grid-cols-2 items-center gap-4">
+                {[leftComparisonImage, rightComparisonImage].map((source, index) => (
+                  <figure key={index} className="flex min-w-0 flex-col items-center gap-2">
+                    <figcaption className="text-sm font-semibold tracking-[0.16em] text-[#ffe3bd]">
+                      {language === "zh" ? `作品 ${index === 0 ? "A" : "B"}` : `Artwork ${index === 0 ? "A" : "B"}`}
+                    </figcaption>
+                    <div className="flex aspect-[16/9] w-full items-center justify-center overflow-hidden rounded-[6px] bg-[#111019]/72 shadow-[0_28px_80px_rgba(0,0,0,0.58)] ring-1 ring-[#efbd77]/32">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={source || ""}
+                        alt={`${copy.imageAlt} ${index === 0 ? "A" : "B"}`}
+                        className="block h-full w-full object-contain"
+                        onLoad={index === 0 ? playResultAudio : undefined}
+                      />
+                    </div>
+                  </figure>
+                ))}
+              </div>
+            ) : (
+              <div className="relative flex h-full w-full items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={displayedResultImage}
+                  alt={copy.imageAlt}
+                  className="block max-h-full max-w-full rounded-[6px] object-contain shadow-[0_34px_110px_rgba(0,0,0,0.62),0_0_45px_rgba(255,187,91,0.16)] ring-1 ring-[#efbd77]/38"
+                  onLoad={playResultAudio}
+                />
+              </div>
+            )}
           </div>
 
-          {!showPlayer && (
+          {studyLocked && studyTrial && (
+            <aside className="absolute bottom-4 right-4 top-4 z-[65] flex w-[306px] flex-col border border-[#a77b57]/48 bg-[#211c27]/96 p-5 shadow-[-18px_0_60px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+              {studyPhase === "artwork" ? (
+                <>
+                  <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.studyEvaluationTitle}</h2>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.studyEvaluationIntro}</p>
+                  <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
+                    {([
+                      ["musicMatchScore", copy.musicMatch],
+                      ["imaginationMatchScore", copy.imaginationMatch],
+                      ["agencyScore", copy.agency],
+                      ["ownershipScore", copy.ownership],
+                    ] as Array<[RatingKey, string]>).map(([key, label]) => (
+                      <ScoreRow
+                        key={key}
+                        label={label}
+                        value={studyRatings[key]}
+                        onChange={(score) => setStudyRatings((current) => ({ ...current, [key]: score }))}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={submitArtworkEvaluation}
+                    disabled={studySaving || Object.values(studyRatings).some((value) => value === null)}
+                    className="mt-4 h-11 border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {studySaving ? copy.submitting : copy.continueComparison}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.comparisonTitle}</h2>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.comparisonIntro}</p>
+                  {baselineStatus === "failed" ? (
+                    <div className="flex flex-1 flex-col items-center justify-center text-center">
+                      <p className="text-sm text-[#efb6a5]">{copy.baselineFailed}</p>
+                      <button
+                        type="button"
+                        onClick={retryBaseline}
+                        disabled={studySaving}
+                        className="mt-4 h-10 border border-[#ffd083]/58 px-4 text-xs font-semibold text-[#ffe3bd] hover:bg-[#4b3444] disabled:opacity-40"
+                      >
+                        {copy.retryBaseline}
+                      </button>
+                    </div>
+                  ) : !comparisonReady ? (
+                    <div className="flex flex-1 flex-col items-center justify-center text-center">
+                      <div className="h-10 w-10 animate-spin rounded-full border border-[#a97950]/42 border-t-[#ffd083]" />
+                      <p className="mt-4 text-sm text-[#d7b99b]">{copy.baselinePending}</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
+                        <BlindChoiceRow
+                          label={copy.comparisonMusic}
+                          value={comparison.musicMatchChoice}
+                          sameLabel={copy.same}
+                          onChange={(value) => setComparison((current) => ({ ...current, musicMatchChoice: value }))}
+                        />
+                        <BlindChoiceRow
+                          label={copy.comparisonAesthetic}
+                          value={comparison.aestheticChoice}
+                          sameLabel={copy.same}
+                          onChange={(value) => setComparison((current) => ({ ...current, aestheticChoice: value }))}
+                        />
+                        <BlindChoiceRow
+                          label={copy.comparisonOverall}
+                          value={comparison.overallChoice}
+                          sameLabel={copy.same}
+                          onChange={(value) => setComparison((current) => ({ ...current, overallChoice: value }))}
+                        />
+                        <textarea
+                          value={comparison.reason}
+                          onChange={(event) => setComparison((current) => ({ ...current, reason: event.target.value }))}
+                          placeholder={copy.comparisonReason}
+                          className="h-20 w-full resize-none border border-[#8f6b52]/44 bg-[#17131a] p-3 text-xs text-[#ffe3bd] outline-none placeholder:text-[#9f8066] focus:border-[#ffd083]/70"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={submitComparison}
+                        disabled={
+                          studySaving ||
+                          !comparison.musicMatchChoice ||
+                          !comparison.aestheticChoice ||
+                          !comparison.overallChoice
+                        }
+                        className="mt-4 h-11 border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {studySaving ? copy.submitting : copy.submitComparison}
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+              {studyError && <p className="mt-3 text-xs text-[#efb6a5]">{studyError}</p>}
+            </aside>
+          )}
+
+          {canSwitchPairedArtwork && (
+            <div className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 border border-[#a77b57]/44 bg-[#1f1923]/90 p-1 text-xs text-[#ffe3bd] shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur">
+              {([
+                ["co_created", copy.viewCoCreated],
+                ["direct_baseline", copy.viewBaseline],
+              ] as Array<[GenerationRole, string]>).map(([role, label]) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => setResultArtworkRole(role)}
+                  aria-pressed={resultArtworkRole === role}
+                  className={`min-w-24 px-4 py-2 font-semibold transition ${
+                    resultArtworkRole === role
+                      ? "bg-[#f3cf9a] text-[#30242d]"
+                      : "text-[#d8b997] hover:bg-[#3a2d32] hover:text-[#ffe3bd]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {studyTrial && studyPhase === "revealed" && baselineResult && !canSwitchPairedArtwork && (
+            <div className="absolute left-1/2 top-4 z-50 -translate-x-1/2 border border-[#a77b57]/44 bg-[#1f1923]/90 px-4 py-2 text-xs text-[#ffe3bd] shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur">
+              {coCreatedIsLeft ? "A" : "B"} · {copy.revealCoCreated}　/　{coCreatedIsLeft ? "B" : "A"} · {copy.revealBaseline}
+            </div>
+          )}
+
+          {!studyLocked && !showPlayer && (
           <div className={`absolute bottom-1 left-[170px] z-40 h-[76px] overflow-hidden border-y border-[#9f6f45]/22 bg-[#15131c]/48 py-1 backdrop-blur-sm transition-[right] ${showAppendix ? "right-[370px]" : "right-[240px]"}`} aria-label={copy.replayTitle}>
             {danmakuLanes.map((lane, laneIndex) => (
               <div key={laneIndex} className="mv-danmaku-lane h-1/2 overflow-hidden">
@@ -787,7 +1281,7 @@ export default function ResultPage() {
             </aside>
           )}
 
-          <details
+          {!studyLocked && <details
             onToggle={(event) => {
               setShowAppendix(event.currentTarget.open);
               if (event.currentTarget.open) {
@@ -800,7 +1294,7 @@ export default function ResultPage() {
           >
             <summary className="cursor-pointer font-semibold">{copy.appendix}</summary>
             <div className="mt-4 max-h-[420px] overflow-auto pr-1">
-              {debugInfo?.meta?.runId && (
+              {debugInfo?.meta?.runId && !studyTrial && (
                 <div className="rounded-[16px] border border-[#8f6b52]/34 bg-[#2d2732]/78 p-3">
                   <p className="mb-3 text-sm font-semibold">{copy.feedbackTitle}</p>
                   <div className="space-y-3">
@@ -894,8 +1388,8 @@ export default function ResultPage() {
                 </details>
               )}
             </div>
-          </details>
-          {!showAppendix && (
+          </details>}
+          {!studyLocked && !showAppendix && (
             <button
               type="button"
               onClick={handleStartOver}

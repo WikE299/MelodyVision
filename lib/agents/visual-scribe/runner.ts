@@ -25,6 +25,7 @@ type CompleteVisualScribe = (params: {
   userMessage: string;
   temperature?: number;
   maxTokens?: number;
+  signal?: AbortSignal;
 }) => Promise<LLMResponse>;
 
 const FIELD_TYPES: Record<VisualBriefFieldKey, "string" | "array"> = {
@@ -230,6 +231,8 @@ function sourceReference(
       ? "user-message"
       : message.role === "musician"
         ? "musician-message"
+        : message.role === "guide"
+          ? "guide-message"
         : "facilitator-subtitle",
     sourceId: message.id,
     excerpt: message.content.slice(0, 180),
@@ -286,11 +289,50 @@ function fallbackBrief(input: VisualScribeInput, now = new Date().toISOString())
     musicProfileId: input.conversationState.musicProfileId,
     now,
   });
+  const fields: VisualBriefFields = { ...previous.fields };
+  const round = Math.min(input.conversationState.completedUserRounds, 4);
+  const userMessages = input.conversationState.messages
+    .filter((message) => message.role === "user")
+    .slice(0, round);
+  const isMissing = (key: VisualBriefFieldKey) => fields[key].status === "missing";
+
+  userMessages.forEach((message, index) => {
+    const content = message.content.trim().slice(0, 300);
+    const sourceFor = (key: VisualBriefFieldKey) => [sourceReference(message.id, key, input)];
+    const messageRound = index + 1;
+
+    if (messageRound === 1) {
+      if (isMissing("subject")) fields.subject = { value: content, status: "confirmed", sources: sourceFor("subject") };
+      if (isMissing("space")) fields.space = { value: content, status: "confirmed", sources: sourceFor("space") };
+    } else if (messageRound === 2) {
+      if (isMissing("composition")) fields.composition = { value: content, status: "confirmed", sources: sourceFor("composition") };
+      if (isMissing("motion")) fields.motion = { value: [content], status: "confirmed", sources: sourceFor("motion") };
+    } else if (messageRound === 3) {
+      if (isMissing("materials")) fields.materials = { value: [content], status: "confirmed", sources: sourceFor("materials") };
+      if (isMissing("palette")) fields.palette = { value: [content], status: "confirmed", sources: sourceFor("palette") };
+      if (isMissing("lighting")) fields.lighting = { value: content, status: "confirmed", sources: sourceFor("lighting") };
+      if (isMissing("atmosphere")) fields.atmosphere = { value: [content], status: "confirmed", sources: sourceFor("atmosphere") };
+    } else if (messageRound === 4) {
+      if (isMissing("personalMeaning")) {
+        fields.personalMeaning = { value: content, status: "confirmed", sources: sourceFor("personalMeaning") };
+      }
+      if (isMissing("mustInclude")) {
+        fields.mustInclude = { value: [content], status: "confirmed", sources: sourceFor("mustInclude") };
+      }
+      if (isMissing("mustAvoid") && /[不无勿]|避免|排除/.test(content)) {
+        fields.mustAvoid = { value: [content], status: "confirmed", sources: sourceFor("mustAvoid") };
+      }
+    }
+  });
+
+  const readiness = calculateVisualBriefReadiness(fields);
   return {
     ...previous,
     parentVersionId: previous.version > 0 ? `${previous.id}@${previous.version}` : undefined,
     version: previous.version + 1,
-    readiness: calculateVisualBriefReadiness(previous.fields),
+    status: readiness.ready ? "ready" : "collecting",
+    fields,
+    readiness,
     updatedAt: now,
   };
 }
@@ -302,8 +344,11 @@ export async function runVisualScribeAgent(
   const basePrompt = buildVisualScribePrompt(input);
   let lastErrors: string[] = [];
   let lastModel = "unknown";
+  let attempts = 0;
+  const maxAttempts = complete === callLLM ? 1 : 2;
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    attempts = attempt;
     try {
       const response = await complete({
         systemPrompt: attempt === 1
@@ -312,6 +357,7 @@ export async function runVisualScribeAgent(
         userMessage: "更新 VisualBrief。只返回 JSON。",
         temperature: attempt === 1 ? 0.25 : 0.1,
         maxTokens: 2600,
+        ...(complete === callLLM ? { signal: AbortSignal.timeout(10_000) } : {}),
       });
       lastModel = response.model;
       const draft = parseDraft(response.content);
@@ -335,7 +381,7 @@ export async function runVisualScribeAgent(
   return {
     brief: fallbackBrief(input),
     model: lastModel,
-    attempts: 2,
+    attempts,
     profileVersion: VISUAL_SCRIBE_PROFILE_VERSION,
     fallback: true,
     validationErrors: lastErrors,

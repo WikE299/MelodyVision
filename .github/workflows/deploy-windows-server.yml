@@ -1,9 +1,6 @@
 name: Deploy Windows Server
 
 on:
-  push:
-    branches:
-      - feat/v2-global-musicians
   workflow_dispatch:
 
 concurrency:

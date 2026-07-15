@@ -1,5 +1,7 @@
 # MelodyVision Deployment Notes
 
+The primary public deployment has moved to Vercel + Hugging Face + Supabase. See [deployment-online.md](./deployment-online.md). The Windows instructions below are retained as a manual fallback and are no longer triggered by GitHub pushes.
+
 Last updated: 2026-07-11
 
 ## Current Deployment
@@ -136,7 +138,7 @@ For local Version 2 development, start the Python analyzer before Next.js, or us
 
 ```bash
 cd services/audio-analysis
-HF_HOME=.cache/huggingface .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+CLAP_DISABLED=1 CLAP_PRELOAD=0 HF_HOME=.cache/huggingface .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
 Then run `npm run dev` from the repository root, or run `npm run dev:full` to start both services. Check the proxy with:
@@ -144,6 +146,8 @@ Then run `npm run dev` from the repository root, or run `npm run dev:full` to st
 ```bash
 curl http://127.0.0.1:3000/api/analyze
 ```
+
+`npm run dev:full` uses the same deterministic local defaults so startup does not wait for a model download. Set `CLAP_DISABLED=0 CLAP_PRELOAD=1` explicitly only after the CLAP model is cached.
 
 The normal product flow requires the rich analyzer. `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is an explicit visual-only local-development escape hatch and must not be set for user studies or public deployment.
 
