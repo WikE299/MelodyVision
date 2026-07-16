@@ -4,7 +4,7 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    branch: codex/version2-co-creation
+    branch: main
     autoDeployTrigger: commit
     dockerfilePath: services/audio-analysis/Dockerfile.render
     dockerContext: services/audio-analysis

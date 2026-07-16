@@ -37,7 +37,7 @@ AUDIO_ANALYSIS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 AUDIO_ANALYSIS_ALLOWED_ORIGIN_REGEX=^https://melodyvision(?:-[a-z0-9-]+)?\.vercel\.app$
 ```
 
-Render deploys from `codex/version2-co-creation` while Version 2 is being validated. Change `branch` to `main` after the branch is merged.
+Render deploys automatically from `main` after the Version 2 pull request is merged.
 
 Verify:
 
