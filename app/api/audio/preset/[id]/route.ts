@@ -53,13 +53,13 @@ export async function GET(
     });
     if (!range) {
       headers.set("Content-Length", String(file.byteLength));
-      return new Response(file, { headers });
+      return new Response(Uint8Array.from(file), { headers });
     }
 
     const chunk = file.subarray(range.start, range.end + 1);
     headers.set("Content-Length", String(chunk.byteLength));
     headers.set("Content-Range", `bytes ${range.start}-${range.end}/${file.byteLength}`);
-    return new Response(chunk, { status: 206, headers });
+    return new Response(Uint8Array.from(chunk), { status: 206, headers });
   } catch {
     return Response.json({ error: "Preset audio unavailable" }, { status: 404 });
   }
