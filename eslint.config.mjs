@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "sites/**",
+    "services/audio-analysis/.venv/**",
     "next-env.d.ts",
   ]),
 ]);

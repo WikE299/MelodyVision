@@ -30,8 +30,22 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# runtime artifacts
+/logs/
+/data/
+/public/generated/
+/file/
+
+# raw preset source audio; deploy the clipped versions under /public/preset-audio/clips/
+/public/preset-audio/*.mp3
+/public/preset-audio/*.ogg
+
+# local-only working assets
+/local-assets/
+
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel

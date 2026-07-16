@@ -1,0 +1,213 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1160" viewBox="0 0 1800 1160" role="img" aria-labelledby="title desc">
+  <title id="title">MelodyVision Research Architecture</title>
+  <desc id="desc">A research-style system architecture diagram showing inputs, outputs, and data flow for MelodyVision.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f4ef"/>
+      <stop offset="55%" stop-color="#f1f4f6"/>
+      <stop offset="100%" stop-color="#f7efe8"/>
+    </linearGradient>
+    <linearGradient id="audio" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e7f0ff"/>
+      <stop offset="100%" stop-color="#d8e6fb"/>
+    </linearGradient>
+    <linearGradient id="semantic" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f3e8ff"/>
+      <stop offset="100%" stop-color="#ead8fb"/>
+    </linearGradient>
+    <linearGradient id="gen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff0d5"/>
+      <stop offset="100%" stop-color="#f9ddb6"/>
+    </linearGradient>
+    <linearGradient id="eval" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#dcf7eb"/>
+      <stop offset="100%" stop-color="#c8eddd"/>
+    </linearGradient>
+    <filter id="shadow" x="-12%" y="-18%" width="124%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#27313c" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2 2 L10 6 L2 10 Z" fill="#3f4d5c"/>
+    </marker>
+    <marker id="arrowSoft" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2 2 L10 6 L2 10 Z" fill="#8b6f3f"/>
+    </marker>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1f2933; }
+      .subtitle { font: 400 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5b6673; }
+      .layer-title { font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #26323f; letter-spacing: 0.5px; }
+      .node-title { font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #18212b; }
+      .node-subtitle { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #52606d; }
+      .label { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #394b59; }
+      .text { font: 400 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #344250; }
+      .small { font: 400 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5d6a78; }
+      .mono { font: 500 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #3d4b59; }
+      .edge { fill: none; stroke: #3f4d5c; stroke-width: 2.2; marker-end: url(#arrow); }
+      .edge-soft { fill: none; stroke: #8b6f3f; stroke-width: 2; marker-end: url(#arrowSoft); stroke-dasharray: 7 7; }
+      .loop { fill: none; stroke: #9b5d36; stroke-width: 2.2; marker-end: url(#arrowSoft); stroke-dasharray: 8 7; }
+      .node { stroke: rgba(45, 55, 72, 0.2); stroke-width: 1.2; rx: 18; filter: url(#shadow); }
+      .io { fill: rgba(255,255,255,0.62); stroke: rgba(45,55,72,0.13); stroke-width: 1; rx: 10; }
+      .band { fill: rgba(255,255,255,0.38); stroke: rgba(45,55,72,0.14); stroke-width: 1; rx: 22; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1160" fill="url(#bg)"/>
+
+  <text x="80" y="70" class="title">MelodyVision 技术架构科研框架图</text>
+  <text x="80" y="102" class="subtitle">Interpretable audio evidence + multi-agent listening critique + validated prompt director + image generation feedback loop</text>
+
+  <rect x="60" y="145" width="1680" height="185" class="band"/>
+  <rect x="60" y="365" width="1680" height="255" class="band"/>
+  <rect x="60" y="655" width="1680" height="245" class="band"/>
+  <rect x="60" y="935" width="1680" height="150" class="band"/>
+
+  <text x="86" y="180" class="layer-title">Layer 1. Audio Acquisition and Representation</text>
+  <text x="86" y="400" class="layer-title">Layer 2. Human-AI Listening Interpretation</text>
+  <text x="86" y="690" class="layer-title">Layer 3. Cross-Modal Planning and Image Synthesis</text>
+  <text x="86" y="970" class="layer-title">Layer 4. Trace, Evaluation, and Research Data</text>
+
+  <!-- Node 1 -->
+  <rect x="95" y="205" width="300" height="105" class="node" fill="url(#audio)"/>
+  <text x="120" y="236" class="node-title">音频入口</text>
+  <text x="120" y="259" class="node-subtitle">HomePageClient</text>
+  <rect x="116" y="272" width="258" height="25" class="io"/>
+  <text x="128" y="289" class="text">Input: 示例 / 搜索 / 上传</text>
+  <text x="128" y="306" class="text">Output: File + audio URL</text>
+
+  <!-- Node 2 -->
+  <rect x="455" y="205" width="335" height="105" class="node" fill="url(#audio)"/>
+  <text x="480" y="236" class="node-title">音频解码与帧级特征</text>
+  <text x="480" y="259" class="node-subtitle">Web Audio API + Meyda</text>
+  <rect x="476" y="272" width="293" height="25" class="io"/>
+  <text x="488" y="289" class="text">Input: audio buffer</text>
+  <text x="488" y="306" class="text">Output: RMS / ZCR / MFCC / spectral features</text>
+
+  <!-- Node 3 -->
+  <rect x="850" y="195" width="400" height="125" class="node" fill="url(#audio)"/>
+  <text x="875" y="226" class="node-title">可解释音乐证据</text>
+  <text x="875" y="249" class="node-subtitle">feature aggregation and heuristic interpretation</text>
+  <rect x="876" y="264" width="348" height="42" class="io"/>
+  <text x="888" y="281" class="text">Input: low-level descriptors + BPM</text>
+  <text x="888" y="299" class="text">Output: musicAnalysis JSON</text>
+  <text x="888" y="316" class="small">energy, brightness, segments, salientMoments, curves</text>
+
+  <!-- Node 4 -->
+  <rect x="1310" y="205" width="340" height="105" class="node" fill="url(#audio)"/>
+  <text x="1335" y="236" class="node-title">前端状态传递</text>
+  <text x="1335" y="259" class="node-subtitle">sessionStorage</text>
+  <rect x="1336" y="272" width="288" height="25" class="io"/>
+  <text x="1348" y="289" class="text">Input: audio metadata + musicAnalysis</text>
+  <text x="1348" y="306" class="text">Output: select/listen/result page state</text>
+
+  <!-- Node 5 -->
+  <rect x="155" y="430" width="350" height="130" class="node" fill="url(#semantic)"/>
+  <text x="180" y="462" class="node-title">音乐家角色选择</text>
+  <text x="180" y="485" class="node-subtitle">1-4 persona agents</text>
+  <rect x="181" y="500" width="298" height="42" class="io"/>
+  <text x="193" y="517" class="text">Input: selected character IDs</text>
+  <text x="193" y="535" class="text">Output: agent roster + temperatures</text>
+
+  <!-- Node 6 -->
+  <rect x="575" y="430" width="395" height="130" class="node" fill="url(#semantic)"/>
+  <text x="600" y="462" class="node-title">多智能体音乐评论</text>
+  <text x="600" y="485" class="node-subtitle">/api/comment + LLM</text>
+  <rect x="601" y="500" width="343" height="42" class="io"/>
+  <text x="613" y="517" class="text">Input: characterId + musicAnalysis</text>
+  <text x="613" y="535" class="text">Output: characterName + comment + model</text>
+
+  <!-- Node 7 -->
+  <rect x="1040" y="430" width="360" height="130" class="node" fill="url(#semantic)"/>
+  <text x="1065" y="462" class="node-title">用户共创信号</text>
+  <text x="1065" y="485" class="node-subtitle">listen page interaction</text>
+  <rect x="1066" y="500" width="308" height="42" class="io"/>
+  <text x="1078" y="517" class="text">Input: comments + user note + resonance</text>
+  <text x="1078" y="535" class="text">Output: weighted comments + presets</text>
+
+  <!-- Node 8 -->
+  <rect x="180" y="725" width="405" height="130" class="node" fill="url(#gen)"/>
+  <text x="205" y="757" class="node-title">Prompt Director</text>
+  <text x="205" y="780" class="node-subtitle">cross-modal visual planning</text>
+  <rect x="206" y="795" width="353" height="42" class="io"/>
+  <text x="218" y="812" class="text">Input: evidence + comments + weights + presets</text>
+  <text x="218" y="830" class="text">Output: structured visual brief JSON</text>
+
+  <!-- Node 9 -->
+  <rect x="660" y="725" width="400" height="130" class="node" fill="url(#gen)"/>
+  <text x="685" y="757" class="node-title">校验与修复循环</text>
+  <text x="685" y="780" class="node-subtitle">validation, repair, fallback</text>
+  <rect x="686" y="795" width="348" height="42" class="io"/>
+  <text x="698" y="812" class="text">Input: brief.finalPrompt + negativePrompt</text>
+  <text x="698" y="830" class="text">Output: validated prompt or deterministic fallback</text>
+
+  <!-- Node 10 -->
+  <rect x="1135" y="725" width="390" height="130" class="node" fill="url(#gen)"/>
+  <text x="1160" y="757" class="node-title">图像生成服务</text>
+  <text x="1160" y="780" class="node-subtitle">DashScope / wan2.7-image</text>
+  <rect x="1161" y="795" width="338" height="42" class="io"/>
+  <text x="1173" y="812" class="text">Input: final image prompt + negative prompt</text>
+  <text x="1173" y="830" class="text">Output: remote image URL + request metadata</text>
+
+  <!-- Node 11 -->
+  <rect x="112" y="1000" width="360" height="65" class="node" fill="url(#eval)"/>
+  <text x="135" y="1029" class="node-title">生成产物</text>
+  <text x="135" y="1054" class="text">Output: /public/generated image + result page</text>
+
+  <!-- Node 12 -->
+  <rect x="535" y="1000" width="450" height="65" class="node" fill="url(#eval)"/>
+  <text x="558" y="1029" class="node-title">可追踪日志</text>
+  <text x="558" y="1054" class="text">Output: runLog, promptDirector attempts, timings</text>
+
+  <!-- Node 13 -->
+  <rect x="1048" y="1000" width="475" height="65" class="node" fill="url(#eval)"/>
+  <text x="1071" y="1029" class="node-title">研究数据库与反馈</text>
+  <text x="1071" y="1054" class="text">Output: generation_runs + generation_feedback</text>
+
+  <!-- Edges Layer 1 -->
+  <path class="edge" d="M395 257 C420 257, 430 257, 455 257"/>
+  <path class="edge" d="M790 257 C815 257, 825 257, 850 257"/>
+  <path class="edge" d="M1250 257 C1275 257, 1285 257, 1310 257"/>
+
+  <!-- Evidence to comments and prompt director -->
+  <path class="edge" d="M1480 310 C1480 356, 772 356, 772 430"/>
+  <text x="895" y="348" class="mono">musicAnalysis</text>
+  <path class="edge-soft" d="M1050 320 C1050 565, 382 565, 382 725"/>
+  <text x="560" y="604" class="mono">audio evidence reused</text>
+
+  <!-- Layer 2 edges -->
+  <path class="edge" d="M505 495 C530 495, 550 495, 575 495"/>
+  <path class="edge" d="M970 495 C995 495, 1015 495, 1040 495"/>
+  <path class="edge" d="M1220 560 C1220 650, 382 650, 382 725"/>
+  <text x="640" y="642" class="mono">weighted comments + user note</text>
+
+  <!-- Layer 3 edges -->
+  <path class="edge" d="M585 790 C615 790, 630 790, 660 790"/>
+  <path class="loop" d="M860 855 C860 905, 560 905, 560 785 C585 760, 620 760, 660 760"/>
+  <text x="610" y="918" class="mono">repair when validation fails</text>
+  <path class="edge" d="M1060 790 C1090 790, 1105 790, 1135 790"/>
+
+  <!-- Outputs -->
+  <path class="edge" d="M1330 855 C1330 920, 292 920, 292 1000"/>
+  <path class="edge" d="M1330 855 C1330 930, 760 930, 760 1000"/>
+  <path class="edge" d="M1330 855 C1330 930, 1285 930, 1285 1000"/>
+
+  <!-- Evaluation feedback back into co-creation -->
+  <path class="edge-soft" d="M1285 1000 C1285 905, 1505 905, 1505 495 C1505 470, 1435 470, 1400 495"/>
+  <text x="1395" y="924" class="mono">feedback for iterative studies</text>
+
+  <!-- Side notes -->
+  <rect x="1420" y="420" width="250" height="170" rx="16" fill="rgba(255,255,255,0.52)" stroke="rgba(45,55,72,0.14)"/>
+  <text x="1440" y="450" class="label">Explicit Research Variables</text>
+  <text x="1440" y="478" class="small">X1: acoustic descriptors</text>
+  <text x="1440" y="501" class="small">X2: persona selection</text>
+  <text x="1440" y="524" class="small">X3: resonance weights</text>
+  <text x="1440" y="547" class="small">X4: visual presets</text>
+  <text x="1440" y="570" class="small">Y: image match / aesthetic scores</text>
+
+  <rect x="1545" y="725" width="145" height="130" rx="16" fill="rgba(255,255,255,0.52)" stroke="rgba(45,55,72,0.14)"/>
+  <text x="1564" y="755" class="label">Key Constraint</text>
+  <text x="1564" y="785" class="small">No visible text</text>
+  <text x="1564" y="808" class="small">No people/faces</text>
+  <text x="1564" y="831" class="small">Trace every input</text>
+
+  <text x="80" y="1125" class="small">Figure. MelodyVision as an interpretable, multi-agent, cross-modal music-to-image generation pipeline. Each module lists its main input and output.</text>
+</svg>

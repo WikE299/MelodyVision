@@ -5,30 +5,47 @@ import { useCallback, useState, useRef } from "react";
 interface AudioUploaderProps {
   onFileSelect: (file: File) => void;
   disabled?: boolean;
+  language?: "zh" | "en";
 }
 
-export default function AudioUploader({ onFileSelect, disabled }: AudioUploaderProps) {
+const COPY = {
+  zh: {
+    formatError: "支持格式：MP3 / WAV / FLAC / OGG",
+    sizeError: "文件大小不能超过 20MB",
+    title: "拖拽音频到这里",
+    meta: "MP3 · WAV · FLAC · OGG · 最大 20MB",
+  },
+  en: {
+    formatError: "Supported formats: MP3 / WAV / FLAC / OGG",
+    sizeError: "File size must be under 20MB",
+    title: "Drop audio here",
+    meta: "MP3 · WAV · FLAC · OGG · Max 20MB",
+  },
+};
+
+export default function AudioUploader({ onFileSelect, disabled, language = "zh" }: AudioUploaderProps) {
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const copy = COPY[language];
 
   const validateFile = useCallback((file: File): boolean => {
     setError(null);
 
-    const allowedExts = [".mp3", ".wav", ".flac"];
+    const allowedExts = [".mp3", ".wav", ".flac", ".ogg"];
     const ext = "." + file.name.split(".").pop()?.toLowerCase();
     if (!allowedExts.includes(ext)) {
-      setError("支持格式：MP3 / WAV / FLAC");
+      setError(copy.formatError);
       return false;
     }
 
     if (file.size > 20 * 1024 * 1024) {
-      setError("文件大小不能超过 20MB");
+      setError(copy.sizeError);
       return false;
     }
 
     return true;
-  }, []);
+  }, [copy.formatError, copy.sizeError]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -69,46 +86,49 @@ export default function AudioUploader({ onFileSelect, disabled }: AudioUploaderP
         onDrop={handleDrop}
         onClick={() => !disabled && inputRef.current?.click()}
         className={`
-          relative flex flex-col items-center justify-center
-          w-full h-48 rounded-2xl border-2 border-dashed
-          cursor-pointer transition-all duration-200
+          group relative flex flex-col items-center justify-center
+          h-52 w-full overflow-hidden rounded-[28px] border border-dashed
+          cursor-pointer transition-all duration-300
           ${
             disabled
-              ? "opacity-50 cursor-not-allowed border-gray-300 bg-gray-50"
+              ? "cursor-not-allowed border-[#d8b27a]/35 bg-[#caa27e]/25 opacity-70"
               : dragActive
-              ? "border-blue-500 bg-blue-50 scale-[1.02]"
-              : "border-gray-300 bg-white hover:border-gray-400 hover:bg-gray-50"
+              ? "scale-[1.02] border-[#ffe0a6] bg-[#d6b08b]/35 shadow-[0_0_60px_rgba(255,198,112,0.32)]"
+              : "border-[#ffe0a6]/70 bg-[#c9a184]/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_18px_70px_rgba(18,12,20,0.35)] hover:border-[#ffe8bf] hover:bg-[#d0aa8c]/45"
           }
         `}
       >
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,244,216,0.36),transparent_48%),linear-gradient(180deg,rgba(255,255,255,0.18),rgba(97,61,59,0.08))]" />
+        <div className="absolute inset-x-5 top-4 border-t border-dashed border-white/45" />
+        <div className="absolute inset-x-5 bottom-4 border-t border-dashed border-white/25" />
         <input
           ref={inputRef}
           type="file"
-          accept=".mp3,.wav,.flac,audio/mpeg,audio/wav,audio/flac"
+          accept=".mp3,.wav,.flac,.ogg,audio/mpeg,audio/wav,audio/flac,audio/ogg,application/ogg"
           onChange={handleChange}
           className="hidden"
           disabled={disabled}
         />
 
-        <div className="flex flex-col items-center gap-3 text-center px-4">
-          <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-            <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+        <div className="relative flex flex-col items-center gap-4 px-4 text-center text-[#fff0d2]">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/30 bg-white/16 shadow-[0_0_34px_rgba(255,223,175,0.28)] backdrop-blur">
+            <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 19V5m0 0-5 5m5-5 5 5" />
             </svg>
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-700">
-              拖拽音频到这里，或点击选择
+            <p className="text-2xl font-medium tracking-wide">
+              {copy.title}
             </p>
-            <p className="text-xs text-gray-400 mt-1">
-              支持 MP3 / WAV / FLAC，最大 20MB
+            <p className="mt-3 text-base text-white/80">
+              {copy.meta}
             </p>
           </div>
         </div>
       </div>
 
       {error && (
-        <p className="mt-2 text-sm text-red-500 text-center">{error}</p>
+        <p className="mt-3 text-center text-sm text-[#ffd2c7]">{error}</p>
       )}
     </div>
   );

@@ -1,0 +1,8 @@
+data/
+logs/
+public/generated/
+services/audio-analysis/.cache/
+services/audio-analysis/.venv/
+services/audio-analysis/results/
+local-assets/
+cloudflare-tunnel-setup.txt

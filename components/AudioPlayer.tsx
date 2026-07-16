@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 
 interface AudioPlayerProps {
   file: File | null;
@@ -12,15 +12,12 @@ export default function AudioPlayer({ file, onTimeUpdate }: AudioPlayerProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const objectUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
 
   useEffect(() => {
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setObjectUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-  }, [file]);
+    if (!objectUrl) return;
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [objectUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;
