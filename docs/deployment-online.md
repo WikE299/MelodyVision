@@ -1,6 +1,6 @@
 # MelodyVision Zero-Cost Online Deployment
 
-This is the primary public deployment path. It uses Vercel for Next.js, a Hugging Face Docker Space for rich audio analysis, and Supabase for PostgreSQL plus generated-image storage.
+This is the primary public deployment path. It uses Vercel for Next.js, a Render Free web service for librosa audio analysis, and Supabase for PostgreSQL plus generated-image storage.
 
 ## 1. Supabase
 
@@ -22,32 +22,30 @@ SUPABASE_DATABASE_URL
 
 Use the Supavisor transaction-pooler connection string for `SUPABASE_DATABASE_URL`. Do not expose either database secret to the browser.
 
-## 2. Hugging Face Space
+## 2. Render audio service
 
-Create a public Docker Space, for example `WikE299/melodyvision-audio`. CPU Basic is sufficient for the prototype, but it sleeps when unused.
+Create a Render Blueprint from this repository and select `render.yaml`. The Blueprint creates the public `melodyvision-audio` Docker web service on the Free plan in Singapore.
 
-Create a Hugging Face write token, then add these GitHub repository secrets:
+The Render image uses `services/audio-analysis/Dockerfile.render`. It keeps the librosa signal, rhythm, tonality, dynamics, timbre, and section analysis while disabling CLAP and its PyTorch runtime so the service fits the Free instance's 512 MB memory limit.
 
-```text
-HF_TOKEN=<write token>
-HF_SPACE_REPO=WikE299/melodyvision-audio
-```
-
-In the Space settings add:
+The Blueprint configures:
 
 ```text
-AUDIO_ANALYSIS_ALLOWED_ORIGINS=https://<production-project>.vercel.app,http://localhost:3000
+CLAP_DISABLED=1
+CLAP_PRELOAD=0
+AUDIO_ANALYSIS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+AUDIO_ANALYSIS_ALLOWED_ORIGIN_REGEX=^https://melodyvision(?:-[a-z0-9-]+)?\.vercel\.app$
 ```
 
-Run the `Deploy Hugging Face Audio Service` GitHub Action once. It publishes `services/audio-analysis` and rebuilds automatically when that folder changes on `main`.
+Render deploys from `codex/version2-co-creation` while Version 2 is being validated. Change `branch` to `main` after the branch is merged.
 
 Verify:
 
 ```bash
-curl https://<space>.hf.space/health
+curl https://melodyvision-audio.onrender.com/health
 ```
 
-The first build downloads the CLAP model into the Docker image. A cold Space can take several minutes to wake.
+Free Render web services sleep after 15 minutes without inbound traffic. A cold service typically takes about one minute to wake.
 
 ## 3. Vercel
 
@@ -59,8 +57,8 @@ SUPABASE_DATABASE_URL=<Supavisor transaction-pooler URL>
 SUPABASE_URL=<project URL>
 SUPABASE_SERVICE_ROLE_KEY=<server-only service role key>
 SUPABASE_GENERATED_BUCKET=generated
-NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://<space>.hf.space
-AUDIO_ANALYSIS_URL=https://<space>.hf.space
+NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://melodyvision-audio.onrender.com
+AUDIO_ANALYSIS_URL=https://melodyvision-audio.onrender.com
 LLM_API_KEY=<server-only key>
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-v4-flash
@@ -117,7 +115,7 @@ Test MP3, WAV, FLAC, OGG, a Jamendo result, image persistence after refresh, fee
 ## Free-Tier Limits
 
 - Vercel Hobby is for personal, non-commercial use and does not provide a production SLA.
-- Hugging Face CPU Basic sleeps after inactivity; the page remains available while the analyzer wakes.
+- Render Free sleeps after 15 minutes of inactivity and provides 512 MB RAM, so the hosted analyzer intentionally omits CLAP.
 - Supabase Free can pause inactive projects and provides limited database, storage, and egress quotas.
 - DeepSeek and DashScope usage is billed separately from hosting.
 

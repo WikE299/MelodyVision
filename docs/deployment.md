@@ -1,6 +1,6 @@
 # MelodyVision Deployment Notes
 
-The primary public deployment has moved to Vercel + Hugging Face + Supabase. See [deployment-online.md](./deployment-online.md). The Windows instructions below are retained as a manual fallback and are no longer triggered by GitHub pushes.
+The primary public deployment has moved to Vercel + Render + Supabase. See [deployment-online.md](./deployment-online.md). The Windows instructions below are retained as a manual fallback and are no longer triggered by GitHub pushes.
 
 Last updated: 2026-07-11
 

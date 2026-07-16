@@ -57,10 +57,10 @@ Local development can proxy through Next.js. The Vercel deployment sends uploads
 
 ```text
 AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
-NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://your-space.hf.space
+NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://melodyvision-audio.onrender.com
 ```
 
-Set `AUDIO_ANALYSIS_ALLOWED_ORIGINS` in the Space settings to the comma-separated production and local origins. Search results use `POST /analyze-remote`; that endpoint only accepts Jamendo HTTPS hosts and never retains the downloaded audio.
+The zero-cost Render deployment uses `Dockerfile.render`, which disables CLAP to fit the Free instance memory limit while preserving the librosa signal path. Set `AUDIO_ANALYSIS_ALLOWED_ORIGINS` and `AUDIO_ANALYSIS_ALLOWED_ORIGIN_REGEX` to the production and local origins. Search results use `POST /analyze-remote`; that endpoint only accepts Jamendo HTTPS hosts and never retains the downloaded audio.
 
 The browser does not run Meyda alongside a successful rich analysis request. Meyda is started only when this service fails and `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is explicitly enabled, which avoids blocking the page on long uploads. The product flow otherwise stops with a visible error when this service is unavailable. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
 

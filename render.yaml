@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: melodyvision-audio
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: codex/version2-co-creation
+    autoDeployTrigger: commit
+    dockerfilePath: services/audio-analysis/Dockerfile.render
+    dockerContext: services/audio-analysis
+    healthCheckPath: /health
+    envVars:
+      - key: CLAP_DISABLED
+        value: "1"
+      - key: CLAP_PRELOAD
+        value: "0"
+      - key: AUDIO_ANALYSIS_ALLOWED_ORIGINS
+        value: http://localhost:3000,http://127.0.0.1:3000
+      - key: AUDIO_ANALYSIS_ALLOWED_ORIGIN_REGEX
+        value: ^https://melodyvision(?:-[a-z0-9-]+)?\.vercel\.app$
