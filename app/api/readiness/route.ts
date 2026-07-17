@@ -2,7 +2,7 @@ import { getDatabase, usesSupabaseDatabase } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 15;
+export const maxDuration = 35;
 
 async function databaseStatus() {
   try {
@@ -18,7 +18,24 @@ async function databaseStatus() {
   }
 }
 
-async function audioAnalysisStatus() {
+async function audioAnalysisStatus(request: Request) {
+  if (process.env.AUDIO_ANALYSIS_PROVIDER === "vercel-python") {
+    try {
+      const response = await fetch(new URL("/api/audio-profile", request.url), {
+        cache: "no-store",
+        signal: AbortSignal.timeout(25_000),
+      });
+      return {
+        status: response.ok ? "ok" : "warming",
+        provider: "vercel-python",
+        httpStatus: response.status,
+      };
+    } catch (error) {
+      console.error("Readiness Python audio check failed:", error);
+      return { status: "warming", provider: "vercel-python" };
+    }
+  }
+
   const baseUrl = (
     process.env.AUDIO_ANALYSIS_URL ||
     process.env.NEXT_PUBLIC_AUDIO_ANALYSIS_URL ||
@@ -29,17 +46,21 @@ async function audioAnalysisStatus() {
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });
-    return { status: response.ok ? "ok" : "warming", httpStatus: response.status };
+    return {
+      status: response.ok ? "ok" : "warming",
+      provider: "external",
+      httpStatus: response.status,
+    };
   } catch (error) {
     console.error("Readiness audio check failed:", error);
-    return { status: "warming" };
+    return { status: "warming", provider: "external" };
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const [database, audioAnalysis] = await Promise.all([
     databaseStatus(),
-    audioAnalysisStatus(),
+    audioAnalysisStatus(request),
   ]);
   return Response.json({
     status: database.status === "ok" && audioAnalysis.status === "ok" ? "ready" : "warming",

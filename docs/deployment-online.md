@@ -1,18 +1,24 @@
 # MelodyVision Zero-Cost Online Deployment
 
-This is the primary public deployment path. It uses Vercel for Next.js, a Render Free web service for librosa audio analysis, and Supabase for PostgreSQL plus generated-image storage.
+The public deployment uses Vercel for Next.js and librosa analysis, plus
+Supabase for PostgreSQL, temporary audio transfer, and generated-image storage.
+It does not require Render, a credit card, a custom domain, or a continuously
+running server.
 
 ## 1. Supabase
 
-Create one Free project in a region near the intended audience. Open SQL Editor and run:
+Create one Free project and apply:
 
 ```text
 supabase/migrations/20260715000000_melodyvision_schema.sql
+supabase/migrations/20260717000000_audio_analysis_storage.sql
 ```
 
-The migration creates the research tables, indexes, the public `generated` bucket, and read-only public access for generated artwork. Uploads still require the Service Role key.
+The migrations create the research tables, the public `generated` artwork
+bucket, and a private `audio-analysis` bucket. Audio objects are limited to
+20 MB and deleted after analysis.
 
-Collect these values from Project Settings:
+Collect:
 
 ```text
 SUPABASE_URL
@@ -20,36 +26,13 @@ SUPABASE_SERVICE_ROLE_KEY
 SUPABASE_DATABASE_URL
 ```
 
-Use the Supavisor transaction-pooler connection string for `SUPABASE_DATABASE_URL`. Do not expose either database secret to the browser.
+Use the Supavisor transaction-pooler URL for `SUPABASE_DATABASE_URL`. The
+database password and Service Role key must remain server-only.
 
-## 2. Render audio service
+## 2. Vercel
 
-Create a Render Blueprint from this repository and select `render.yaml`. The Blueprint creates the public `melodyvision-audio` Docker web service on the Free plan in Singapore.
-
-The Render image uses `services/audio-analysis/Dockerfile.render`. It keeps the librosa signal, rhythm, tonality, dynamics, timbre, and section analysis while disabling CLAP and its PyTorch runtime so the service fits the Free instance's 512 MB memory limit.
-
-The Blueprint configures:
-
-```text
-CLAP_DISABLED=1
-CLAP_PRELOAD=0
-AUDIO_ANALYSIS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-AUDIO_ANALYSIS_ALLOWED_ORIGIN_REGEX=^https://melodyvision(?:-[a-z0-9-]+)?\.vercel\.app$
-```
-
-Render deploys automatically from `main` after the Version 2 pull request is merged.
-
-Verify:
-
-```bash
-curl https://melodyvision-audio.onrender.com/health
-```
-
-Free Render web services sleep after 15 minutes without inbound traffic. A cold service typically takes about one minute to wake.
-
-## 3. Vercel
-
-Import the GitHub repository into a personal Hobby project and set `main` as the production branch. Configure the following Production environment variables:
+Import the GitHub repository into a personal Hobby project and use `main` as
+the production branch. Configure these Production environment variables:
 
 ```text
 DATABASE_PROVIDER=supabase
@@ -57,8 +40,9 @@ SUPABASE_DATABASE_URL=<Supavisor transaction-pooler URL>
 SUPABASE_URL=<project URL>
 SUPABASE_SERVICE_ROLE_KEY=<server-only service role key>
 SUPABASE_GENERATED_BUCKET=generated
-NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://melodyvision-audio.onrender.com
-AUDIO_ANALYSIS_URL=https://melodyvision-audio.onrender.com
+SUPABASE_AUDIO_BUCKET=audio-analysis
+AUDIO_ANALYSIS_PROVIDER=vercel-python
+NEXT_PUBLIC_AUDIO_ANALYSIS_PROVIDER=vercel-python
 LLM_API_KEY=<server-only key>
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-v4-flash
@@ -70,34 +54,48 @@ JAMENDO_CLIENT_ID=<Jamendo client id>
 EXPERIMENT_EXPORT_TOKEN=<long random value>
 ```
 
-`NEXT_PUBLIC_AUDIO_ANALYSIS_URL` is embedded at build time. Redeploy after changing it. Keep Preview deployments without production secrets unless they intentionally share the same research database.
+Do not set `AUDIO_ANALYSIS_URL` or `NEXT_PUBLIC_AUDIO_ANALYSIS_URL` in
+production. `NEXT_PUBLIC_AUDIO_ANALYSIS_PROVIDER` is embedded at build time, so
+redeploy after changing it.
 
-Verify the deployed application:
+`api/audio-profile.py` runs on Vercel Python 3.12. It reuses the deterministic
+librosa analyzer from `services/audio-analysis`; CLAP remains disabled to keep
+the free function bundle and cold start under control.
+
+Verify:
 
 ```bash
 curl https://<production-project>.vercel.app/api/readiness
 ```
 
-Expected status after the Space is warm:
+Expected result:
 
 ```json
 {
   "status": "ready",
   "app": { "status": "ok" },
   "database": { "status": "ok", "provider": "supabase" },
-  "audioAnalysis": { "status": "ok" },
+  "audioAnalysis": { "status": "ok", "provider": "vercel-python" },
   "storage": { "status": "configured" }
 }
 ```
 
 ## Data Flow
 
-- Uploads go directly from the browser to `POST <space>/analyze`.
-- Jamendo search stays on `/api/music/search`; the Space receives an allowlisted URL through `POST <space>/analyze-remote`.
+- The browser requests a two-hour signed upload URL from
+  `/api/audio/upload-ticket`, then uploads directly to the private Supabase
+  bucket. Audio bytes do not pass through a Next.js Function.
+- The browser sends only the private object path to `/api/audio-profile`.
+- Jamendo search sends an allowlisted HTTPS URL to the Python Function, which
+  downloads at most 20 MB.
+- The Python Function analyzes at most the first 60 seconds and deletes the raw
+  audio object in a `finally` block.
 - LLM and image generation calls remain server-side on Vercel.
-- The temporary DashScope image is copied to Supabase before `/api/generate` returns.
+- The temporary DashScope image is copied to Supabase before `/api/generate`
+  returns.
 - Successful generation logs are stored in `generation_runs.run_log_json`.
-- Local development continues to use SQLite and `public/generated` unless `DATABASE_PROVIDER=supabase` is set.
+- Local development continues to use the standalone Python service, SQLite,
+  and `public/generated` unless production providers are explicitly enabled.
 
 ## Release Checks
 
@@ -109,13 +107,18 @@ cd services/audio-analysis
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Test MP3, WAV, FLAC, OGG, a Jamendo result, image persistence after refresh, feedback, experiment export, and a cold Space wake-up before sharing the link.
+Test MP3, WAV, FLAC, OGG, a Jamendo result, persistence after refresh,
+feedback, experiment export, and a cold Python Function invocation.
 
 ## Free-Tier Limits
 
-- Vercel Hobby is for personal, non-commercial use and does not provide a production SLA.
-- Render Free sleeps after 15 minutes of inactivity and provides 512 MB RAM, so the hosted analyzer intentionally omits CLAP.
-- Supabase Free can pause inactive projects and provides limited database, storage, and egress quotas.
+- Vercel Hobby is for personal, non-commercial use and has no production SLA.
+- Vercel Functions have finite monthly CPU and transfer allowances. The
+  analyzer omits CLAP and processes no more than 60 seconds per request.
+- Supabase Free can pause inactive projects and has limited database, storage,
+  and egress quotas.
 - DeepSeek and DashScope usage is billed separately from hosting.
 
-After the online chain is verified, the Windows application, Cloudflare quick tunnel, and self-hosted GitHub runner can be stopped. The Windows deployment workflow remains available only through manual dispatch.
+After the online chain is verified, the Windows application, Cloudflare quick
+tunnel, and self-hosted GitHub runner can remain stopped. The Windows deployment
+workflow is retained only as a manual fallback.
