@@ -1,3 +1,5 @@
+import { isAllowedJamendoAudioUrl } from "@/lib/audio/external-music";
+
 export const runtime = "nodejs";
 
 const JAMENDO_TRACKS_URL = "https://api.jamendo.com/v3.0/tracks/";
@@ -43,24 +45,36 @@ async function getTrack(id: string) {
 }
 
 export async function GET(request: Request) {
-  if (!getJamendoClientId()) {
-    return Response.json({ error: "JAMENDO_CLIENT_ID is not configured" }, { status: 503 });
-  }
-
   const url = new URL(request.url);
   const id = url.searchParams.get("id")?.trim();
-  if (!id) {
-    return Response.json({ error: "id is required" }, { status: 400 });
+  const source = url.searchParams.get("source")?.trim() || "";
+  if (!id && !source) {
+    return Response.json({ error: "id or source is required" }, { status: 400 });
   }
 
   let track: JamendoTrack | null;
-  try {
-    track = await getTrack(id);
-  } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? `Track lookup failed: ${error.message}` : "Track lookup failed" },
-      { status: 502 }
-    );
+  if (source) {
+    if (!isAllowedJamendoAudioUrl(source)) {
+      return Response.json({ error: "Unsupported audio source" }, { status: 400 });
+    }
+    track = {
+      id,
+      name: id || "jamendo-preview",
+      audiodownload: source,
+      audiodownload_allowed: true,
+    };
+  } else {
+    if (!getJamendoClientId()) {
+      return Response.json({ error: "JAMENDO_CLIENT_ID is not configured" }, { status: 503 });
+    }
+    try {
+      track = await getTrack(id!);
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? `Track lookup failed: ${error.message}` : "Track lookup failed" },
+        { status: 502 }
+      );
+    }
   }
   if (!track) {
     return Response.json({ error: "Track not found" }, { status: 404 });
@@ -92,9 +106,11 @@ export async function GET(request: Request) {
 
   return new Response(audio, {
     headers: {
-      "Content-Type": "audio/mpeg",
+      "Content-Type": audioRes.headers.get("content-type")?.startsWith("audio/")
+        ? audioRes.headers.get("content-type")!
+        : "audio/mpeg",
       "Content-Length": String(audio.byteLength),
-      "Content-Disposition": `attachment; filename="${safeFilename(track.name || id)}.mp3"`,
+      "Content-Disposition": `attachment; filename="${safeFilename(track.name || id || "jamendo-track")}.mp3"`,
       "Cache-Control": "private, max-age=3600",
     },
   });

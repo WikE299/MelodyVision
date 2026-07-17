@@ -11,6 +11,7 @@ export type StudyTrialStatus =
   | "evaluating"
   | "completed";
 export type BaselineJobStatus = "pending" | "running" | "completed" | "failed";
+export const CURRENT_STUDY_PROTOCOL_VERSION = "v2-14-labeled-comparison";
 
 export interface StudyTrial {
   id: string;
@@ -21,6 +22,8 @@ export interface StudyTrial {
   musicProfileId: string;
   coCreatedRunId: string | null;
   baselineRunId: string | null;
+  protocolVersion: string;
+  /** @deprecated Preserved only for trials created by the former blind-comparison protocol. */
   comparisonOrder: ComparisonOrder | null;
   status: StudyTrialStatus;
   createdAt: IsoDateTime;

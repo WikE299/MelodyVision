@@ -120,6 +120,15 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
       imaginationMatchScore: 5,
       agencyScore: 4,
       ownershipScore: 5,
+      immersionScore: 4,
+      satisfactionScore: 5,
+    });
+    await evaluations.saveLabeledComparison({
+      trialId: trial.id,
+      musicMatchChoice: "co_created",
+      imaginationMatchChoice: "co_created",
+      overallChoice: "co_created",
+      reason: "The co-created result preserved the imagined bridge.",
     });
     await evaluations.savePairwiseComparison({
       trialId: trial.id,
@@ -127,7 +136,13 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
       musicMatchChoice: "co_created",
       aestheticChoice: "tie",
       overallChoice: "co_created",
-      reason: "The co-created result preserved the imagined bridge.",
+      reason: "Legacy blind-comparison record.",
+    });
+    await evaluations.saveManipulationCheck({
+      trialId: trial.id,
+      perspectiveMultiplicityScore: 5,
+      articulationSupportScore: 4,
+      dialogueExperienceScore: 5,
     });
 
     const restored = await trials.getStudyTrial(trial.id);
@@ -137,12 +152,18 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
     const exported = await exports.exportExperimentJson();
     assert.equal(restored?.baselineRunId, "run-baseline");
     assert.equal(restored?.coCreatedRunId, "run-co-created");
+    assert.equal(restored?.protocolVersion, "v2-14-labeled-comparison");
     assert.equal(restored?.status, "completed");
     assert.equal(job?.status, "completed");
     assert.equal(result?.generationRole, "direct_baseline");
     assert.equal(result?.imageSize, "1696*960");
     assert.equal(evaluation.artwork?.ownership_score, 5);
     assert.equal(evaluation.comparison?.overall_choice, "co_created");
+    assert.equal(evaluation.labeledComparison?.imagination_match_choice, "co_created");
+    assert.equal(evaluation.manipulation?.articulation_support_score, 4);
+    assert.equal(exported.schemaVersion, 4);
+    assert.equal(exported.labeledComparisons.length, 1);
+    assert.equal(exported.manipulationChecks.length, 1);
     assert.equal(exported.trials.length, 14);
     assert.equal(exported.trials.some((item) => item.id === "recovered-trial"), true);
     assert.equal(exported.runs.filter((run) => run.trial_id === trial.id).length, 2);

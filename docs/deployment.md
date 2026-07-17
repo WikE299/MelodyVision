@@ -134,22 +134,22 @@ These are server-only values. Do not prefix them with `NEXT_PUBLIC_`. Research e
 
 The deployment script requires Node.js 22.13 or newer and Python 3.12 through the Windows `py` launcher. Node 22.13+ is required by the built-in SQLite research store. The script creates `services/audio-analysis/.venv`, installs dependencies when `requirements.txt` changes, and starts the analyzer on `127.0.0.1:8001`.
 
-For local Version 2 development, start the Python analyzer before Next.js, or use the combined command after creating the Python 3.12 virtual environment:
+For local Version 2 development, `npm run dev` starts both the Python analyzer and Next.js after the Python 3.12 virtual environment has been created. `npm run dev:full` is an alias for the same combined command. To start the services separately, run the analyzer first:
 
 ```bash
 cd services/audio-analysis
 CLAP_DISABLED=1 CLAP_PRELOAD=0 HF_HOME=.cache/huggingface .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-Then run `npm run dev` from the repository root, or run `npm run dev:full` to start both services. Check the proxy with:
+Then run `npm run dev:web` from the repository root. Check the proxy with:
 
 ```bash
 curl http://127.0.0.1:3000/api/analyze
 ```
 
-`npm run dev:full` uses the same deterministic local defaults so startup does not wait for a model download. Set `CLAP_DISABLED=0 CLAP_PRELOAD=1` explicitly only after the CLAP model is cached.
+The combined development command uses deterministic local defaults so startup does not wait for a model download. Set `CLAP_DISABLED=0 CLAP_PRELOAD=1` explicitly only after the CLAP model is cached.
 
-The normal product flow requires the rich analyzer. `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is an explicit visual-only local-development escape hatch and must not be set for user studies or public deployment.
+Formal studies and public deployment require the rich analyzer. In ordinary demo mode only, a locally available audio file can fall back to the browser Meyda analyzer if the rich service fails; that degraded result is visibly marked and does not create a formal StudyTrial.
 
 The deployment is considered healthy only when both `/health` on port `8001` and the Next.js root on port `3000` respond. The first analyzer start may download and warm the CLAP model, so its health-check window is four minutes. A failed check restores and rebuilds the pre-deployment Git commit.
 

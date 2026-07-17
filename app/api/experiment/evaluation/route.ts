@@ -3,7 +3,8 @@ import { getStudyTrial } from "@/lib/db/study-trials";
 import {
   getTrialEvaluationState,
   saveArtworkEvaluation,
-  savePairwiseComparison,
+  saveLabeledComparison,
+  saveManipulationCheck,
   type ComparisonChoice,
 } from "@/lib/db/trial-evaluations";
 
@@ -41,6 +42,8 @@ export async function POST(request: NextRequest) {
         score(body.imaginationMatchScore),
         score(body.agencyScore),
         score(body.ownershipScore),
+        score(body.immersionScore),
+        score(body.satisfactionScore),
       ];
       if (scores.some((value) => value === null) || !trial.coCreatedRunId) {
         return Response.json({ error: "All artwork scores and a co-created run are required" }, { status: 400 });
@@ -52,26 +55,45 @@ export async function POST(request: NextRequest) {
         imaginationMatchScore: scores[1]!,
         agencyScore: scores[2]!,
         ownershipScore: scores[3]!,
+        immersionScore: scores[4]!,
+        satisfactionScore: scores[5]!,
       });
       return Response.json({ saved: true, stage: "artwork" });
     }
 
     if (body.stage === "comparison") {
       const musicMatchChoice = choice(body.musicMatchChoice);
-      const aestheticChoice = choice(body.aestheticChoice);
+      const imaginationMatchChoice = choice(body.imaginationMatchChoice);
       const overallChoice = choice(body.overallChoice);
-      if (!musicMatchChoice || !aestheticChoice || !overallChoice || !trial.baselineRunId || !trial.coCreatedRunId) {
-        return Response.json({ error: "A complete paired comparison is required" }, { status: 400 });
+      if (!musicMatchChoice || !imaginationMatchChoice || !overallChoice || !trial.baselineRunId || !trial.coCreatedRunId) {
+        return Response.json({ error: "A complete labeled comparison is required" }, { status: 400 });
       }
-      await savePairwiseComparison({
+      await saveLabeledComparison({
         trialId,
-        leftRole: trial.comparisonOrder === "co_created_left" ? "co_created" : "direct_baseline",
         musicMatchChoice,
-        aestheticChoice,
+        imaginationMatchChoice,
         overallChoice,
         reason: typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : "",
       });
-      return Response.json({ saved: true, stage: "comparison", revealed: true });
+      return Response.json({ saved: true, stage: "comparison" });
+    }
+
+    if (body.stage === "manipulation") {
+      const scores = [
+        score(body.perspectiveMultiplicityScore),
+        score(body.articulationSupportScore),
+        score(body.dialogueExperienceScore),
+      ];
+      if (scores.some((value) => value === null)) {
+        return Response.json({ error: "All interaction check scores are required" }, { status: 400 });
+      }
+      await saveManipulationCheck({
+        trialId,
+        perspectiveMultiplicityScore: scores[0]!,
+        articulationSupportScore: scores[1]!,
+        dialogueExperienceScore: scores[2]!,
+      });
+      return Response.json({ saved: true, stage: "manipulation" });
     }
 
     return Response.json({ error: "Unknown evaluation stage" }, { status: 400 });

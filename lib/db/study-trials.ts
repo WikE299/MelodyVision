@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { CURRENT_STUDY_PROTOCOL_VERSION } from "../contracts/study-trial.ts";
 import type {
   AssignmentMethod,
   BaselineJobStatus,
@@ -18,6 +19,7 @@ interface StudyTrialRow {
   music_profile_id: string;
   co_created_run_id: string | null;
   baseline_run_id: string | null;
+  protocol_version: string;
   comparison_order: ComparisonOrder;
   status: StudyTrialStatus;
   created_at: string;
@@ -34,6 +36,7 @@ function rowToTrial(row: StudyTrialRow): StudyTrial {
     musicProfileId: row.music_profile_id,
     coCreatedRunId: row.co_created_run_id,
     baselineRunId: row.baseline_run_id,
+    protocolVersion: row.protocol_version,
     comparisonOrder: row.comparison_order,
     status: row.status,
     createdAt: row.created_at,
@@ -79,15 +82,13 @@ async function insertStudyTrial(
 ): Promise<StudyTrial> {
   const id = input.id || randomUUID();
   const now = new Date().toISOString();
-  const comparisonOrder: ComparisonOrder = Math.random() < 0.5
-    ? "co_created_left"
-    : "baseline_left";
+  const legacyComparisonOrder: ComparisonOrder = "co_created_left";
   await database.prepare(`
     INSERT INTO study_trials (
       id, participant_id, session_id, condition, assignment_method,
       music_profile_id, co_created_run_id, baseline_run_id,
-      comparison_order, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'created', ?, ?)
+      protocol_version, comparison_order, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'created', ?, ?)
   `).run(
     id,
     input.participantId,
@@ -95,7 +96,8 @@ async function insertStudyTrial(
     input.condition,
     input.assignmentMethod,
     input.musicProfileId,
-    comparisonOrder,
+    CURRENT_STUDY_PROTOCOL_VERSION,
+    legacyComparisonOrder,
     now,
     now
   );

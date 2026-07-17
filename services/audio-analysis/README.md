@@ -49,7 +49,7 @@ curl -X POST http://127.0.0.1:8001/analyze \
   -F "file=@../../public/preset-audio/clips/bach-cello-prelude-clip.mp3"
 ```
 
-From the repository root, `npm run dev:full` starts both this service and Next.js after the virtual environment is ready. For a predictable local startup it defaults to `CLAP_DISABLED=1` and `CLAP_PRELOAD=0`; set `CLAP_DISABLED=0 CLAP_PRELOAD=1` explicitly after the CLAP model is cached when semantic evaluation is needed. The normal product flow requires this service; set `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` only for visual-only local development.
+From the repository root, `npm run dev` starts both this service and Next.js after the virtual environment is ready; `npm run dev:full` is an alias. For a predictable local startup it defaults to `CLAP_DISABLED=1` and `CLAP_PRELOAD=0`; set `CLAP_DISABLED=0 CLAP_PRELOAD=1` explicitly after the CLAP model is cached when semantic evaluation is needed. Formal studies and public deployment require this service.
 
 ## Application integration
 
@@ -62,7 +62,7 @@ NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://melodyvision-audio.onrender.com
 
 The zero-cost Render deployment uses `Dockerfile.render`, which disables CLAP to fit the Free instance memory limit while preserving the librosa signal path. Set `AUDIO_ANALYSIS_ALLOWED_ORIGINS` and `AUDIO_ANALYSIS_ALLOWED_ORIGIN_REGEX` to the production and local origins. Search results use `POST /analyze-remote`; that endpoint only accepts Jamendo HTTPS hosts and never retains the downloaded audio.
 
-The browser does not run Meyda alongside a successful rich analysis request. Meyda is started only when this service fails and `NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=true` is explicitly enabled, which avoids blocking the page on long uploads. The product flow otherwise stops with a visible error when this service is unavailable. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
+The browser does not run Meyda alongside a successful rich analysis request. In ordinary demo mode only, it starts Meyda after this service fails and a local audio `File` is available. Formal study mode still stops with a visible error when the rich service is unavailable. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
 
 ## Run from the command line
 

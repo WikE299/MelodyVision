@@ -77,9 +77,19 @@ interface FeedbackState {
   freeText: string;
 }
 
-type StudyPhase = "artwork" | "comparison" | "revealed";
-type RatingKey = "musicMatchScore" | "imaginationMatchScore" | "agencyScore" | "ownershipScore";
-type BlindChoice = "A" | "B" | "tie";
+type StudyPhase = "artwork" | "comparison" | "manipulation" | "completed";
+type RatingKey =
+  | "musicMatchScore"
+  | "imaginationMatchScore"
+  | "agencyScore"
+  | "ownershipScore"
+  | "immersionScore"
+  | "satisfactionScore";
+type ComparisonChoice = GenerationRole | "tie";
+type ManipulationKey =
+  | "perspectiveMultiplicityScore"
+  | "articulationSupportScore"
+  | "dialogueExperienceScore";
 
 const FEEDBACK_REASONS = {
   zh: ["很准确", "情绪对", "风格不对", "太抽象", "不像音乐", "画面好看"],
@@ -136,7 +146,6 @@ const COPY = {
     collected: "已收集",
     appendix: "研究附录",
     feedbackTitle: "这张图像符合你的听感吗？",
-    musicMatch: "像这首音乐",
     commentMatch: "体现点评",
     aesthetic: "画面好看",
     feedbackPlaceholder: "补充一句你的感受（可选）",
@@ -152,28 +161,39 @@ const COPY = {
     you: "你",
     facilitator: "共创引导",
     overview: "查看生成依据",
-    studyEvaluationTitle: "先只看这幅共同完成的画",
-    studyEvaluationIntro: "请根据此刻的真实感受逐项评分，完成前不会展示另一幅作品或生成依据。",
-    imaginationMatch: "贴近我的想象",
-    agency: "我影响了这幅画",
-    ownership: "这像是我们的共同作品",
-    continueComparison: "提交并查看盲测对比",
-    comparisonTitle: "比较作品 A 与作品 B",
-    comparisonIntro: "两幅作品使用同一段音乐和同一套生成模型，暂不展示生成方式。",
+    studyEvaluationTitle: "先看这幅生成作品",
+    studyEvaluationIntro: "请根据此刻的真实感受逐项评分，提交后可查看同一段音乐直接生成的参照作品。",
+    degreeScale: "1 表示很低，5 表示很高。",
+    musicMatch: "音乐与画面的匹配程度",
+    imaginationMatch: "画面与我脑海中想象的接近程度",
+    agency: "我对画面内容产生影响的程度",
+    ownership: "我把这幅画视为自己参与完成作品的程度",
+    immersion: "整个过程让我专注于音乐与画面的程度",
+    satisfaction: "这幅画作为本次体验结果让我满意的程度",
+    continueComparison: "提交并查看参照作品",
+    comparisonTitle: "对比两种生成结果",
+    comparisonIntro: "切换查看共创作品与仅依据音乐分析生成的作品，再根据真实感受作答。",
     comparisonMusic: "哪幅更贴近音乐",
-    comparisonAesthetic: "哪幅画面表现更好",
+    comparisonImagination: "哪幅更贴近我的想象",
     comparisonOverall: "总体更喜欢哪幅",
+    coCreatedChoice: "共创作品",
+    baselineChoice: "音乐直生",
     same: "差不多",
     comparisonReason: "简单说说你判断的原因",
-    submitComparison: "提交比较",
+    submitComparison: "提交对比",
+    manipulationTitle: "最后回顾刚才的过程",
+    manipulationIntro: "请评价实际体验本身，无需猜测系统采用了哪种方式。",
+    agreementScale: "1 表示完全不同意，5 表示完全同意。",
+    perspectiveMultiplicity: "我感受到了多个彼此不同的听觉视角",
+    articulationSupport: "引导帮助我逐步说清脑海中的画面",
+    dialogueExperience: "整个过程更接近共同讨论，而不是填写画面参数",
+    submitManipulation: "完成评价",
     baselinePending: "参照作品仍在生成，请稍候",
     baselineFailed: "参照作品生成失败",
     retryBaseline: "重新生成参照作品",
     evaluationError: "评价保存失败，请稍后重试",
-    revealCoCreated: "共同完成的作品",
-    revealBaseline: "直接生成的参照作品",
     viewCoCreated: "共创作品",
-    viewBaseline: "参照作品",
+    viewBaseline: "音乐直生作品",
   },
   en: {
     audioName: "Music",
@@ -224,7 +244,6 @@ const COPY = {
     collected: "Collected",
     appendix: "Research Appendix",
     feedbackTitle: "Does this image match what you heard?",
-    musicMatch: "Matches the music",
     commentMatch: "Reflects comments",
     aesthetic: "Looks good",
     feedbackPlaceholder: "Add one more thought (optional)",
@@ -240,28 +259,39 @@ const COPY = {
     you: "You",
     facilitator: "Co-creation guide",
     overview: "View generation rationale",
-    studyEvaluationTitle: "First, consider only the artwork you co-created",
-    studyEvaluationIntro: "Rate your immediate response before the reference artwork or generation rationale is revealed.",
-    imaginationMatch: "Matches what I imagined",
-    agency: "I influenced this artwork",
-    ownership: "This feels like our shared work",
-    continueComparison: "Submit and open blind comparison",
-    comparisonTitle: "Compare Artwork A and Artwork B",
-    comparisonIntro: "Both use the same music and generation models. Their sources remain hidden for now.",
+    studyEvaluationTitle: "First, consider this generated artwork",
+    studyEvaluationIntro: "Rate your immediate response. You can view a reference generated directly from the same music after submitting.",
+    degreeScale: "1 means very low and 5 means very high.",
+    musicMatch: "Degree of match between the music and artwork",
+    imaginationMatch: "Degree of match with what I imagined",
+    agency: "Degree to which my input affected the artwork",
+    ownership: "Degree to which I regard this as a work I helped create",
+    immersion: "Degree to which the process focused me on music and imagery",
+    satisfaction: "Degree of satisfaction with this artwork as the outcome",
+    continueComparison: "Submit and view reference",
+    comparisonTitle: "Compare the two generation results",
+    comparisonIntro: "Switch between the co-created artwork and the music-only generation, then answer from your actual response.",
     comparisonMusic: "Which better matches the music",
-    comparisonAesthetic: "Which has stronger visual quality",
+    comparisonImagination: "Which better matches what I imagined",
     comparisonOverall: "Which do you prefer overall",
+    coCreatedChoice: "Co-created",
+    baselineChoice: "Music-only",
     same: "About the same",
     comparisonReason: "Briefly explain your choice",
     submitComparison: "Submit comparison",
+    manipulationTitle: "Finally, reflect on the process",
+    manipulationIntro: "Rate the experience itself without trying to infer how the system was implemented.",
+    agreementScale: "1 means strongly disagree and 5 means strongly agree.",
+    perspectiveMultiplicity: "I encountered multiple distinct listening perspectives",
+    articulationSupport: "The guidance helped me articulate the image in my mind",
+    dialogueExperience: "The process felt more like a shared discussion than filling in image parameters",
+    submitManipulation: "Complete evaluation",
     baselinePending: "The reference artwork is still generating",
     baselineFailed: "Reference generation failed",
     retryBaseline: "Retry reference generation",
     evaluationError: "Evaluation could not be saved. Please try again.",
-    revealCoCreated: "Co-created artwork",
-    revealBaseline: "Direct-generation reference",
     viewCoCreated: "Co-created",
-    viewBaseline: "Reference",
+    viewBaseline: "Music-only",
   },
 };
 
@@ -391,22 +421,26 @@ function ScoreRow({
   );
 }
 
-function BlindChoiceRow({
+function ComparisonChoiceRow({
   label,
   value,
   sameLabel,
+  coCreatedLabel,
+  baselineLabel,
   onChange,
 }: {
   label: string;
-  value: BlindChoice | null;
+  value: ComparisonChoice | null;
   sameLabel: string;
-  onChange: (choice: BlindChoice) => void;
+  coCreatedLabel: string;
+  baselineLabel: string;
+  onChange: (choice: ComparisonChoice) => void;
 }) {
   return (
     <div>
       <p className="mb-1.5 text-xs text-[#d7b99b]">{label}</p>
       <div className="grid grid-cols-3 gap-1.5">
-        {(["A", "B", "tie"] as BlindChoice[]).map((choice) => (
+        {(["co_created", "direct_baseline", "tie"] as ComparisonChoice[]).map((choice) => (
           <button
             key={choice}
             type="button"
@@ -418,7 +452,11 @@ function BlindChoiceRow({
                 : "border-[#8f6b52]/44 bg-[#211b25] text-[#c8aa8e] hover:border-[#ffd083]/70"
             }`}
           >
-            {choice === "tie" ? sameLabel : choice}
+            {choice === "tie"
+              ? sameLabel
+              : choice === "co_created"
+                ? coCreatedLabel
+                : baselineLabel}
           </button>
         ))}
       </div>
@@ -466,7 +504,7 @@ export default function ResultPage() {
     freeText: "",
   });
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [studyPhase, setStudyPhase] = useState<StudyPhase>(initialState.studyTrial ? "artwork" : "revealed");
+  const [studyPhase, setStudyPhase] = useState<StudyPhase>(initialState.studyTrial ? "artwork" : "completed");
   const [baselineStatus, setBaselineStatus] = useState<"pending" | "running" | "completed" | "failed">("pending");
   const [baselineResult, setBaselineResult] = useState<BaselineResult | null>(null);
   const [studyRatings, setStudyRatings] = useState<Record<RatingKey, number | null>>({
@@ -474,17 +512,24 @@ export default function ResultPage() {
     imaginationMatchScore: null,
     agencyScore: null,
     ownershipScore: null,
+    immersionScore: null,
+    satisfactionScore: null,
   });
   const [comparison, setComparison] = useState<{
-    musicMatchChoice: BlindChoice | null;
-    aestheticChoice: BlindChoice | null;
-    overallChoice: BlindChoice | null;
+    musicMatchChoice: ComparisonChoice | null;
+    imaginationMatchChoice: ComparisonChoice | null;
+    overallChoice: ComparisonChoice | null;
     reason: string;
   }>({
     musicMatchChoice: null,
-    aestheticChoice: null,
+    imaginationMatchChoice: null,
     overallChoice: null,
     reason: "",
+  });
+  const [manipulationRatings, setManipulationRatings] = useState<Record<ManipulationKey, number | null>>({
+    perspectiveMultiplicityScore: null,
+    articulationSupportScore: null,
+    dialogueExperienceScore: null,
   });
   const [studySaving, setStudySaving] = useState(false);
   const [studyError, setStudyError] = useState("");
@@ -529,15 +574,36 @@ export default function ResultPage() {
           setBaselineResult(baselineData.result || null);
         }
         if (evaluationResponse.ok) {
-          if (evaluationData.comparison) {
-            setStudyPhase("revealed");
+          const restoredScore = (value: unknown) => {
+            const parsed = Number(value);
+            return Number.isInteger(parsed) && parsed >= 1 && parsed <= 5 ? parsed : null;
+          };
+          if (evaluationData.manipulation) {
+            setStudyPhase("completed");
+            setManipulationRatings({
+              perspectiveMultiplicityScore: restoredScore(evaluationData.manipulation.perspective_multiplicity_score),
+              articulationSupportScore: restoredScore(evaluationData.manipulation.articulation_support_score),
+              dialogueExperienceScore: restoredScore(evaluationData.manipulation.dialogue_experience_score),
+            });
+          } else if (evaluationData.labeledComparison) {
+            setStudyPhase("manipulation");
+            setComparison({
+              musicMatchChoice: evaluationData.labeledComparison.music_match_choice as ComparisonChoice,
+              imaginationMatchChoice: evaluationData.labeledComparison.imagination_match_choice as ComparisonChoice,
+              overallChoice: evaluationData.labeledComparison.overall_choice as ComparisonChoice,
+              reason: String(evaluationData.labeledComparison.reason || ""),
+            });
+          } else if (evaluationData.comparison) {
+            setStudyPhase("completed");
           } else if (evaluationData.artwork) {
             setStudyPhase("comparison");
             setStudyRatings({
-              musicMatchScore: Number(evaluationData.artwork.music_match_score),
-              imaginationMatchScore: Number(evaluationData.artwork.imagination_match_score),
-              agencyScore: Number(evaluationData.artwork.agency_score),
-              ownershipScore: Number(evaluationData.artwork.ownership_score),
+              musicMatchScore: restoredScore(evaluationData.artwork.music_match_score),
+              imaginationMatchScore: restoredScore(evaluationData.artwork.imagination_match_score),
+              agencyScore: restoredScore(evaluationData.artwork.agency_score),
+              ownershipScore: restoredScore(evaluationData.artwork.ownership_score),
+              immersionScore: restoredScore(evaluationData.artwork.immersion_score),
+              satisfactionScore: restoredScore(evaluationData.artwork.satisfaction_score),
             });
           }
         }
@@ -565,12 +631,11 @@ export default function ResultPage() {
       comparisonExposureRecordedRef.current
     ) return;
     comparisonExposureRecordedRef.current = true;
-    recordExperimentEvent("paired-comparison-exposed", "/result", {
+    recordExperimentEvent("labeled-baseline-comparison-exposed", "/result", {
       trialId: studyTrialId,
       condition: studyTrial?.condition,
-      comparisonOrder: studyTrial?.comparisonOrder,
     });
-  }, [baselineResult?.imageUrl, baselineStatus, studyPhase, studyTrial?.comparisonOrder, studyTrial?.condition, studyTrialId]);
+  }, [baselineResult?.imageUrl, baselineStatus, studyPhase, studyTrial?.condition, studyTrialId]);
 
   const playResultAudio = useCallback(async () => {
     const audio = audioRef.current;
@@ -764,20 +829,11 @@ export default function ResultPage() {
     }
   };
 
-  const blindChoiceToRole = (choice: BlindChoice | null): GenerationRole | "tie" | null => {
-    if (!choice || choice === "tie") return choice;
-    const leftRole: GenerationRole = studyTrial?.comparisonOrder === "co_created_left"
-      ? "co_created"
-      : "direct_baseline";
-    if (choice === "A") return leftRole;
-    return leftRole === "co_created" ? "direct_baseline" : "co_created";
-  };
-
   const submitComparison = async () => {
     if (
       !studyTrial ||
       !comparison.musicMatchChoice ||
-      !comparison.aestheticChoice ||
+      !comparison.imaginationMatchChoice ||
       !comparison.overallChoice ||
       studySaving
     ) return;
@@ -790,19 +846,53 @@ export default function ResultPage() {
         body: JSON.stringify({
           stage: "comparison",
           trialId: studyTrial.id,
-          musicMatchChoice: blindChoiceToRole(comparison.musicMatchChoice),
-          aestheticChoice: blindChoiceToRole(comparison.aestheticChoice),
-          overallChoice: blindChoiceToRole(comparison.overallChoice),
+          musicMatchChoice: comparison.musicMatchChoice,
+          imaginationMatchChoice: comparison.imaginationMatchChoice,
+          overallChoice: comparison.overallChoice,
           reason: comparison.reason,
         }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || copy.evaluationError);
-      setStudyPhase("revealed");
-      recordExperimentEvent("paired-comparison-submitted", "/result", {
+      setStudyPhase("manipulation");
+      recordExperimentEvent("labeled-baseline-comparison-submitted", "/result", {
         trialId: studyTrial.id,
         condition: studyTrial.condition,
-        comparisonOrder: studyTrial.comparisonOrder,
+      });
+    } catch (error) {
+      setStudyError(error instanceof Error ? error.message : copy.evaluationError);
+    } finally {
+      setStudySaving(false);
+    }
+  };
+
+  const submitManipulationCheck = async () => {
+    if (
+      !studyTrial ||
+      studySaving ||
+      Object.values(manipulationRatings).some((value) => value === null)
+    ) return;
+    setStudySaving(true);
+    setStudyError("");
+    try {
+      const response = await fetch("/api/experiment/evaluation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage: "manipulation",
+          trialId: studyTrial.id,
+          ...manipulationRatings,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || copy.evaluationError);
+      setStudyPhase("completed");
+      const completedTrial = { ...studyTrial, status: "completed" as const };
+      setStudyTrial(completedTrial);
+      sessionStorage.setItem("studyTrial", JSON.stringify(completedTrial));
+      recordExperimentEvent("manipulation-check-submitted", "/result", {
+        trialId: studyTrial.id,
+        condition: studyTrial.condition,
       });
     } catch (error) {
       setStudyError(error instanceof Error ? error.message : copy.evaluationError);
@@ -882,16 +972,13 @@ export default function ResultPage() {
     danmakuMessages.filter((_, index) => index % 2 === 0),
     danmakuMessages.filter((_, index) => index % 2 === 1),
   ].filter((lane) => lane.length > 0);
-  const studyLocked = Boolean(studyTrial && studyPhase !== "revealed");
-  const coCreatedIsLeft = studyTrial?.comparisonOrder !== "baseline_left";
-  const leftComparisonImage = coCreatedIsLeft ? imageUrl : baselineResult?.imageUrl;
-  const rightComparisonImage = coCreatedIsLeft ? baselineResult?.imageUrl : imageUrl;
-  const comparisonReady = studyPhase === "comparison" && baselineStatus === "completed" && Boolean(baselineResult?.imageUrl);
+  const studyLocked = Boolean(studyTrial && studyPhase !== "completed");
+  const pairedArtworkReady = baselineStatus === "completed" && Boolean(baselineResult?.imageUrl);
+  const comparisonReady = studyPhase === "comparison" && pairedArtworkReady;
   const canSwitchPairedArtwork = Boolean(
-    studyTrial?.condition === "single_agent" &&
-    studyPhase === "revealed" &&
-    baselineStatus === "completed" &&
-    baselineResult?.imageUrl
+    studyTrial &&
+    studyPhase !== "artwork" &&
+    pairedArtworkReady
   );
   const displayedResultImage = canSwitchPairedArtwork && resultArtworkRole === "direct_baseline"
     ? baselineResult?.imageUrl || imageUrl
@@ -926,10 +1013,11 @@ export default function ResultPage() {
               </div>
               <div className="group relative">
                 <a
-                  href={imageUrl}
-                  download={`melodyvision-${debugInfo?.meta?.runId || "artwork"}.png`}
+                  href={displayedResultImage}
+                  download={`melodyvision-${resultArtworkRole}-${debugInfo?.meta?.runId || "artwork"}.png`}
                   onClick={() => recordExperimentEvent("artwork-downloaded", "/result", {
                     runId: debugInfo?.meta?.runId || null,
+                    role: resultArtworkRole,
                   })}
                   aria-label={copy.save}
                   title={copy.save}
@@ -965,36 +1053,15 @@ export default function ResultPage() {
           )}
 
           <div className={`absolute bottom-[96px] top-[56px] flex items-center justify-center xl:top-3 ${studyLocked ? "left-6 right-[338px]" : "inset-x-6"}`}>
-            {comparisonReady ? (
-              <div className="grid h-full w-full grid-cols-2 items-center gap-4">
-                {[leftComparisonImage, rightComparisonImage].map((source, index) => (
-                  <figure key={index} className="flex min-w-0 flex-col items-center gap-2">
-                    <figcaption className="text-sm font-semibold tracking-[0.16em] text-[#ffe3bd]">
-                      {language === "zh" ? `作品 ${index === 0 ? "A" : "B"}` : `Artwork ${index === 0 ? "A" : "B"}`}
-                    </figcaption>
-                    <div className="flex aspect-[16/9] w-full items-center justify-center overflow-hidden rounded-[6px] bg-[#111019]/72 shadow-[0_28px_80px_rgba(0,0,0,0.58)] ring-1 ring-[#efbd77]/32">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={source || ""}
-                        alt={`${copy.imageAlt} ${index === 0 ? "A" : "B"}`}
-                        className="block h-full w-full object-contain"
-                        onLoad={index === 0 ? playResultAudio : undefined}
-                      />
-                    </div>
-                  </figure>
-                ))}
-              </div>
-            ) : (
-              <div className="relative flex h-full w-full items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={displayedResultImage}
-                  alt={copy.imageAlt}
-                  className="block max-h-full max-w-full rounded-[6px] object-contain shadow-[0_34px_110px_rgba(0,0,0,0.62),0_0_45px_rgba(255,187,91,0.16)] ring-1 ring-[#efbd77]/38"
-                  onLoad={playResultAudio}
-                />
-              </div>
-            )}
+            <div className="relative flex h-full w-full items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={displayedResultImage}
+                alt={copy.imageAlt}
+                className="block max-h-full max-w-full rounded-[6px] object-contain shadow-[0_34px_110px_rgba(0,0,0,0.62),0_0_45px_rgba(255,187,91,0.16)] ring-1 ring-[#efbd77]/38"
+                onLoad={playResultAudio}
+              />
+            </div>
           </div>
 
           {studyLocked && studyTrial && (
@@ -1003,12 +1070,15 @@ export default function ResultPage() {
                 <>
                   <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.studyEvaluationTitle}</h2>
                   <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.studyEvaluationIntro}</p>
+                  <p className="mt-1.5 text-[11px] text-[#a98c72]">{copy.degreeScale}</p>
                   <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
                     {([
                       ["musicMatchScore", copy.musicMatch],
                       ["imaginationMatchScore", copy.imaginationMatch],
                       ["agencyScore", copy.agency],
                       ["ownershipScore", copy.ownership],
+                      ["immersionScore", copy.immersion],
+                      ["satisfactionScore", copy.satisfaction],
                     ] as Array<[RatingKey, string]>).map(([key, label]) => (
                       <ScoreRow
                         key={key}
@@ -1027,7 +1097,7 @@ export default function ResultPage() {
                     {studySaving ? copy.submitting : copy.continueComparison}
                   </button>
                 </>
-              ) : (
+              ) : studyPhase === "comparison" ? (
                 <>
                   <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.comparisonTitle}</h2>
                   <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.comparisonIntro}</p>
@@ -1051,22 +1121,28 @@ export default function ResultPage() {
                   ) : (
                     <>
                       <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
-                        <BlindChoiceRow
+                        <ComparisonChoiceRow
                           label={copy.comparisonMusic}
                           value={comparison.musicMatchChoice}
                           sameLabel={copy.same}
+                          coCreatedLabel={copy.coCreatedChoice}
+                          baselineLabel={copy.baselineChoice}
                           onChange={(value) => setComparison((current) => ({ ...current, musicMatchChoice: value }))}
                         />
-                        <BlindChoiceRow
-                          label={copy.comparisonAesthetic}
-                          value={comparison.aestheticChoice}
+                        <ComparisonChoiceRow
+                          label={copy.comparisonImagination}
+                          value={comparison.imaginationMatchChoice}
                           sameLabel={copy.same}
-                          onChange={(value) => setComparison((current) => ({ ...current, aestheticChoice: value }))}
+                          coCreatedLabel={copy.coCreatedChoice}
+                          baselineLabel={copy.baselineChoice}
+                          onChange={(value) => setComparison((current) => ({ ...current, imaginationMatchChoice: value }))}
                         />
-                        <BlindChoiceRow
+                        <ComparisonChoiceRow
                           label={copy.comparisonOverall}
                           value={comparison.overallChoice}
                           sameLabel={copy.same}
+                          coCreatedLabel={copy.coCreatedChoice}
+                          baselineLabel={copy.baselineChoice}
                           onChange={(value) => setComparison((current) => ({ ...current, overallChoice: value }))}
                         />
                         <textarea
@@ -1082,7 +1158,7 @@ export default function ResultPage() {
                         disabled={
                           studySaving ||
                           !comparison.musicMatchChoice ||
-                          !comparison.aestheticChoice ||
+                          !comparison.imaginationMatchChoice ||
                           !comparison.overallChoice
                         }
                         className="mt-4 h-11 border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-40"
@@ -1091,6 +1167,34 @@ export default function ResultPage() {
                       </button>
                     </>
                   )}
+                </>
+              ) : (
+                <>
+                  <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.manipulationTitle}</h2>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.manipulationIntro}</p>
+                  <p className="mt-1.5 text-[11px] text-[#a98c72]">{copy.agreementScale}</p>
+                  <div className="mt-5 flex-1 space-y-5 overflow-y-auto pr-1">
+                    {([
+                      ["perspectiveMultiplicityScore", copy.perspectiveMultiplicity],
+                      ["articulationSupportScore", copy.articulationSupport],
+                      ["dialogueExperienceScore", copy.dialogueExperience],
+                    ] as Array<[ManipulationKey, string]>).map(([key, label]) => (
+                      <ScoreRow
+                        key={key}
+                        label={label}
+                        value={manipulationRatings[key]}
+                        onChange={(score) => setManipulationRatings((current) => ({ ...current, [key]: score }))}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={submitManipulationCheck}
+                    disabled={studySaving || Object.values(manipulationRatings).some((value) => value === null)}
+                    className="mt-4 h-11 border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {studySaving ? copy.submitting : copy.submitManipulation}
+                  </button>
                 </>
               )}
               {studyError && <p className="mt-3 text-xs text-[#efb6a5]">{studyError}</p>}
@@ -1106,7 +1210,13 @@ export default function ResultPage() {
                 <button
                   key={role}
                   type="button"
-                  onClick={() => setResultArtworkRole(role)}
+                  onClick={() => {
+                    setResultArtworkRole(role);
+                    recordExperimentEvent("result-artwork-switched", "/result", {
+                      trialId: studyTrial?.id || null,
+                      role,
+                    });
+                  }}
                   aria-pressed={resultArtworkRole === role}
                   className={`min-w-24 px-4 py-2 font-semibold transition ${
                     resultArtworkRole === role
@@ -1117,12 +1227,6 @@ export default function ResultPage() {
                   {label}
                 </button>
               ))}
-            </div>
-          )}
-
-          {studyTrial && studyPhase === "revealed" && baselineResult && !canSwitchPairedArtwork && (
-            <div className="absolute left-1/2 top-4 z-50 -translate-x-1/2 border border-[#a77b57]/44 bg-[#1f1923]/90 px-4 py-2 text-xs text-[#ffe3bd] shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur">
-              {coCreatedIsLeft ? "A" : "B"} · {copy.revealCoCreated}　/　{coCreatedIsLeft ? "B" : "A"} · {copy.revealBaseline}
             </div>
           )}
 

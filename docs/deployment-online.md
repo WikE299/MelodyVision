@@ -68,7 +68,6 @@ IMAGE_MODEL=wan2.7-image
 IMAGE_SIZE=1696*960
 JAMENDO_CLIENT_ID=<Jamendo client id>
 EXPERIMENT_EXPORT_TOKEN=<long random value>
-NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS=false
 ```
 
 `NEXT_PUBLIC_AUDIO_ANALYSIS_URL` is embedded at build time. Redeploy after changing it. Keep Preview deployments without production secrets unless they intentionally share the same research database.
