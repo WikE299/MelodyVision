@@ -1,12 +1,3 @@
----
-title: MelodyVision Audio Analysis
-colorFrom: gray
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # MelodyVision Audio Analysis Service
 
 This service implements the Version 2 `MusicProfile` analyzer introduced in `V2-02` and connected to the application in `V2-04`.
@@ -53,14 +44,28 @@ From the repository root, `npm run dev` starts both this service and Next.js aft
 
 ## Application integration
 
-Local development can proxy through Next.js. The Vercel deployment sends uploads directly from the browser to this service to avoid the serverless request-size limit. Configure:
+Local development proxies through Next.js to this service:
 
 ```text
 AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
-NEXT_PUBLIC_AUDIO_ANALYSIS_URL=https://melodyvision-audio.onrender.com
 ```
 
-The zero-cost Render deployment uses `Dockerfile.render`, which disables CLAP to fit the Free instance memory limit while preserving the librosa signal path. Set `AUDIO_ANALYSIS_ALLOWED_ORIGINS` and `AUDIO_ANALYSIS_ALLOWED_ORIGIN_REGEX` to the production and local origins. Search results use `POST /analyze-remote`; that endpoint only accepts Jamendo HTTPS hosts and never retains the downloaded audio.
+The zero-cost production deployment reuses the same `MusicAnalyzer` through
+`api/audio-profile.py` on Vercel. Browser uploads go directly to a private
+Supabase bucket through a signed upload URL, so audio files do not cross the
+Vercel 4.5 MB request boundary. The Python Function downloads the temporary
+object, analyzes it with CLAP disabled, and deletes it before returning.
+
+Production configuration:
+
+```text
+AUDIO_ANALYSIS_PROVIDER=vercel-python
+NEXT_PUBLIC_AUDIO_ANALYSIS_PROVIDER=vercel-python
+SUPABASE_AUDIO_BUCKET=audio-analysis
+```
+
+Search results send an allowlisted Jamendo HTTPS URL to the same Python
+Function. Raw search audio is held only in the function temporary directory.
 
 The browser does not run Meyda alongside a successful rich analysis request. In ordinary demo mode only, it starts Meyda after this service fails and a local audio `File` is available. Formal study mode still stops with a visible error when the rich service is unavailable. A successful response stores the full `MusicProfile` separately from the compatibility view used by Version 1 pages.
 

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "fluid": true,
+  "functions": {
+    "api/audio-profile.py": {
+      "maxDuration": 300,
+      "includeFiles": "services/audio-analysis/app/**"
+    }
+  }
+}
