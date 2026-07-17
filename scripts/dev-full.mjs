@@ -24,7 +24,7 @@ const children = [
     env: audioServiceEnv,
     stdio: "inherit",
   }),
-  spawn(isWindows ? "npm.cmd" : "npm", ["run", "dev"], {
+  spawn(isWindows ? "npm.cmd" : "npm", ["run", "dev:web"], {
     cwd: root,
     stdio: "inherit",
   }),

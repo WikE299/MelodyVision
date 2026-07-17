@@ -223,6 +223,7 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       music_profile_id TEXT NOT NULL,
       co_created_run_id TEXT,
       baseline_run_id TEXT,
+      protocol_version TEXT NOT NULL DEFAULT 'v2-14-labeled-comparison',
       comparison_order TEXT NOT NULL,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -249,6 +250,8 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       imagination_match_score INTEGER NOT NULL,
       agency_score INTEGER NOT NULL,
       ownership_score INTEGER NOT NULL,
+      immersion_score INTEGER NOT NULL,
+      satisfaction_score INTEGER NOT NULL,
       FOREIGN KEY (trial_id) REFERENCES study_trials(id) ON DELETE CASCADE
     );
 
@@ -262,6 +265,27 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       overall_choice TEXT NOT NULL,
       reason TEXT NOT NULL,
       revealed_at TEXT,
+      FOREIGN KEY (trial_id) REFERENCES study_trials(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS labeled_comparisons (
+      id TEXT PRIMARY KEY,
+      trial_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      music_match_choice TEXT NOT NULL,
+      imagination_match_choice TEXT NOT NULL,
+      overall_choice TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      FOREIGN KEY (trial_id) REFERENCES study_trials(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS manipulation_checks (
+      id TEXT PRIMARY KEY,
+      trial_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      perspective_multiplicity_score INTEGER NOT NULL,
+      articulation_support_score INTEGER NOT NULL,
+      dialogue_experience_score INTEGER NOT NULL,
       FOREIGN KEY (trial_id) REFERENCES study_trials(id) ON DELETE CASCADE
     );
 
@@ -294,6 +318,12 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_artwork_evaluations_one_per_trial
       ON artwork_evaluations(trial_id);
+
+    CREATE INDEX IF NOT EXISTS idx_labeled_comparisons_trial
+      ON labeled_comparisons(trial_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_manipulation_checks_trial
+      ON manipulation_checks(trial_id, created_at);
   `);
 
   ensureColumn(database, "generation_runs", "music_profile_json", "TEXT NOT NULL DEFAULT 'null'");
@@ -309,6 +339,9 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
   ensureColumn(database, "conversation_snapshots", "trial_id", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "visual_brief_versions", "trial_id", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "interaction_events", "trial_id", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, "study_trials", "protocol_version", "TEXT NOT NULL DEFAULT 'v2-13-blind-comparison'");
+  ensureColumn(database, "artwork_evaluations", "immersion_score", "INTEGER");
+  ensureColumn(database, "artwork_evaluations", "satisfaction_score", "INTEGER");
 
   return wrapSQLiteDatabase(database);
 }

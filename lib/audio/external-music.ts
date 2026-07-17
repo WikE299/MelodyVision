@@ -67,3 +67,15 @@ export function getMusicSearchTags(tagIds: string[]): MusicSearchTag[] {
   const selected = new Set(tagIds);
   return MUSIC_SEARCH_TAGS.filter((tag) => selected.has(tag.id));
 }
+
+export function isAllowedJamendoAudioUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      /^prod-\d+\.storage\.jamendo\.com$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}

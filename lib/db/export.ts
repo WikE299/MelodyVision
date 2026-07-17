@@ -56,7 +56,7 @@ async function readRows(
 export async function exportExperimentJson() {
   const database = await getDatabase();
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     exportedAt: new Date().toISOString(),
     sessions: await readRows(database, "experiment_sessions"),
     audioAnalyses: await readRows(database, "audio_analyses"),
@@ -69,6 +69,8 @@ export async function exportExperimentJson() {
     baselineJobs: await readRows(database, "baseline_jobs", "updated_at"),
     artworkEvaluations: await readRows(database, "artwork_evaluations"),
     pairwiseComparisons: await readRows(database, "pairwise_comparisons"),
+    labeledComparisons: await readRows(database, "labeled_comparisons"),
+    manipulationChecks: await readRows(database, "manipulation_checks"),
   };
 }
 
@@ -100,6 +102,8 @@ export async function exportExperimentCsv() {
       baseline_job: data.baselineJobs.find((item) => item.trial_id === trialId) || null,
       artwork_evaluation: data.artworkEvaluations.find((item) => item.trial_id === trialId) || null,
       pairwise_comparison: data.pairwiseComparisons.find((item) => item.trial_id === trialId) || null,
+      labeled_comparison: data.labeledComparisons.find((item) => item.trial_id === trialId) || null,
+      manipulation_check: data.manipulationChecks.find((item) => item.trial_id === trialId) || null,
     };
   });
   const headers = [
@@ -119,6 +123,8 @@ export async function exportExperimentCsv() {
     "baseline_job",
     "artwork_evaluation",
     "pairwise_comparison",
+    "labeled_comparison",
+    "manipulation_check",
   ];
   const lines = [
     headers.join(","),

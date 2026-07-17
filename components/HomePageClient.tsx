@@ -273,7 +273,7 @@ export default function HomePageClient() {
       };
       if (
         richResult.status === "rejected" &&
-        file && process.env.NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS === "true"
+        file && !isStudyMode
       ) {
         [realtimeResult] = await Promise.allSettled([analyzeAudioFile(file)]);
       }
@@ -290,15 +290,12 @@ export default function HomePageClient() {
         sessionStorage.removeItem("audioAnalysisNotice");
         analysis = profileToCompatibleAnalysis(richResult.value, context.sourceMetadata);
       } else if (
-        realtimeResult.status === "fulfilled" &&
-        process.env.NEXT_PUBLIC_ALLOW_DEGRADED_AUDIO_ANALYSIS === "true"
+        realtimeResult.status === "fulfilled" && !isStudyMode
       ) {
         console.warn("Rich analysis unavailable; using explicit Meyda degraded mode.", richResult.reason);
         sessionStorage.removeItem("musicProfile");
         sessionStorage.setItem("audioAnalysisNotice", "meyda-degraded");
         analysis = meydaToDegradedAnalysis(realtimeResult.value, context.sourceMetadata);
-      } else if (realtimeResult.status === "fulfilled") {
-        throw new Error("RICH_ANALYSIS_UNAVAILABLE");
       } else {
         console.error("Rich audio analysis unavailable:", richResult.reason);
         throw new Error("RICH_ANALYSIS_UNAVAILABLE");
@@ -461,12 +458,23 @@ export default function HomePageClient() {
     setError(null);
 
     try {
-      await handleFileSelect(null, {
+      const downloadParams = new URLSearchParams({
+        id: item.id,
+        source: item.previewUrl,
+      });
+      const downloadResponse = await fetch(`/api/music/download?${downloadParams.toString()}`);
+      if (!downloadResponse.ok) {
+        const data = await downloadResponse.json().catch(() => null) as { error?: string } | null;
+        throw new Error(data?.error || copy.downloadFailed);
+      }
+      const blob = await downloadResponse.blob();
+      if (blob.size < 1024) throw new Error(copy.downloadFailed);
+      const file = new File([blob], `${item.title}.mp3`, { type: blob.type || "audio/mpeg" });
+      await handleFileSelect(file, {
         sourceKind: "search",
         playbackUrl: item.previewUrl,
-        remoteSourceUrl: item.previewUrl,
         fileName: `${item.title}.mp3`,
-        fileSize: 0,
+        fileSize: file.size,
         catalogItemId: item.id,
         sourceMetadata: {
           title: item.title,

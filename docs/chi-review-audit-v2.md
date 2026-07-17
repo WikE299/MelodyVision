@@ -2,6 +2,8 @@
 
 Audit date: 2026-07-15
 
+Protocol update: on 2026-07-16 the participant-facing randomized blind comparison described in this audit was replaced by a labeled co-created/direct-baseline comparison followed by manipulation checks. The frozen current protocol is documented in `docs/version2-study-protocol.md`; references to blind A/B below describe the audited historical build.
+
 ## Executive verdict
 
 The current V2 prototype is technically suitable for a controlled pilot study on a desktop computer. The two interactive conditions, paired direct baseline, four-round co-creation protocol, evidence-preserving Prompt Director, two-stage evaluation, and research export are all present in one end-to-end system.
