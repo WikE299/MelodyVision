@@ -1,0 +1,105 @@
+name: Smoke Test Online Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Public MelodyVision URL
+        required: false
+        default: https://melodyvision-five.vercel.app
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+
+    steps:
+      - name: Checkout test audio
+        uses: actions/checkout@v4
+
+      - name: Check Python audio service
+        shell: bash
+        run: |
+          set -euo pipefail
+          health="$(
+            curl --fail --silent --show-error \
+              --retry 3 --retry-delay 5 --max-time 180 \
+              "$BASE_URL/api/audio-profile"
+          )"
+          jq -e '
+            .status == "ok"
+            and .provider == "vercel-python"
+            and .schemaVersion == "2.0.0"
+          ' <<<"$health"
+
+      - name: Upload and analyze a real audio clip
+        shell: bash
+        run: |
+          set -euo pipefail
+          audio_path="public/preset-audio/clips/bach-cello-prelude-clip.mp3"
+          byte_size="$(wc -c <"$audio_path" | tr -d ' ')"
+          ticket="$(
+            curl --fail --silent --show-error \
+              --request POST "$BASE_URL/api/audio/upload-ticket" \
+              --header "Content-Type: application/json" \
+              --data "{\"fileName\":\"bach-cello-prelude-clip.mp3\",\"mimeType\":\"audio/mpeg\",\"byteSize\":$byte_size}"
+          )"
+          storage_path="$(jq -er '.storagePath' <<<"$ticket")"
+          upload_url="$(jq -er '.uploadUrl' <<<"$ticket")"
+
+          cleanup() {
+            curl --silent --show-error \
+              --request DELETE "$BASE_URL/api/audio/upload-ticket" \
+              --header "Content-Type: application/json" \
+              --data "{\"storagePath\":\"$storage_path\"}" >/dev/null || true
+          }
+          trap cleanup EXIT
+
+          curl --fail --silent --show-error \
+            --request PUT "$upload_url" \
+            --header "x-upsert: false" \
+            --form "cacheControl=3600" \
+            --form "=@$audio_path;type=audio/mpeg" >/dev/null
+
+          profile="$(
+            curl --fail --silent --show-error \
+              --max-time 300 \
+              --request POST "$BASE_URL/api/audio-profile" \
+              --header "Content-Type: application/json" \
+              --data "{
+                \"storagePath\":\"$storage_path\",
+                \"fileName\":\"bach-cello-prelude-clip.mp3\",
+                \"mimeType\":\"audio/mpeg\",
+                \"sessionId\":\"github-online-smoke\",
+                \"sourceKind\":\"preset\",
+                \"catalogItemId\":\"bach-cello-prelude\"
+              }"
+          )"
+          jq -e '
+            .schemaVersion == "2.0.0"
+            and .audio.sourceKind == "preset"
+            and .audio.durationSeconds > 1
+            and any(.analyzers[]; .name == "librosa")
+            and (.sections | length) > 0
+          ' <<<"$profile"
+
+      - name: Check application readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          readiness="$(
+            curl --fail --silent --show-error \
+              --retry 2 --retry-delay 5 --max-time 180 \
+              "$BASE_URL/api/readiness"
+          )"
+          jq -e '
+            .status == "ready"
+            and .app.status == "ok"
+            and .database.status == "ok"
+            and .audioAnalysis.status == "ok"
+          ' <<<"$readiness"
