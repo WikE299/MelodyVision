@@ -28,7 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      BASE_URL: ${{ github.event_name == 'deployment_status' && github.event.deployment_status.environment_url || inputs.base_url }}
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || vars.PRODUCTION_BASE_URL || 'https://melodyvision-five.vercel.app' }}
+      DEPLOYMENT_URL: ${{ github.event_name == 'deployment_status' && github.event.deployment_status.environment_url || inputs.base_url }}
       DEPLOYMENT_SHA: ${{ github.event_name == 'deployment_status' && github.event.deployment.sha || github.sha }}
 
     steps:
@@ -125,7 +126,8 @@ jobs:
             echo "## MelodyVision production smoke"
             echo
             echo "- Result: **${{ job.status }}**"
-            echo "- URL: $BASE_URL"
+            echo "- Public URL: $BASE_URL"
+            echo "- Deployment URL: $DEPLOYMENT_URL"
             echo "- Commit: \`$DEPLOYMENT_SHA\`"
             echo "- Trigger: \`${{ github.event_name }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
