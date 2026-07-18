@@ -110,6 +110,36 @@ cd services/audio-analysis
 Test MP3, WAV, FLAC, OGG, a Jamendo result, persistence after refresh,
 feedback, experiment export, and a cold Python Function invocation.
 
+## GitHub Release Flow
+
+Normal production changes use:
+
+```text
+codex/<task>
+-> pull request
+-> required Node, Python, and migration checks
+-> Vercel Preview review when the change is user-facing or high-risk
+-> merge to main
+-> Vercel production deployment
+-> automatic real-audio production smoke test
+```
+
+The smoke workflow can also be started manually from GitHub Actions with a
+specific public URL. It checks the Python analyzer, uploads and analyzes a
+short tracked audio clip, checks `/api/readiness`, and removes the temporary
+audio object. It does not invoke DeepSeek or DashScope.
+
+Before merging a high-risk change, record the previous known-good deployment
+URL from the Vercel dashboard. If the production smoke test fails and the
+public journey is affected, roll back from the dashboard or run:
+
+```bash
+npx vercel rollback <previous-deployment-url-or-id> --yes
+```
+
+Do not report a release as complete until the fixed production URL and the
+production smoke workflow both pass.
+
 ## Free-Tier Limits
 
 - Vercel Hobby is for personal, non-commercial use and has no production SLA.

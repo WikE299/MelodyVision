@@ -7,16 +7,29 @@ on:
         description: Public MelodyVision URL
         required: false
         default: https://melodyvision-five.vercel.app
+  deployment_status:
 
 permissions:
   contents: read
+  deployments: read
+
+concurrency:
+  group: online-smoke-${{ github.event.deployment.id || inputs.base_url }}
+  cancel-in-progress: false
 
 jobs:
   smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.deployment_status.state == 'success' &&
+        github.event.deployment.environment == 'Production'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      BASE_URL: ${{ inputs.base_url }}
+      BASE_URL: ${{ github.event_name == 'deployment_status' && github.event.deployment_status.environment_url || inputs.base_url }}
+      DEPLOYMENT_SHA: ${{ github.event_name == 'deployment_status' && github.event.deployment.sha || github.sha }}
 
     steps:
       - name: Checkout test audio
@@ -50,7 +63,6 @@ jobs:
               --data "{\"fileName\":\"bach-cello-prelude-clip.mp3\",\"mimeType\":\"audio/mpeg\",\"byteSize\":$byte_size}"
           )"
           storage_path="$(jq -er '.storagePath' <<<"$ticket")"
-          upload_url="$(jq -er '.uploadUrl' <<<"$ticket")"
 
           cleanup() {
             curl --silent --show-error \
@@ -59,6 +71,7 @@ jobs:
               --data "{\"storagePath\":\"$storage_path\"}" >/dev/null || true
           }
           trap cleanup EXIT
+          upload_url="$(jq -er '.uploadUrl' <<<"$ticket")"
 
           curl --fail --silent --show-error \
             --request PUT "$upload_url" \
@@ -103,3 +116,16 @@ jobs:
             and .database.status == "ok"
             and .audioAnalysis.status == "ok"
           ' <<<"$readiness"
+
+      - name: Report tested deployment
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## MelodyVision production smoke"
+            echo
+            echo "- Result: **${{ job.status }}**"
+            echo "- URL: $BASE_URL"
+            echo "- Commit: \`$DEPLOYMENT_SHA\`"
+            echo "- Trigger: \`${{ github.event_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
