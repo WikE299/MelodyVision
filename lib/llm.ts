@@ -22,10 +22,24 @@ export interface LLMStreamRequest {
   signal?: AbortSignal;
 }
 
-const client = new OpenAI({
-  apiKey: process.env.LLM_API_KEY,
-  baseURL: process.env.LLM_BASE_URL,
-});
+let client: OpenAI | null = null;
+
+function getClient(): OpenAI {
+  if (client) {
+    return client;
+  }
+
+  const apiKey = process.env.LLM_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("LLM_API_KEY is not configured");
+  }
+
+  client = new OpenAI({
+    apiKey,
+    baseURL: process.env.LLM_BASE_URL,
+  });
+  return client;
+}
 
 const MODEL = process.env.LLM_MODEL || "mimo-v2.5-pro";
 const IMAGE_PROMPT_MODEL = process.env.LLM_IMAGE_PROMPT_MODEL || MODEL;
@@ -71,7 +85,7 @@ export async function callLLM(params: {
     ],
   };
 
-  const response = await client.chat.completions.create(
+  const response = await getClient().chat.completions.create(
     request,
     signal ? { signal } : undefined
   );
@@ -109,7 +123,7 @@ export async function* streamLLM(params: LLMStreamRequest): AsyncGenerator<LLMSt
       { role: "user" as const, content: userMessage },
     ],
   };
-  const stream = await client.chat.completions.create(
+  const stream = await getClient().chat.completions.create(
     request,
     signal ? { signal } : undefined
   );
@@ -141,7 +155,7 @@ export async function callPromptDirector(systemPrompt: string): Promise<PromptDi
       },
     ],
   };
-  const response = await client.chat.completions.create(request);
+  const response = await getClient().chat.completions.create(request);
 
   const choice = response.choices[0];
 
@@ -177,7 +191,7 @@ export async function callPromptDirectorRepair(
       },
     ],
   };
-  const response = await client.chat.completions.create(request);
+  const response = await getClient().chat.completions.create(request);
 
   const choice = response.choices[0];
 
@@ -223,7 +237,7 @@ Rewrite the supplied prompt into an entirely original, non-referential visual de
       },
     ],
   };
-  const response = await client.chat.completions.create(request);
+  const response = await getClient().chat.completions.create(request);
   const choice = response.choices[0];
 
   return {
@@ -268,7 +282,7 @@ export async function callLLMForImagePrompt(
         { role: "user" as const, content: request.userMessage },
       ],
     };
-    const response = await client.chat.completions.create(completionRequest);
+    const response = await getClient().chat.completions.create(completionRequest);
 
     const choice = response.choices[0];
     const content = choice?.message.content || "";

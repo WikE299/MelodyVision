@@ -124,14 +124,10 @@ codex/<task>
 -> automatic real-audio production smoke test
 ```
 
-Current transition state:
-
-- The Vercel project is not yet connected to the GitHub repository.
-- Until the Vercel GitHub App is authorized, deploy only from a clean, validated
-  `main` checkout with `npx vercel deploy --prod --yes`.
-- Start the online smoke workflow manually after that deployment.
-- After Git connection succeeds, PR Preview, production deployment, and the
-  deployment-status smoke trigger replace those two manual steps.
+The Vercel GitHub App is connected to `WikE299/MelodyVision`, and `main` is the
+production branch. Normal releases do not require a local Vercel CLI deployment.
+Keep `npx vercel deploy --prod --yes` only as a documented fallback when the Git
+integration is unavailable.
 
 The smoke workflow can also be started manually from GitHub Actions with a
 specific public URL. It checks the Python analyzer, uploads and analyzes a

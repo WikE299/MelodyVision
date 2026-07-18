@@ -39,9 +39,9 @@ server-side part of production verification:
 - `.github/pull_request_template.md` records the task contract, verification,
   Preview review, release risk, and documentation impact.
 - `.github/workflows/smoke-online-deployment.yml` remains manually runnable and
-  also listens for a successful Vercel `Production` deployment status. The
-  automatic trigger becomes active after the Vercel GitHub App is installed
-  and this repository is connected to the Vercel project.
+  also listens for a successful Vercel `Production` deployment status.
+- The Vercel GitHub App is connected to `WikE299/MelodyVision`, with `main` as
+  the production branch.
 - GitHub protects `main`, requires pull requests, and requires the three CI
   checks listed below. The rule also applies to repository administrators.
 - The Windows deployment remains a manual fallback.
@@ -49,9 +49,6 @@ server-side part of production verification:
 The following work is intentionally still pending:
 
 - Preview data isolation from the production Supabase project.
-- Vercel GitHub App authorization and repository connection. Until that account
-  step is complete, production deploys use the Vercel CLI from a clean `main`
-  checkout and the online smoke workflow is started manually.
 - Browser-level end-to-end coverage.
 - Automated paid-model full-chain testing. This remains a controlled manual
   release check.
@@ -68,18 +65,18 @@ The repository already has:
   `.github/workflows/smoke-online-deployment.yml`.
 - A manually triggered Windows fallback deployment:
   `.github/workflows/deploy-windows-server.yml`.
-- Vercel production deployment of the GitHub `main` branch through the CLI.
+- Vercel Preview deployments for pull-request branches and production
+  deployments from `main`.
 - Supabase storage and PostgreSQL production persistence.
 - A real smoke-test path that uploads an audio clip, analyzes it, checks the
   returned profile, checks `/api/readiness`, and removes temporary audio.
 
 Remaining gaps:
 
-1. The Vercel project is not yet connected to the GitHub repository.
-2. Vercel Preview review is not yet backed by isolated Preview data.
-3. There is no browser-level end-to-end test suite.
-4. Paid-model full-chain testing is manual by design.
-5. Branch, worktree, temporary database, and storage cleanup are documented but
+1. Vercel Preview review is not yet backed by isolated Preview data.
+2. There is no browser-level end-to-end test suite.
+3. Paid-model full-chain testing is manual by design.
+4. Branch, worktree, temporary database, and storage cleanup are documented but
    not fully automated.
 
 ## Core Rules
@@ -458,12 +455,8 @@ Partially implemented:
 
 Still required:
 
-- Install the Vercel GitHub App for `WikE299/MelodyVision` and connect it to the
-  existing `melodyvision` project.
 - Isolated Preview data.
 - Browser smoke coverage.
-- Observed verification that the Vercel Git integration emits the production
-  deployment status for this repository.
 
 ### Phase 3: Release hygiene
 
