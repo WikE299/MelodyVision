@@ -40,6 +40,8 @@ server-side part of production verification:
   Preview review, release risk, and documentation impact.
 - `.github/workflows/smoke-online-deployment.yml` remains manually runnable and
   also listens for a successful Vercel `Production` deployment status.
+- GitHub protects `main`, requires pull requests, and requires the three CI
+  checks listed below. The rule also applies to repository administrators.
 - The Windows deployment remains a manual fallback.
 
 The following work is intentionally still pending:
