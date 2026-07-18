@@ -14,6 +14,7 @@ import {
   buildPromptDirectorInput,
   buildPromptDirectorInstruction,
   getPromptDirectorUserSourceIds,
+  sanitizeImagePromptForProvider,
 } from "../lib/prompts/image-gen.ts";
 
 function runtime() {
@@ -141,4 +142,15 @@ test("direct baseline prompt input contains music evidence and no co-creation da
   assert.match(instruction, /music-only reference condition/);
   assert.match(instruction, /sourceMappings.*must be empty/);
   assert.doesNotMatch(instruction, /Treat these co-created fields as authoritative/);
+});
+
+test("provider prompt sanitizer translates known IP references into generic visual traits", () => {
+  const prompt = sanitizeImagePromptForProvider(
+    "A Tom and Jerry scene with 汤姆猫 dancing, in the style of Famous Artist."
+  );
+
+  assert.doesNotMatch(prompt, /Tom|Jerry|汤姆猫|Famous Artist/i);
+  assert.match(prompt, /playful slapstick chase rhythm/);
+  assert.match(prompt, /blue-gray ribbon sculpture/);
+  assert.match(prompt, /original visual language/);
 });

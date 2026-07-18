@@ -195,6 +195,51 @@ export async function callPromptDirectorRepair(
   };
 }
 
+export async function callImagePromptSafetyRewrite(
+  prompt: string
+): Promise<PromptDirectorResult> {
+  const request = {
+    model: IMAGE_PROMPT_MODEL,
+    max_tokens: 1200,
+    temperature: 0.2,
+    thinking: { type: "disabled" as const },
+    messages: [
+      {
+        role: "system" as const,
+        content: `You are a safety editor for an image-generation prompt.
+
+Rewrite the supplied prompt into an entirely original, non-referential visual description.
+- Remove every name or title from existing films, television, games, comics, characters, franchises, brands, studios, and artists.
+- Translate removed references into generic drawable traits: object, motion, material, palette, lighting, atmosphere, and composition.
+- Preserve the emotional meaning and concrete visual decisions.
+- Do not depict people, human figures, faces, bodies, portraits, silhouettes, crowds, or characters.
+- Do not include visible text, letters, captions, signs, logos, signatures, or watermarks.
+- Do not mention copyright, infringement, IP, source material, rewriting, safety, or prompt.
+- Return only one English image-generation prompt of 80-150 words, with no markdown or explanation.`,
+      },
+      {
+        role: "user" as const,
+        content: prompt,
+      },
+    ],
+  };
+  const response = await client.chat.completions.create(request);
+  const choice = response.choices[0];
+
+  return {
+    content: choice?.message.content || "",
+    finishReason: choice?.finish_reason || null,
+    model: response.model,
+    usage: response.usage
+      ? {
+          inputTokens: response.usage.prompt_tokens,
+          outputTokens: response.usage.completion_tokens,
+          reasoningTokens: response.usage.completion_tokens_details?.reasoning_tokens,
+        }
+      : undefined,
+  };
+}
+
 export async function callLLMForImagePrompt(
   systemPrompt: string,
   userMessage: string
