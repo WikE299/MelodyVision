@@ -31,5 +31,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "sites"]
+  "exclude": ["node_modules", "sites", "local-assets"]
 }
