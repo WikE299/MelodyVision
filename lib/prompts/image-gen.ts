@@ -137,6 +137,31 @@ export interface PromptDirectorBrief {
   negativePrompt: string;
 }
 
+const IP_REFERENCE_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/\bTom\s*(?:and|&)\s*Jerry\b/gi, "a playful slapstick chase rhythm"],
+  [/猫和老鼠/g, "a playful slapstick chase rhythm"],
+  [/\bTom(?:\s+the)?\s+Cat\b/gi, "a blue-gray ribbon sculpture"],
+  [/汤姆猫/g, "a blue-gray ribbon sculpture"],
+  [/\bPlants\s+vs\.?\s+Zombies\b/gi, "a whimsical botanical defense tableau"],
+  [/植物大战僵尸/g, "a whimsical botanical defense tableau"],
+];
+
+export function sanitizeImagePromptForProvider(prompt: string): string {
+  const withoutKnownReferences = IP_REFERENCE_REPLACEMENTS.reduce(
+    (value, [pattern, replacement]) => value.replace(pattern, replacement),
+    prompt
+  );
+
+  return withoutKnownReferences
+    .replace(
+      /\b(?:in the style of|styled after|imitating)\s+[^,.;]+/gi,
+      "with an original visual language"
+    )
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .trim();
+}
+
 /**
  * Synthesize multiple character comments into a single image generation prompt.
  * The prompt is hidden from the user.
@@ -413,7 +438,7 @@ Hard rules:
 7. If inputs conflict, preserve the conflict visually, for example calm surface with hidden pressure.
 8. Do not mention music, comments, BPM, musicians, analysis, or prompt in finalPrompt.
 9. finalPrompt must be concrete and imageable, not abstract.
-10. Avoid copyrighted game character names or exact franchise names in finalPrompt; translate them into visual traits instead.
+10. Do not use names or titles from existing films, television, games, comics, characters, franchises, brands, studios, or artists in finalPrompt or any visual translation. Convert every such reference into generic drawable traits, motion, material, palette, and composition.
 11. Do not include any people, human figures, faces, bodies, portraits, silhouettes, crowds, or characters in the image.
 12. Do not include any visible text, letters, captions, handwriting, signs, subtitles, logos, or watermarks in the image.
 13. Choose a visualDomain before writing finalPrompt. Consider objects, interiors, architecture, natural phenomena, still life, material studies, geometric space, microscopic worlds, surreal environments, machines, weather systems, or ceremonial spaces as appropriate.
@@ -515,6 +540,7 @@ Make userNoteTrace concrete when userNote is present.
 Do not remove any musician's influence.
 Keep every input comment exactly once in weightingRationale and copy comment.weight exactly.
 Do not include forbidden meta words in finalPrompt.
+Remove every film, television, game, comic, character, franchise, brand, studio, and artist name from finalPrompt and all visual translations. Preserve only generic drawable traits.
 Do not include any people or visible text in finalPrompt.`;
 }
 

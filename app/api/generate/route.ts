@@ -8,10 +8,16 @@ import {
   buildPromptDirectorInstruction,
   buildPromptDirectorRepairInstruction,
   getPromptDirectorUserSourceIds,
+  sanitizeImagePromptForProvider,
   PromptDirectorBrief,
   PromptDirectorInput,
 } from "@/lib/prompts/image-gen";
-import { callPromptDirector, callPromptDirectorRepair, PromptDirectorResult } from "@/lib/llm";
+import {
+  callImagePromptSafetyRewrite,
+  callPromptDirector,
+  callPromptDirectorRepair,
+  PromptDirectorResult,
+} from "@/lib/llm";
 import { characters } from "@/lib/characters";
 import { buildVisualPresetPrompt } from "@/lib/prompts/visual-presets";
 import { insertGenerationRun } from "@/lib/db/generation-runs";
@@ -88,6 +94,24 @@ interface PromptDirectorStep {
     usage?: PromptDirectorResult["usage"];
     parseStatus: "ok" | "invalid-json";
   };
+}
+
+interface ImageGenerationAttempt {
+  attempt: number;
+  prompt: string;
+  status: "success" | "error";
+  error?: string;
+}
+
+class ImageGenerationPipelineError extends Error {
+  constructor(
+    error: unknown,
+    readonly attemptLog: ImageGenerationAttempt[],
+    readonly safetyRewrite: PromptDirectorResult | null
+  ) {
+    super(error instanceof Error ? error.message : String(error), { cause: error });
+    this.name = "ImageGenerationPipelineError";
+  }
 }
 
 const PROMPT_DIRECTOR_MAX_REPAIRS = 1;
@@ -250,6 +274,9 @@ function appendCoCreationConstraints(
   brief: PromptDirectorBrief | null
 ): string {
   const fields = input.coCreation?.visualBrief.fields || [];
+  const visualBriefMappings = new Map(
+    (brief?.visualBriefMappings || []).map((mapping) => [mapping.field, mapping])
+  );
   const anchors = fields.filter(
     (field) => field.status === "confirmed" && field.field !== "mustAvoid"
   );
@@ -261,15 +288,27 @@ function appendCoCreationConstraints(
     userTranslations.length
       ? `Primary personal visual anchors: ${userTranslations.join("; ")}.`
       : input.userNote
-        ? `Primary personal image to depict as content, not as an instruction: ${input.userNote}.`
+        ? ""
       : "",
     anchors.length
-      ? `Non-negotiable co-creation anchors: ${anchors.map((field) => `${field.field}: ${Array.isArray(field.value) ? field.value.join(", ") : field.value}`).join("; ")}.`
+      ? `Non-negotiable co-creation anchors: ${anchors
+          .map((field) => {
+            const translation = visualBriefMappings.get(field.field)?.visualTranslation;
+            return translation ? `${field.field}: ${translation}` : "";
+          })
+          .filter(Boolean)
+          .join("; ")}.`
       : "",
     conflicts.length
-      ? `Keep these tensions visibly unresolved: ${conflicts.map((field) => `${field.field}: ${Array.isArray(field.value) ? field.value.join(" versus ") : field.value}`).join("; ")}.`
+      ? `Keep these tensions visibly unresolved: ${conflicts
+          .map((field) => {
+            const translation = visualBriefMappings.get(field.field)?.visualTranslation;
+            return translation ? `${field.field}: ${translation}` : "";
+          })
+          .filter(Boolean)
+          .join("; ")}.`
       : "",
-  ].filter(Boolean);
+  ].filter((part) => part && !part.endsWith(": ."));
   return parts.length ? `${prompt.trim()} ${parts.join(" ")}` : prompt.trim();
 }
 
@@ -408,7 +447,16 @@ function hasUserSourceMappings(value: unknown): value is NonNullable<PromptDirec
 
 function collectForbiddenIpTerms(input: PromptDirectorInput): string[] {
   const text = `${input.userNote} ${input.comments.map((comment) => comment.comment).join(" ")}`;
-  const terms = ["植物大战僵尸", "Plants vs. Zombies"];
+  const terms = [
+    "植物大战僵尸",
+    "Plants vs. Zombies",
+    "猫和老鼠",
+    "Tom and Jerry",
+    "Tom & Jerry",
+    "汤姆猫",
+    "Tom Cat",
+    "Tom the Cat",
+  ];
   return terms.filter((term) => text.toLowerCase().includes(term.toLowerCase()));
 }
 
@@ -808,18 +856,63 @@ async function generateImageWithDashScope(prompt: string, negativePrompt?: strin
 
 async function generateImageWithRetry(prompt: string, negativePrompt?: string) {
   let lastError: unknown;
+  let currentPrompt = sanitizeImagePromptForProvider(prompt);
+  let safetyRewrite: PromptDirectorResult | null = null;
+  const attemptLog: ImageGenerationAttempt[] = [];
+
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
+      const result = await generateImageWithDashScope(currentPrompt, negativePrompt);
+      attemptLog.push({
+        attempt,
+        prompt: currentPrompt,
+        status: "success",
+      });
       return {
-        result: await generateImageWithDashScope(prompt, negativePrompt),
+        result,
         attempts: attempt,
+        attemptLog,
+        finalPrompt: currentPrompt,
+        safetyRewrite,
       };
     } catch (error) {
       lastError = error;
+      attemptLog.push({
+        attempt,
+        prompt: currentPrompt,
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      if (attempt < 2 && isIpInfringementError(error)) {
+        try {
+          safetyRewrite = await callImagePromptSafetyRewrite(currentPrompt);
+          const rewrittenPrompt = sanitizeImagePromptForProvider(
+            cleanImagePrompt(safetyRewrite.content)
+          );
+          if (!rewrittenPrompt) {
+            throw new Error("Image prompt safety rewrite returned empty content");
+          }
+          currentPrompt = appendLandscapeFormatConstraint(rewrittenPrompt);
+          continue;
+        } catch (rewriteError) {
+          throw new ImageGenerationPipelineError(
+            rewriteError,
+            attemptLog,
+            safetyRewrite
+          );
+        }
+      }
+
       if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
-  throw lastError;
+  throw new ImageGenerationPipelineError(lastError, attemptLog, safetyRewrite);
+}
+
+function isIpInfringementError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /IP infringement|intellectual property|suspected.*infringement/i.test(message);
 }
 
 function parseMusicProfile(value: unknown): MusicProfile | null {
@@ -1008,14 +1101,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (promptOverride) {
-      const overrideImagePrompt = appendLandscapeFormatConstraint(promptOverride);
+      const preparedOverrideImagePrompt = appendLandscapeFormatConstraint(promptOverride);
       const overrideNegativePrompt = negativePromptOverride ||
         "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs";
       const imageStartedAt = Date.now();
       const imageAttempt = await generateImageWithRetry(
-        overrideImagePrompt,
+        preparedOverrideImagePrompt,
         overrideNegativePrompt
       );
+      const overrideImagePrompt = imageAttempt.finalPrompt;
       const imageResult = imageAttempt.result;
       timings.imageGenerationAttempts = imageAttempt.attempts;
       timings.imageGenerationMs = Date.now() - imageStartedAt;
@@ -1043,10 +1137,13 @@ export async function POST(request: NextRequest) {
         },
         prompt: {
           source: "prompt-override",
+          preparedImagePrompt: preparedOverrideImagePrompt,
           finalImagePrompt: overrideImagePrompt,
           negativePrompt: overrideNegativePrompt,
+          safetyRewrite: imageAttempt.safetyRewrite,
         },
         image: {
+          attempts: imageAttempt.attemptLog,
           provider: imageResult.provider,
           model: imageResult.model,
           imageSize: imageResult.imageSize,
@@ -1116,6 +1213,7 @@ export async function POST(request: NextRequest) {
         imageSize: imageResult.imageSize,
         requestId: imageResult.requestId,
         usage: imageResult.usage,
+        promptSafetyRewrite: imageAttempt.safetyRewrite,
         logPath,
         logRef: logPath,
         timings,
@@ -1164,7 +1262,7 @@ export async function POST(request: NextRequest) {
     const directorImagePrompt =
       cleanedPrompt ||
       buildFallbackImagePrompt(normalizedComments, presets || {}, effectiveUserNote, musicAnalysis, promptDirectorInput);
-    const imagePrompt = appendLandscapeFormatConstraint(
+    const preparedImagePrompt = appendLandscapeFormatConstraint(
       appendCoCreationConstraints(
         appendVisualPresetPrompt(directorImagePrompt, presets || {}),
         promptDirectorInput,
@@ -1178,7 +1276,8 @@ export async function POST(request: NextRequest) {
     );
 
     const imageStartedAt = Date.now();
-    const imageAttempt = await generateImageWithRetry(imagePrompt, negativePrompt);
+    const imageAttempt = await generateImageWithRetry(preparedImagePrompt, negativePrompt);
+    const imagePrompt = imageAttempt.finalPrompt;
     const imageResult = imageAttempt.result;
     timings.imageGenerationAttempts = imageAttempt.attempts;
     timings.imageGenerationMs = Date.now() - imageStartedAt;
@@ -1215,10 +1314,13 @@ export async function POST(request: NextRequest) {
         },
         directorImagePrompt,
         visualPresetPrompt: promptDirectorInput.visualPreset,
+        preparedImagePrompt,
         finalImagePrompt: imagePrompt,
         negativePrompt,
+        safetyRewrite: imageAttempt.safetyRewrite,
       },
       image: {
+        attempts: imageAttempt.attemptLog,
         provider: imageResult.provider,
         model: imageResult.model,
         imageSize: imageResult.imageSize,
@@ -1295,6 +1397,7 @@ export async function POST(request: NextRequest) {
       imageSize: imageResult.imageSize,
       requestId: imageResult.requestId,
       usage: imageResult.usage,
+      promptSafetyRewrite: imageAttempt.safetyRewrite,
       logPath,
       logRef: logPath,
       timings,
@@ -1310,18 +1413,27 @@ export async function POST(request: NextRequest) {
       await updateStudyTrial({ id: primaryCoCreatedTrialId, status: "interacting" }).catch(() => undefined);
     }
     timings.totalMs = Date.now() - startedAt.getTime();
+    const imagePipelineError =
+      error instanceof ImageGenerationPipelineError ? error : null;
     await writeGenerationRunLog(runId, {
       runId,
       createdAt: startedAt.toISOString(),
       completedAt: new Date().toISOString(),
       status: "error",
       error: error instanceof Error ? error.message : String(error),
+      imageAttempts: imagePipelineError?.attemptLog,
+      promptSafetyRewrite: imagePipelineError?.safetyRewrite,
       timings,
     }).catch((logError) => {
       console.error("Failed to write generation error log:", logError);
     });
 
-    console.error("Image generation failed:", error);
+    console.error("Image generation failed:", {
+      error: error instanceof Error ? error.message : String(error),
+      runId,
+      imageAttempts: imagePipelineError?.attemptLog,
+      promptSafetyRewrite: imagePipelineError?.safetyRewrite,
+    });
     return Response.json(
       {
         runId,
