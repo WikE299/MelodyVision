@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type SyntheticEvent } from "react";
 import { useRouter } from "next/navigation";
 import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
@@ -194,6 +194,8 @@ const COPY = {
     evaluationError: "评价保存失败，请稍后重试",
     viewCoCreated: "共创作品",
     viewBaseline: "音乐直生作品",
+    imageLoading: "作品加载中",
+    imageLoadFailed: "作品加载失败，请重新切换后再试",
   },
   en: {
     audioName: "Music",
@@ -292,6 +294,8 @@ const COPY = {
     evaluationError: "Evaluation could not be saved. Please try again.",
     viewCoCreated: "Co-created",
     viewBaseline: "Music-only",
+    imageLoading: "Loading artwork",
+    imageLoadFailed: "Artwork failed to load. Switch away and try again.",
   },
 };
 
@@ -471,6 +475,8 @@ export default function ResultPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const resultViewRecordedRef = useRef(false);
   const comparisonExposureRecordedRef = useRef(false);
+  const baselinePreloadOutcomesRef = useRef(new Set<string>());
+  const displayedImageLoadStartedAtRef = useRef<number | null>(null);
   const mounted = useHydrated();
   const [initialState] = useState(getInitialResultState);
   const [imageUrl, setImageUrl] = useState<string | null>(initialState.imageUrl);
@@ -534,6 +540,7 @@ export default function ResultPage() {
   const [studySaving, setStudySaving] = useState(false);
   const [studyError, setStudyError] = useState("");
   const [resultArtworkRole, setResultArtworkRole] = useState<GenerationRole>("co_created");
+  const [resultImageStatus, setResultImageStatus] = useState<"loading" | "loaded" | "error">("loading");
 
   useEffect(() => {
     if (!imageUrl) {
@@ -621,6 +628,40 @@ export default function ResultPage() {
       if (timer) clearTimeout(timer);
     };
   }, [studyTrialId]);
+
+  useEffect(() => {
+    const baselineImageUrl = baselineResult?.imageUrl;
+    if (!baselineImageUrl || baselinePreloadOutcomesRef.current.has(baselineImageUrl)) return;
+
+    const startedAt = Date.now();
+    const image = new window.Image();
+    image.onload = () => {
+      if (baselinePreloadOutcomesRef.current.has(baselineImageUrl)) return;
+      baselinePreloadOutcomesRef.current.add(baselineImageUrl);
+      recordExperimentEvent("result-image-preload-completed", "/result", {
+        trialId: studyTrialId || null,
+        runId: baselineResult.runId,
+        role: "direct_baseline",
+        loadMs: Date.now() - startedAt,
+      });
+    };
+    image.onerror = () => {
+      if (baselinePreloadOutcomesRef.current.has(baselineImageUrl)) return;
+      baselinePreloadOutcomesRef.current.add(baselineImageUrl);
+      recordExperimentEvent("result-image-preload-failed", "/result", {
+        trialId: studyTrialId || null,
+        runId: baselineResult.runId,
+        role: "direct_baseline",
+        loadMs: Date.now() - startedAt,
+      });
+    };
+    image.src = baselineImageUrl;
+
+    return () => {
+      image.onload = null;
+      image.onerror = null;
+    };
+  }, [baselineResult?.imageUrl, baselineResult?.runId, studyTrialId]);
 
   useEffect(() => {
     if (
@@ -720,6 +761,8 @@ export default function ResultPage() {
         throw new Error(data.detail || data.error || copy.regenerateFailed);
       }
 
+      displayedImageLoadStartedAtRef.current = null;
+      setResultImageStatus("loading");
       setImageUrl(data.imageUrl);
       const nextDebugInfo: DebugInfo = {
         musicAnalysis: debugInfo?.musicAnalysis,
@@ -924,6 +967,48 @@ export default function ResultPage() {
     }
   };
 
+  const handleSelectResultArtwork = (role: GenerationRole, startedAt: number) => {
+    if (role === resultArtworkRole) return;
+    displayedImageLoadStartedAtRef.current = startedAt;
+    setResultImageStatus("loading");
+    setResultArtworkRole(role);
+    recordExperimentEvent("result-artwork-switched", "/result", {
+      trialId: studyTrial?.id || null,
+      role,
+    });
+  };
+
+  const handleResultImageLoad = (event: SyntheticEvent<HTMLImageElement>) => {
+    const startedAt = displayedImageLoadStartedAtRef.current;
+    displayedImageLoadStartedAtRef.current = null;
+    setResultImageStatus("loaded");
+    recordExperimentEvent("result-image-loaded", "/result", {
+      trialId: studyTrial?.id || null,
+      runId:
+        resultArtworkRole === "direct_baseline"
+          ? baselineResult?.runId || null
+          : debugInfo?.meta?.runId || null,
+      role: resultArtworkRole,
+      loadMs: startedAt === null ? null : Math.max(0, Math.round(event.timeStamp - startedAt)),
+    });
+    void playResultAudio();
+  };
+
+  const handleResultImageError = (event: SyntheticEvent<HTMLImageElement>) => {
+    const startedAt = displayedImageLoadStartedAtRef.current;
+    displayedImageLoadStartedAtRef.current = null;
+    setResultImageStatus("error");
+    recordExperimentEvent("result-image-load-failed", "/result", {
+      trialId: studyTrial?.id || null,
+      runId:
+        resultArtworkRole === "direct_baseline"
+          ? baselineResult?.runId || null
+          : debugInfo?.meta?.runId || null,
+      role: resultArtworkRole,
+      loadMs: startedAt === null ? null : Math.max(0, Math.round(event.timeStamp - startedAt)),
+    });
+  };
+
   if (!mounted || !imageUrl) return null;
 
   const characters = getCharactersByIds(characterIds);
@@ -1056,11 +1141,30 @@ export default function ResultPage() {
             <div className="relative flex h-full w-full items-center justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
+                key={`${resultArtworkRole}:${displayedResultImage}`}
                 src={displayedResultImage}
                 alt={copy.imageAlt}
-                className="block max-h-full max-w-full rounded-[6px] object-contain shadow-[0_34px_110px_rgba(0,0,0,0.62),0_0_45px_rgba(255,187,91,0.16)] ring-1 ring-[#efbd77]/38"
-                onLoad={playResultAudio}
+                className={`block max-h-full max-w-full rounded-[6px] object-contain shadow-[0_34px_110px_rgba(0,0,0,0.62),0_0_45px_rgba(255,187,91,0.16)] ring-1 ring-[#efbd77]/38 transition-opacity duration-200 ${
+                  resultImageStatus === "loading" ? "opacity-0" : "opacity-100"
+                }`}
+                onLoad={handleResultImageLoad}
+                onError={handleResultImageError}
               />
+              {resultImageStatus === "loading" && (
+                <div className="absolute inset-0 flex items-center justify-center" role="status" aria-live="polite">
+                  <div className="flex items-center gap-3 border border-[#a77b57]/44 bg-[#1f1923]/88 px-4 py-3 text-sm text-[#ffe3bd] shadow-[0_14px_36px_rgba(0,0,0,0.34)] backdrop-blur">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#ffd083]/30 border-t-[#ffd083]" />
+                    {copy.imageLoading}
+                  </div>
+                </div>
+              )}
+              {resultImageStatus === "error" && (
+                <div className="absolute inset-0 flex items-center justify-center" role="alert">
+                  <p className="border border-[#b76557]/56 bg-[#291d24]/92 px-4 py-3 text-sm text-[#efb6a5] shadow-[0_14px_36px_rgba(0,0,0,0.34)]">
+                    {copy.imageLoadFailed}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1210,13 +1314,7 @@ export default function ResultPage() {
                 <button
                   key={role}
                   type="button"
-                  onClick={() => {
-                    setResultArtworkRole(role);
-                    recordExperimentEvent("result-artwork-switched", "/result", {
-                      trialId: studyTrial?.id || null,
-                      role,
-                    });
-                  }}
+                  onClick={(event) => handleSelectResultArtwork(role, event.timeStamp)}
                   aria-pressed={resultArtworkRole === role}
                   className={`min-w-24 px-4 py-2 font-semibold transition ${
                     resultArtworkRole === role
