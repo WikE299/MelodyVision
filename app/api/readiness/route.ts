@@ -7,8 +7,16 @@ export const maxDuration = 35;
 async function databaseStatus() {
   try {
     const database = await getDatabase();
-    const rows = await database.prepare("SELECT 1 AS ok").all();
-    return { status: rows.length === 1 ? "ok" : "unavailable", provider: database.provider };
+    const schemaChecks = [
+      "SELECT protocol_version FROM study_trials LIMIT 0",
+      "SELECT immersion_score, satisfaction_score FROM artwork_evaluations LIMIT 0",
+      "SELECT id FROM labeled_comparisons LIMIT 0",
+      "SELECT id FROM manipulation_checks LIMIT 0",
+    ];
+    for (const query of schemaChecks) {
+      await database.prepare(query).all();
+    }
+    return { status: "ok", provider: database.provider };
   } catch (error) {
     console.error("Readiness database check failed:", error);
     return {
