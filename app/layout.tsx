@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://melodyvision-five.vercel.app"),
   title: "MelodyVision",
   description: "Upload music, invite listening guides to respond, and generate an artwork.",
 };
