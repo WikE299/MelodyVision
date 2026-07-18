@@ -129,6 +129,11 @@ production branch. Normal releases do not require a local Vercel CLI deployment.
 Keep `npx vercel deploy --prod --yes` only as a documented fallback when the Git
 integration is unavailable.
 
+The GitHub repository variable `PRODUCTION_BASE_URL` must point to the public
+production alias. The automatic smoke test uses that alias because Vercel's
+deployment-specific production URL may require SSO even when the public alias
+is accessible.
+
 The smoke workflow can also be started manually from GitHub Actions with a
 specific public URL. It checks the Python analyzer, uploads and analyzes a
 short tracked audio clip, checks `/api/readiness`, and removes the temporary
