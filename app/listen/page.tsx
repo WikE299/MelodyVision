@@ -19,6 +19,7 @@ import type {
 } from "@/lib/contracts";
 import type { FacilitatorPlan } from "@/lib/agents/facilitator";
 import { readConversationStream } from "@/lib/conversation";
+import { isGenerationActionBlocked } from "@/lib/conversation/generation-guard";
 import { isMeaningfulUserInput } from "@/lib/conversation/user-input";
 import { ensureStudyTrial, startDirectBaseline } from "@/lib/experiment-trial-client";
 
@@ -707,6 +708,8 @@ export default function ListenPage() {
   const streamGenerationRef = useRef(0);
   const activeStreamSpeakerRef = useRef("");
   const allCommentsRef = useRef(initialState.comments);
+  const conversationStateRef = useRef(initialState.conversationState);
+  const userSubmissionInFlightRef = useRef(false);
   const visualBriefRefRef = useRef(initialState.conversationState?.visualBriefRef || null);
   const baselineRecoveryAttemptedRef = useRef(false);
   const trialRecoveryRef = useRef<Promise<StudyTrial | null> | null>(null);
@@ -818,6 +821,7 @@ export default function ListenPage() {
       ? { ...nextState, visualBriefRef: latestRef }
       : nextState;
     visualBriefRefRef.current = mergedState.visualBriefRef;
+    conversationStateRef.current = mergedState;
     setConversationState(mergedState);
     sessionStorage.setItem("conversationState", JSON.stringify(mergedState));
   }, []);
@@ -1086,12 +1090,19 @@ export default function ListenPage() {
 
   const handleSubmitUserNote = async () => {
     const content = userNote.trim();
-    if (!content || !conversationState || submittingUserNote || (isReflective && loading.size > 0)) return;
+    if (
+      !content ||
+      !conversationState ||
+      submittingUserNote ||
+      userSubmissionInFlightRef.current ||
+      (isReflective && loading.size > 0)
+    ) return;
     if (!isMeaningfulUserInput(content)) {
       setUserNoteError(copy.inputNeedsDetail);
       return;
     }
 
+    userSubmissionInFlightRef.current = true;
     setSubmittingUserNote(true);
     setUserNoteError("");
     setPendingUserMessage({ id: crypto.randomUUID(), content });
@@ -1143,6 +1154,7 @@ export default function ListenPage() {
       setUserNote(content);
       setUserNoteError(error instanceof Error ? error.message : copy.userNoteFailed);
     } finally {
+      userSubmissionInFlightRef.current = false;
       setSubmittingUserNote(false);
     }
   };
@@ -1203,21 +1215,27 @@ export default function ListenPage() {
   };
 
   const handleContinue = async () => {
-    if (!conversationState || generating) return;
+    if (
+      !conversationState ||
+      generationActionBlocked ||
+      userSubmissionInFlightRef.current ||
+      turnInFlightRef.current
+    ) return;
+    const generationState = conversationStateRef.current || conversationState;
     cancelActiveTurn();
     setGenerating(true);
     setGenerationProgress(6);
     setGenerationError("");
     recordExperimentEvent("generation-started", "/listen", {
-      trialId: conversationState.trialId,
-      condition: conversationState.condition,
-      conversationId: conversationState.id,
-      musicianCount: conversationState.selectedMusicianIds.length,
+      trialId: generationState.trialId,
+      condition: generationState.condition,
+      conversationId: generationState.id,
+      musicianCount: generationState.selectedMusicianIds.length,
       resonantMusicianIds: [...resonantComments],
     });
 
     try {
-      const activeTrial = await ensureActiveTrial(conversationState);
+      const activeTrial = await ensureActiveTrial(generationState);
       const musicProfileForBaseline = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
       const musicAnalysisForBaseline = JSON.parse(sessionStorage.getItem("musicAnalysis") || "null") as Record<string, unknown> | null;
       if (activeTrial && musicProfileForBaseline && musicAnalysisForBaseline) {
@@ -1230,7 +1248,7 @@ export default function ListenPage() {
       const stateResponse = await fetch("/api/conversation/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationState }),
+        body: JSON.stringify({ conversationState: generationState }),
       });
       const stateData = await stateResponse.json();
       if (!stateResponse.ok) throw new Error(stateData.error || "Conversation cannot enter generation");
@@ -1394,6 +1412,13 @@ export default function ListenPage() {
   );
   const generationReady = isReflective ? conversationReady : conversationReady || visualBriefReady;
   const reflectiveCanGenerate = generationReady && Object.keys(allComments).length > 0;
+  const generationActionBlocked = isGenerationActionBlocked({
+    generating,
+    submittingUserNote,
+    hasPendingUserMessage: Boolean(pendingUserMessage),
+    loadingCount: loading.size,
+    streamingCount: streaming.size,
+  });
   const canGenerateEarly = Boolean(
     conversationState?.condition === "multi_agent" &&
     conversationState.turnPolicy.userMayGenerateEarly &&
@@ -1685,7 +1710,7 @@ export default function ListenPage() {
                     </div>
                   </>
                 ) : (
-                  <button type="button" onClick={handleContinue} disabled={!reflectiveCanGenerate || generating} className="mt-3 flex h-11 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:opacity-40">
+                  <button type="button" onClick={handleContinue} disabled={!reflectiveCanGenerate || generationActionBlocked} className="mt-3 flex h-11 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:opacity-40">
                     {copy.generate}
                   </button>
                 )}
@@ -1842,7 +1867,7 @@ export default function ListenPage() {
                 onClick={generationReady ? handleContinue : () => setChatOpen(false)}
                 disabled={
                   generationReady
-                    ? generating
+                    ? generationActionBlocked
                     : !waitingForNextAgent
                 }
                 className="mt-2 flex h-12 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 px-5 text-sm font-semibold text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.26)] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61]"
@@ -1853,7 +1878,7 @@ export default function ListenPage() {
                 <button
                   type="button"
                   onClick={handleContinue}
-                  disabled={generating}
+                  disabled={generationActionBlocked}
                   className="mt-2 w-full text-center text-xs text-[#d8b18b] transition hover:text-[#ffe0b5] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {copy.generateEarly}
