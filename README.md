@@ -1,7 +1,7 @@
 # MelodyVision
 
 <p align="center">
-  <img src="./app/opengraph-image.png" alt="MelodyVision crystal music-note mark" width="100%" />
+  <img src="./app/opengraph-image.png" alt="Music traces passing through an amber crystal and becoming a shared visual landscape" width="100%" />
 </p>
 
 <p align="center">
