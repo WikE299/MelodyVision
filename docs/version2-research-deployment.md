@@ -20,6 +20,12 @@ Raw uploaded audio is excluded. The Python analyzer uses a temporary file and de
 
 `GET /api/experiment/export` and `?format=csv` require `EXPERIMENT_EXPORT_TOKEN`. A missing server token returns `503`; an invalid client token returns `401`. The CSV encoder neutralizes formula-leading user text before export.
 
+## Local research dashboard
+
+Set `RESEARCH_DASHBOARD_ENABLED=true` only in the local development environment, then open `http://localhost:3000/research`. The page and `/api/research/data` return `404` unless the flag is enabled and the request host is `localhost`, `127.0.0.1`, or `::1`.
+
+The dashboard reads the local database by default. To inspect server experiments without exposing the dashboard publicly, download the protected JSON export and drag that file into the local dashboard. Imported snapshots are parsed in browser memory and never written back to the database. The default aggregate includes only the current study protocol; historical protocols remain available through the protocol filter.
+
 ## Windows deployment
 
 The GitHub Actions deployment script now manages two services:
