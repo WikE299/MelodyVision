@@ -24,7 +24,27 @@ Raw uploaded audio is excluded. The Python analyzer uses a temporary file and de
 
 Set `RESEARCH_DASHBOARD_ENABLED=true` only in the local development environment, then open `http://localhost:3000/research`. The page and `/api/research/data` return `404` unless the flag is enabled and the request host is `localhost`, `127.0.0.1`, or `::1`.
 
-The dashboard reads the local database by default. To inspect server experiments without exposing the dashboard publicly, download the protected JSON export and drag that file into the local dashboard. Imported snapshots are parsed in browser memory and never written back to the database. The default aggregate includes only the current study protocol; historical protocols remain available through the protocol filter.
+The dashboard reads the local database by default. To sync the protected online export automatically, add the following values to the local `.env.local` file and restart the local service:
+
+```text
+RESEARCH_REMOTE_EXPORT_URL=https://<production-project>.vercel.app/api/experiment/export
+RESEARCH_REMOTE_EXPORT_TOKEN=<same value as the production EXPERIMENT_EXPORT_TOKEN>
+```
+
+When configured, `/research` automatically loads the online dataset and exposes a `同步线上数据` action. The token stays in the local Node.js process and is never sent to the browser. The most recent successful export is cached under the ignored local `data/research-cache/` directory and is used when the online export is temporarily unavailable.
+
+If the Vercel alias cannot be reached reliably from the research machine, configure the production Supabase project directly instead:
+
+```text
+RESEARCH_SUPABASE_URL=https://<project-ref>.supabase.co
+RESEARCH_SUPABASE_SERVICE_ROLE_KEY=<server-only service role key>
+```
+
+This direct reader is also local-only and read-only in application behavior. Keep the service-role key only in the ignored local `.env.local`; never expose it through a `NEXT_PUBLIC_` variable. When both sources are configured, the dashboard prefers the direct Supabase reader.
+
+Manual JSON import remains available as a fallback. Imported snapshots are parsed in browser memory and never written back to the database. The default aggregate includes only the current study protocol; historical protocols remain available through the protocol filter.
+
+Online artwork URLs point to the original Supabase Storage objects. The dashboard uses `/api/research/thumbnail` to create and cache 720p WebP previews locally; clicking a preview opens the unchanged full-resolution artwork. Supabase public object URLs are allowed by default. Add comma-separated HTTPS hostnames to `RESEARCH_IMAGE_HOSTS` only when artwork is stored elsewhere.
 
 ## Windows deployment
 

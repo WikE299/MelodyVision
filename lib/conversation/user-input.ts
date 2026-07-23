@@ -18,6 +18,6 @@ const STARTER_PATTERNS = [
 
 export function isMeaningfulUserInput(value: string): boolean {
   const content = value.trim();
-  if (content.length < 3) return false;
+  if (content.length < 2 || !/[\p{L}\p{N}]/u.test(content)) return false;
   return !STARTER_PATTERNS.some((pattern) => pattern.test(content));
 }

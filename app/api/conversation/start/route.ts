@@ -1,26 +1,14 @@
 import type { NextRequest } from "next/server";
 import { getCharacterById } from "@/lib/characters";
-import { runFacilitatorAgent } from "@/lib/agents/facilitator";
-import { getMusicianAgentProfile } from "@/lib/agents/musicians";
 import {
   createConversationState,
   createReflectivePlan,
-  scheduleMusicianTurn,
-  startReflectiveListening,
+  startUserFirstConversation,
 } from "@/lib/conversation";
 import { insertConversationSnapshot } from "@/lib/db/research-data";
 import { isInteractiveCondition } from "@/lib/contracts";
 import { SINGLE_GUIDE_ID } from "@/lib/agents/single-guide";
 import { getStudyTrial, updateStudyTrial } from "@/lib/db/study-trials";
-
-function readStringRecord(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-      .map(([key, text]) => [key, text.trim().slice(0, 800)])
-  );
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -55,12 +43,6 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "selectedMusicianIds must contain 1-4 known unique musicians" }, { status: 400 });
     }
 
-    const musicianNames = Object.fromEntries(
-      selectedMusicianIds.map((id) => [id, getCharacterById(id)!.name])
-    );
-    const musicianIdentityContexts = Object.fromEntries(
-      selectedMusicianIds.map((id) => [id, getMusicianAgentProfile(id)?.identityContext || ""])
-    );
     const state = createConversationState({
       trialId,
       sessionId,
@@ -68,35 +50,21 @@ export async function POST(request: NextRequest) {
       selectedMusicianIds,
       condition,
       turnPolicy: {
-        userMayGenerateEarly:
-          condition === "multi_agent" && studyTrial?.assignmentMethod !== "balanced_random",
+        maxUserRounds: condition === "multi_agent" ? 4 : 2,
+        userMayInterrupt: condition !== "multi_agent",
+        userMayGenerateEarly: false,
       },
       ...(condition === "single_agent" ? { guideId: SINGLE_GUIDE_ID } : {}),
     });
-    if (condition === "single_agent") {
-      const nextState = startReflectiveListening(state);
-      const facilitatorPlan = createReflectivePlan(nextState);
-      await insertConversationSnapshot(nextState, "conversation-started").catch((error) => {
-        console.error("Conversation start snapshot failed:", error);
-      });
-      if (studyTrial) await updateStudyTrial({ id: trialId, status: "interacting" });
-      return Response.json({ state: nextState, facilitatorPlan });
-    }
-    const plan = await runFacilitatorAgent({
-      state,
-      musicianNames,
-      musicianIdentityContexts,
-      preparedSummaries: readStringRecord(body.preparedSummaries),
-    });
-
-    const nextState = scheduleMusicianTurn(state, plan);
+    const nextState = startUserFirstConversation(state);
+    const facilitatorPlan = createReflectivePlan(nextState);
     await insertConversationSnapshot(nextState, "conversation-started").catch((error) => {
       console.error("Conversation start snapshot failed:", error);
     });
     if (studyTrial) await updateStudyTrial({ id: trialId, status: "interacting" });
     return Response.json({
       state: nextState,
-      facilitatorPlan: plan,
+      facilitatorPlan,
     });
   } catch (error) {
     console.error("Conversation start API error:", error);

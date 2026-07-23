@@ -59,10 +59,10 @@ export function parseConversationState(value: unknown): ConversationState {
   if (
     !Number.isInteger(policy.maxConsecutiveMusicianMessages) ||
     Number(policy.maxConsecutiveMusicianMessages) < 1 ||
-    Number(policy.maxConsecutiveMusicianMessages) > 2 ||
+    Number(policy.maxConsecutiveMusicianMessages) > 4 ||
     !Number.isInteger(policy.maxMusiciansPerResponse) ||
     Number(policy.maxMusiciansPerResponse) < 1 ||
-    Number(policy.maxMusiciansPerResponse) > 2 ||
+    Number(policy.maxMusiciansPerResponse) > 4 ||
     !Number.isInteger(policy.maxUserRounds) ||
     Number(policy.maxUserRounds) < 1 ||
     Number(policy.maxUserRounds) > 4 ||

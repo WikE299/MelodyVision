@@ -15,5 +15,18 @@ export default async function ResearchPage() {
     "database"
   );
 
-  return <ResearchDashboardClient initialData={initialData} />;
+  const remoteSyncEnabled = Boolean(
+    (process.env.RESEARCH_SUPABASE_URL?.trim()
+      && process.env.RESEARCH_SUPABASE_SERVICE_ROLE_KEY?.trim())
+    || (process.env.RESEARCH_REMOTE_EXPORT_URL?.trim()
+      && (process.env.RESEARCH_REMOTE_EXPORT_TOKEN?.trim()
+        || process.env.EXPERIMENT_EXPORT_TOKEN?.trim()))
+  );
+
+  return (
+    <ResearchDashboardClient
+      initialData={initialData}
+      remoteSyncEnabled={remoteSyncEnabled}
+    />
+  );
 }

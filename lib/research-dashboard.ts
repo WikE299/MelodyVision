@@ -133,7 +133,7 @@ export interface ResearchTrialRecord {
 
 export interface ResearchDashboardDataset {
   source: {
-    kind: "database" | "snapshot";
+    kind: "database" | "snapshot" | "remote";
     capturedAt: string;
     schemaVersion: number;
   };
@@ -537,7 +537,7 @@ export function parseExperimentExport(value: unknown): RawExperimentExport {
 
 export function buildResearchDashboardDataset(
   value: unknown,
-  sourceKind: "database" | "snapshot" = "snapshot"
+  sourceKind: "database" | "snapshot" | "remote" = "snapshot"
 ): ResearchDashboardDataset {
   const data = parseExperimentExport(value);
   const trials = data.trials

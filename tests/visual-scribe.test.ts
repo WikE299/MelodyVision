@@ -13,7 +13,12 @@ import {
   recordUserMessage,
   scheduleMusicianTurn,
 } from "../lib/conversation/index.ts";
-import { parseVisualBrief } from "../lib/visual-brief/index.ts";
+import {
+  assessVisualBriefSlots,
+  calculateVisualBriefReadiness,
+  createEmptyVisualBrief,
+  parseVisualBrief,
+} from "../lib/visual-brief/index.ts";
 
 function runtime() {
   let id = 0;
@@ -86,6 +91,60 @@ test("visual scribe creates a traceable ready brief from user and musician evide
   assert.equal(result.brief.fields.materials.sources[0].kind, "musician-message");
 });
 
+test("an abstract scene can be ready without a literal subject", () => {
+  const fields = createEmptyVisualBrief({
+    conversationId: "abstract-conversation",
+    musicProfileId: "abstract-music",
+  }).fields;
+  fields.space = { value: "没有边界的远距离空间", status: "confirmed", sources: [] };
+  fields.motion = { value: ["缓慢向外扩张"], status: "confirmed", sources: [] };
+  fields.lighting = { value: "中心冷光逐渐退去", status: "confirmed", sources: [] };
+  fields.atmosphere = { value: ["失重", "安静"], status: "confirmed", sources: [] };
+  fields.personalMeaning = { value: "希望保留失重与疏离感", status: "confirmed", sources: [] };
+
+  const readiness = calculateVisualBriefReadiness(fields);
+  const slots = assessVisualBriefSlots(fields);
+  assert.equal(readiness.ready, true);
+  assert.equal(readiness.missingFields.includes("subject"), true);
+  assert.equal(slots.every((slot) => slot.status === "filled"), true);
+});
+
+test("a sparse feeling receives one targeted follow-up instead of false readiness", () => {
+  const fields = createEmptyVisualBrief({
+    conversationId: "sparse-conversation",
+    musicProfileId: "sparse-music",
+  }).fields;
+  fields.space = { value: "离我很远", status: "confirmed", sources: [] };
+  fields.atmosphere = { value: ["悲伤"], status: "confirmed", sources: [] };
+  fields.personalMeaning = { value: "这段悲伤离我很近", status: "confirmed", sources: [] };
+
+  const readiness = calculateVisualBriefReadiness(fields);
+  const slots = assessVisualBriefSlots(fields);
+  assert.equal(readiness.ready, false);
+  assert.equal(slots.find((slot) => slot.key === "dynamics")?.status, "missing");
+  assert.equal(slots.find((slot) => slot.key === "sensory")?.status, "missing");
+  assert.equal(slots.filter((slot) => slot.status === "filled").length, 2);
+  assert.match(readiness.reasons.join(" "), /变化与画面关系、光色与质地/);
+});
+
+test("musician or music suggestions do not fill a user evidence slot", () => {
+  const fields = createEmptyVisualBrief({
+    conversationId: "suggested-conversation",
+    musicProfileId: "suggested-music",
+  }).fields;
+  fields.subject = { value: "远处的一道人影", status: "confirmed", sources: [] };
+  fields.motion = { value: ["向外扩散"], status: "suggested", sources: [] };
+  fields.lighting = { value: "冷光", status: "suggested", sources: [] };
+  fields.personalMeaning = { value: "不想丢掉疏离感", status: "confirmed", sources: [] };
+
+  const slots = assessVisualBriefSlots(fields);
+  assert.equal(slots.find((slot) => slot.key === "scene")?.status, "filled");
+  assert.equal(slots.find((slot) => slot.key === "dynamics")?.status, "partial");
+  assert.equal(slots.find((slot) => slot.key === "sensory")?.status, "partial");
+  assert.equal(slots.find((slot) => slot.key === "meaning")?.status, "filled");
+  assert.equal(calculateVisualBriefReadiness(fields).ready, false);
+});
+
 test("visual scribe repairs a confirmed field that lacks user evidence", async () => {
   const { state, musicianMessage, userMessage } = scribeFixture();
   const invalid = validDraft(musicianMessage.id, userMessage.id);
@@ -119,12 +178,15 @@ test("visual scribe falls back to traceable user evidence after repeated invalid
   assert.equal(result.fallback, true);
   assert.equal(result.brief.version, 1);
   assert.equal(result.brief.fields.subject.status, "confirmed");
-  assert.equal(result.brief.fields.subject.value, userMessage.content);
   assert.equal(result.brief.fields.subject.sources[0].sourceId, userMessage.id);
+  assert.equal(result.brief.fields.personalMeaning.status, "confirmed");
+  assert.equal(result.brief.fields.personalMeaning.value, userMessage.content);
+  assert.equal(result.brief.fields.personalMeaning.sources[0].sourceId, userMessage.id);
+  assert.equal(result.brief.readiness.ready, true);
   assert.match(result.validationErrors.join(" "), /unknown sourceIds/);
 });
 
-test("visual scribe fallback backfills earlier user rounds after a stale empty brief", async () => {
+test("visual scribe fallback extracts explicit cues across free-form messages", async () => {
   const fixture = scribeFixture();
   const clock = runtime();
   let state = scheduleMusicianTurn(fixture.state, {
@@ -147,6 +209,9 @@ test("visual scribe fallback backfills earlier user rounds after a stale empty b
   assert.equal(result.brief.fields.subject.status, "confirmed");
   assert.equal(result.brief.fields.composition.status, "confirmed");
   assert.equal(result.brief.fields.motion.status, "confirmed");
+  assert.equal(result.brief.fields.personalMeaning.status, "confirmed");
+  assert.match(String(result.brief.fields.personalMeaning.value), /黑色道路/);
+  assert.match(String(result.brief.fields.personalMeaning.value), /快速抬升/);
 });
 
 test("music analysis alone cannot create a visual subject", () => {

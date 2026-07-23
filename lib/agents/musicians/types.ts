@@ -1,4 +1,4 @@
-export const MUSICIAN_PROFILE_VERSION = "2.0.0" as const;
+export const MUSICIAN_PROFILE_VERSION = "2.1.0" as const;
 
 export interface ListeningLens {
   name: string;

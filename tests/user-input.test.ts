@@ -13,3 +13,8 @@ test("a concrete user image is accepted", () => {
   assert.equal(isMeaningfulUserInput("我最先看见的是一朵白花，在水面慢慢打开。"), true);
   assert.equal(isMeaningfulUserInput("A dim path opens through the fog."), true);
 });
+
+test("a short abstract first impression is accepted", () => {
+  assert.equal(isMeaningfulUserInput("很空"), true);
+  assert.equal(isMeaningfulUserInput("下坠"), true);
+});

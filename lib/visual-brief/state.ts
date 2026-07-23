@@ -21,20 +21,61 @@ export const VISUAL_BRIEF_FIELD_KEYS: VisualBriefFieldKey[] = [
   "mustAvoid",
 ];
 
-const CORE_READINESS_FIELDS: VisualBriefFieldKey[] = [
-  "subject",
-  "space",
-  "composition",
-  "motion",
-  "materials",
-  "palette",
-  "lighting",
-  "atmosphere",
-  "personalMeaning",
-];
+export type VisualBriefSlotKey = "scene" | "dynamics" | "sensory" | "meaning";
+export type VisualBriefSlotStatus = "filled" | "partial" | "missing" | "conflicted";
+
+export interface VisualBriefSlotAssessment {
+  key: VisualBriefSlotKey;
+  status: VisualBriefSlotStatus;
+  presentFields: VisualBriefFieldKey[];
+  missingFields: VisualBriefFieldKey[];
+}
+
+export const VISUAL_BRIEF_SLOTS: Record<VisualBriefSlotKey, VisualBriefFieldKey[]> = {
+  scene: ["subject", "space"],
+  dynamics: ["motion", "composition"],
+  sensory: ["materials", "palette", "lighting"],
+  meaning: ["personalMeaning", "mustInclude", "mustAvoid"],
+};
+
+const SLOT_LABELS: Record<VisualBriefSlotKey, string> = {
+  scene: "场景与空间",
+  dynamics: "变化与画面关系",
+  sensory: "光色与质地",
+  meaning: "核心感受与限制",
+};
 
 function missingField<T>(): VisualBriefField<T> {
   return { value: null, status: "missing", sources: [] };
+}
+
+export function assessVisualBriefSlots(
+  fields: VisualBriefFields
+): VisualBriefSlotAssessment[] {
+  return (Object.keys(VISUAL_BRIEF_SLOTS) as VisualBriefSlotKey[]).map((key) => {
+    const slotFields = VISUAL_BRIEF_SLOTS[key];
+    const presentFields = slotFields.filter(
+      (fieldKey) => fields[fieldKey].status !== "missing" && fields[fieldKey].value !== null
+    );
+    const confirmedFields = slotFields.filter(
+      (fieldKey) => fields[fieldKey].status === "confirmed" && fields[fieldKey].value !== null
+    );
+    const conflicted = slotFields.some((fieldKey) => fields[fieldKey].status === "conflicted");
+    const status: VisualBriefSlotStatus = conflicted
+      ? "conflicted"
+      : confirmedFields.length > 0
+        ? "filled"
+        : presentFields.length > 0
+          ? "partial"
+          : "missing";
+
+    return {
+      key,
+      status,
+      presentFields,
+      missingFields: slotFields.filter((fieldKey) => !presentFields.includes(fieldKey)),
+    };
+  });
 }
 
 export function createEmptyVisualBrief(input: {
@@ -82,20 +123,22 @@ export function calculateVisualBriefReadiness(
   const conflictedFields = VISUAL_BRIEF_FIELD_KEYS.filter(
     (key) => fields[key].status === "conflicted"
   );
-  const corePresent = CORE_READINESS_FIELDS.filter((key) => presentFields.includes(key));
-  const rawScore = corePresent.length / CORE_READINESS_FIELDS.length;
-  const score = Math.max(0, Math.min(1, rawScore - conflictedFields.length * 0.05));
-  const hasAnchor = presentFields.includes("subject") && (
-    presentFields.includes("space") || presentFields.includes("composition")
+  const slots = assessVisualBriefSlots(fields);
+  const filledSlots = slots.filter((slot) => slot.status === "filled").length;
+  const partialSlots = slots.filter((slot) => slot.status === "partial").length;
+  const score = Math.max(
+    0,
+    Math.min(1, (filledSlots + partialSlots * 0.5) / slots.length - conflictedFields.length * 0.05)
   );
-  const hasUserMeaning = fields.personalMeaning.status === "confirmed";
-  const ready = score >= 0.6 && hasAnchor && hasUserMeaning;
+  const ready = slots.every((slot) => slot.status === "filled");
   const reasons: string[] = [];
 
-  if (!hasAnchor) reasons.push("仍缺少明确主体及空间或构图锚点");
-  if (!hasUserMeaning) reasons.push("尚未确认用户自己的画面意义");
+  const unresolvedSlots = slots.filter((slot) => slot.status !== "filled");
+  if (unresolvedSlots.length > 0) {
+    reasons.push(`还需要澄清：${unresolvedSlots.map((slot) => SLOT_LABELS[slot.key]).join("、")}`);
+  }
   if (conflictedFields.length) reasons.push(`仍有冲突字段：${conflictedFields.join("、")}`);
-  if (ready) reasons.push("核心画面线索和用户意义已经可以支持生成");
+  if (ready) reasons.push("四个画面槽位均已满足，不需要继续补填");
 
   return {
     score: Math.round(score * 1000) / 1000,

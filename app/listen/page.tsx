@@ -19,11 +19,14 @@ import type {
 } from "@/lib/contracts";
 import type { FacilitatorPlan } from "@/lib/agents/facilitator";
 import { readConversationStream } from "@/lib/conversation";
+import {
+  assessVisualBriefSlots,
+  type VisualBriefSlotKey,
+} from "@/lib/visual-brief";
 import { isGenerationActionBlocked } from "@/lib/conversation/generation-guard";
 import { isMeaningfulUserInput } from "@/lib/conversation/user-input";
 import { ensureStudyTrial, startDirectBaseline } from "@/lib/experiment-trial-client";
-
-const CRYSTAL_RING_BARS = Array.from({ length: 36 }, (_, index) => 12 + Math.abs(Math.sin(index * 0.62)) * 32);
+import CrystalAudioVisualizer from "@/components/CrystalAudioVisualizer";
 
 const FIGURE_STYLE: Record<string, string> = {
   boya: "w-[clamp(178px,12vw,230px)]",
@@ -50,7 +53,12 @@ const COPY = {
     expandProgress: "展开播放进度",
     addFeeling: "点击可补充你的听感",
     myFeeling: "我的感受",
-    feelingPlaceholder: "说说你听见或看见的画面",
+    feelingPlaceholder: "写下此刻浮现的感受或画面",
+    freeInputHint: "不用组织语言，也不用描述完整。写下任何浮现的画面、感受或念头。",
+    inspiration: "需要一点灵感",
+    hideInspiration: "收起灵感提示",
+    inspirationHint: "不用逐项回答，只选一个你愿意继续感受的方向。",
+    inspirationDimensions: ["它给你的整体尺度感", "画面是否在运动或变化", "最靠近你的光、颜色或触感", "你最不想丢掉的感觉"],
     collapse: "收起",
     sendFeeling: "发送听感",
     sendingFeeling: "正在发送",
@@ -59,28 +67,31 @@ const COPY = {
     resonated: "已作为重点听法",
     guideTip: "点击音乐家听点评，点亮共鸣或补充自己的听感。",
     roomTitle: "共同画面",
-    roomSubtitle: "和音乐家一起，把听见的音乐慢慢聊成一幅画",
-    singleRoomSubtitle: "跟随共创引导，把听见的音乐慢慢聊成一幅画",
+    roomSubtitle: "你先说出第一感觉，音乐家从不同角度回应，最后由你决定画面。",
+    singleRoomSubtitle: "先留下你的第一感觉，再沿着不同回应慢慢形成画面。",
     facilitator: "共创引导",
     openChat: "展开聊天室",
     closeChat: "收起聊天室",
-    nextSpeakerWaiting: "下一位音乐家正在等你",
+    nextSpeakerWaiting: "继续听下一位音乐家",
     nextGuideWaiting: "共创引导正在等你开启这一轮",
-    waitingTurn: "音乐家正在说话。你也可以随时写下听感并加入对话。",
-    starterLabel: "可以从这里开始",
-    generateHint: "先补充一处你自己的画面，音乐家的听法才会真正和你汇合。",
-    inputNeedsDetail: "在起句后补充一点自己的画面，再发送。",
+    waitingTurn: "先听完这一轮，主持人随后会邀请你补充",
+    hostLabel: "主持引导",
+    hostOpening: "先写下最先浮现的感觉，不需要完整。",
+    hostListening: "先听音乐家的回应。全部听完后，再轮到你补充画面。",
+    hostWriting: "轮到你了，请回答下面的问题。",
+    hostReady: "画面已经聚拢，可以开始生成。",
+    generateHint: "先留下你自己的感受，音乐家才会沿着它继续听。",
+    inputNeedsDetail: "再写下一点属于你自己的感受或画面。",
     userNoteFailed: "这句话没有送达，请稍后重试。",
-    continueListening: "继续共同聆听",
     pathA: "聆听路径 A",
     pathB: "聆听路径 B",
-    reflectiveTip: "点击音乐家听取独立点评，再写下属于你自己的画面。",
-    journalTitle: "画面札记",
-    journalProgress: "已完成",
+    reflectiveTip: "先写下你的第一感觉，音乐家会沿着它给出不同回应。",
+    journalTitle: "你的画面起点",
     hearAtLeastOne: "至少听取一位音乐家的点评，才能让画面汇合。",
     generateEarly: "用当前线索提前生成",
     startMusic: "触碰水晶，让音乐回到房间",
     visualRecorded: "刚刚记下你的画面",
+    analyzingEvidence: "正在理解你刚才描述的整体画面…",
     returnToGuides: "返回选择音乐家",
     returnToStart: "返回首页",
     changeGuidesConfirm: "更换音乐家会重置当前的共同聆听记录，确定返回吗？",
@@ -102,6 +113,9 @@ const COPY = {
     sourceUser: "来自你",
     sourceMusic: "来自音乐",
     yourTurn: "轮到你了 · 补充脑海里的画面",
+    stageOpening: "先从你的感受开始",
+    stageExploring: "沿着你的画面继续",
+    stageReady: "共同画面已经聚拢",
     generate: "生成画作 →",
     generating: "正在把共同听见的画面聚拢成画作",
     generationStages: ["锁定共同画面", "编排视觉提示", "生成并保存画作"],
@@ -118,7 +132,12 @@ const COPY = {
     expandProgress: "Show playback progress",
     addFeeling: "Add your listening note",
     myFeeling: "My note",
-    feelingPlaceholder: "Describe the image you hear or see",
+    feelingPlaceholder: "Write whatever feeling or image appears",
+    freeInputHint: "No need to organize it or make it complete. Write any image, feeling, or thought that appears.",
+    inspiration: "Need a little inspiration",
+    hideInspiration: "Hide inspiration",
+    inspirationHint: "You do not need to answer each one. Follow only the direction that feels useful.",
+    inspirationDimensions: ["Its overall sense of scale", "Whether the image moves or changes", "The light, color, or texture closest to you", "The feeling you most want to preserve"],
     collapse: "Close",
     sendFeeling: "Send listening note",
     sendingFeeling: "Sending",
@@ -127,28 +146,31 @@ const COPY = {
     resonated: "Marked as key lens",
     guideTip: "Tap a musician to hear their take, mark resonance, or add your own note.",
     roomTitle: "Shared Image",
-    roomSubtitle: "Talk with the musicians and gradually shape the image you hear",
-    singleRoomSubtitle: "Follow the co-creation guide and gradually shape the image you hear",
+    roomSubtitle: "Begin with your impression. The musicians respond from different angles, and you decide what remains.",
+    singleRoomSubtitle: "Begin with your impression, then shape the image through different responses.",
     facilitator: "Co-creation guide",
     openChat: "Open conversation",
     closeChat: "Close conversation",
-    nextSpeakerWaiting: "The next musician is ready",
+    nextSpeakerWaiting: "Hear the next musician",
     nextGuideWaiting: "The co-creation guide is ready for this round",
-    waitingTurn: "A musician is speaking. You can still add your own listening note at any time.",
-    starterLabel: "You could begin here",
-    generateHint: "Add one image of your own so the musicians' views can meet yours.",
-    inputNeedsDetail: "Add a little of your own image after the starter before sending.",
+    waitingTurn: "Listen to this round first. The guide will invite you to add more.",
+    hostLabel: "Listening guide",
+    hostOpening: "Write the first feeling that appears. It does not need to be complete.",
+    hostListening: "Listen to the musicians first. You will add to the image after everyone responds.",
+    hostWriting: "Your turn. Please answer the question below.",
+    hostReady: "The image has converged and is ready to generate.",
+    generateHint: "Leave your own first impression, then the musicians will listen along it.",
+    inputNeedsDetail: "Add a little of your own feeling or image.",
     userNoteFailed: "Your note did not send. Please try again.",
-    continueListening: "Continue Listening Together",
     pathA: "Listening Path A",
     pathB: "Listening Path B",
-    reflectiveTip: "Hear an independent perspective, then record the image that belongs to you.",
-    journalTitle: "Image Notes",
-    journalProgress: "Completed",
+    reflectiveTip: "Begin with your own impression. The musicians will respond along that thread.",
+    journalTitle: "Your image begins here",
     hearAtLeastOne: "Hear at least one musician before bringing the image together.",
     generateEarly: "Generate from Current Cues",
     startMusic: "Touch the crystal and bring the music back into the room",
     visualRecorded: "Your visual cue is now recorded",
+    analyzingEvidence: "Understanding the overall image you just described...",
     returnToGuides: "Change musicians",
     returnToStart: "Back to start",
     changeGuidesConfirm: "Changing musicians will reset this shared listening session. Return anyway?",
@@ -170,12 +192,116 @@ const COPY = {
     sourceUser: "From you",
     sourceMusic: "From the music",
     yourTurn: "Your turn · add the image in your mind",
+    stageOpening: "Begin with your own impression",
+    stageExploring: "Continue along your image",
+    stageReady: "The shared image has converged",
     generate: "Generate Artwork →",
     generating: "Gathering what you heard together into an artwork",
     generationStages: ["Locking the shared image", "Composing the visual direction", "Generating and saving"],
     generationFailed: "Artwork generation failed. Please try again.",
   },
 };
+
+const EVIDENCE_SLOT_COPY: Record<Language, {
+  title: string;
+  count: (filled: number) => string;
+  labels: Record<VisualBriefSlotKey, string>;
+}> = {
+  zh: {
+    title: "画面线索",
+    count: (filled) => `${filled} / 4`,
+    labels: {
+      scene: "场景",
+      dynamics: "变化",
+      sensory: "光色",
+      meaning: "感受",
+    },
+  },
+  en: {
+    title: "Image cues",
+    count: (filled) => `${filled} / 4`,
+    labels: {
+      scene: "Scene",
+      dynamics: "Change",
+      sensory: "Light",
+      meaning: "Feeling",
+    },
+  },
+};
+
+function EvidenceSlotCheck({
+  brief,
+  language,
+  compact = false,
+}: {
+  brief: VisualBrief;
+  language: Language;
+  compact?: boolean;
+}) {
+  const copy = EVIDENCE_SLOT_COPY[language];
+  const slots = assessVisualBriefSlots(brief.fields);
+  const filled = slots.filter((slot) => slot.status === "filled").length;
+  const progress = `${Math.max(0, Math.min(100, filled * 25))}%`;
+
+  if (compact) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-[9px]">
+        <span className="shrink-0 font-semibold text-[#c9a783]">{copy.title}</span>
+        <span className="shrink-0 text-[#927b68]">{copy.count(filled)}</span>
+        <div className="h-px min-w-10 flex-1 overflow-hidden bg-[#6f5848]/38">
+          <div
+            className="h-full bg-[#d9aa66] transition-[width] duration-700"
+            style={{ width: progress }}
+          />
+        </div>
+        {slots.map((slot) => {
+          const complete = slot.status === "filled";
+          return (
+            <span
+              key={slot.key}
+              className={`flex shrink-0 items-center gap-1 ${complete ? "text-[#d9b98e]" : "text-[#74675c]"}`}
+            >
+              <span className={`h-1 w-1 rounded-full ${complete ? "bg-[#dfb66f]" : "bg-[#66584d]"}`} />
+              {copy.labels[slot.key]}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-l-2 border-[#dca45f]/58 bg-[#2b232d]/72 px-3 py-2">
+      <div className="flex items-center justify-between gap-3 text-[10px] tracking-[0.08em]">
+        <span className="font-semibold text-[#e8c69f]">{copy.title}</span>
+        <span className="text-[#ad9278]">{copy.count(filled)}</span>
+      </div>
+      <div className="mt-2 h-1 overflow-hidden bg-[#6f5848]/38">
+        <div
+          className="h-full bg-[#e6b76f] transition-[width] duration-700"
+          style={{ width: progress }}
+        />
+      </div>
+      <div className="mt-2 grid grid-cols-4 gap-2">
+        {slots.map((slot) => {
+          const complete = slot.status === "filled";
+          return (
+            <div key={slot.key} className="flex min-w-0 items-center gap-1.5">
+              <span
+                className={`h-1.5 w-1.5 shrink-0 rounded-full transition ${
+                  complete ? "bg-[#f0c57d] shadow-[0_0_8px_rgba(240,197,125,0.65)]" : "bg-[#705d51]"
+                }`}
+              />
+              <span className={`truncate text-[10px] ${complete ? "text-[#efd2aa]" : "text-[#8e7a6b]"}`}>
+                {copy.labels[slot.key]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function getInitialListenState() {
   if (typeof window === "undefined") {
@@ -376,6 +502,7 @@ function GuideFigure({
   loading,
   streaming,
   canSpeak,
+  compact,
   stageOffset,
   onClick,
   onSpeak,
@@ -387,6 +514,7 @@ function GuideFigure({
   loading: boolean;
   streaming: boolean;
   canSpeak: boolean;
+  compact: boolean;
   stageOffset: string;
   onClick: () => void;
   onSpeak: () => void;
@@ -399,7 +527,9 @@ function GuideFigure({
 
   return (
     <div
-      className={`pointer-events-none group absolute z-40 flex w-[clamp(148px,12vw,192px)] flex-col items-center text-center transition duration-500 ${stageOffset}`}
+      className={`pointer-events-none group absolute z-40 flex w-[clamp(148px,12vw,192px)] origin-bottom flex-col items-center text-center transition duration-500 ${
+        compact ? "scale-[0.82]" : ""
+      } ${stageOffset}`}
     >
       {canSpeak && !loading && !streaming && (
         <>
@@ -482,6 +612,7 @@ function ReflectiveGuideFigure({
   loading,
   streaming,
   comment,
+  canOpen,
   stageOffset,
   onOpen,
   language,
@@ -492,6 +623,7 @@ function ReflectiveGuideFigure({
   loading: boolean;
   streaming: boolean;
   comment: string;
+  canOpen: boolean;
   stageOffset: string;
   onOpen: () => void;
   language: Language;
@@ -501,7 +633,7 @@ function ReflectiveGuideFigure({
   };
   return (
     <div className={`pointer-events-none group absolute z-40 flex w-[clamp(154px,12vw,194px)] flex-col items-center text-center ${stageOffset}`}>
-      {!open && (
+      {!open && canOpen && (
         <button
           type="button"
           onClick={onOpen}
@@ -517,7 +649,12 @@ function ReflectiveGuideFigure({
       <button
         type="button"
         onClick={onOpen}
-        className={`pointer-events-auto relative z-10 mb-1 flex h-[clamp(186px,22vh,254px)] items-end justify-center outline-none transition duration-300 ${active ? "scale-[1.055] drop-shadow-[0_0_24px_rgba(255,218,145,0.74)]" : "drop-shadow-[0_24px_24px_rgba(0,0,0,0.46)] group-hover:scale-[1.025]"}`}
+        disabled={!canOpen}
+        className={`relative z-10 mb-1 flex h-[clamp(186px,22vh,254px)] items-end justify-center outline-none transition duration-300 ${
+          canOpen
+            ? "pointer-events-auto"
+            : "pointer-events-none opacity-[0.82]"
+        } ${active ? "scale-[1.055] drop-shadow-[0_0_24px_rgba(255,218,145,0.74)]" : "drop-shadow-[0_24px_24px_rgba(0,0,0,0.46)] group-hover:scale-[1.025]"}`}
       >
         <Image src={`/characters/stage/${character.id}.png`} alt={label.name} width={512} height={512} priority className={`h-auto max-h-[clamp(194px,23vh,266px)] object-contain ${FIGURE_STYLE[character.id] || "w-[clamp(164px,11vw,214px)]"}`} />
       </button>
@@ -673,8 +810,21 @@ export default function ListenPage() {
   const [conversationState, setConversationState] = useState<ConversationState | null>(initialState.conversationState);
   const [visualBrief, setVisualBrief] = useState<VisualBrief | null>(initialState.visualBrief);
   const [facilitatorPlan, setFacilitatorPlan] = useState<FacilitatorPlan | null>(initialState.facilitatorPlan);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatWasOpened, setChatWasOpened] = useState(false);
+  const [chatOpen, setChatOpen] = useState(() =>
+    initialState.conversationState?.condition === "multi_agent" &&
+    (
+      (
+        initialState.conversationState.turnOwner === "user" &&
+        !initialState.conversationState.messages.some((message) => message.role === "user")
+      ) ||
+      initialState.conversationState.messages.some((message) => message.role === "musician")
+    )
+  );
+  const [chatWasOpened, setChatWasOpened] = useState(() =>
+    initialState.conversationState?.condition === "multi_agent" &&
+    initialState.conversationState.messages.length > 0
+  );
+  const [showInspiration, setShowInspiration] = useState(false);
   const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
   const [visibleComments, setVisibleComments] = useState<Record<string, string>>(initialState.comments);
   const [revealed, setRevealed] = useState<Set<string>>(new Set(Object.keys(initialState.comments)));
@@ -924,6 +1074,8 @@ export default function ListenPage() {
             return next;
           });
           activeStreamSpeakerRef.current = "";
+          turnInFlightRef.current = false;
+          turnAbortRef.current = null;
           persistConversationState(event.state);
           recordExperimentEvent("guided-turn-completed", "/listen", {
             trialId: event.state.trialId,
@@ -948,10 +1100,10 @@ export default function ListenPage() {
     } finally {
       if (requestGeneration === streamGenerationRef.current) {
         clearTurnIndicators(speakerId);
-        turnInFlightRef.current = false;
-        turnAbortRef.current = null;
-        activeStreamSpeakerRef.current = "";
       }
+      turnInFlightRef.current = false;
+      if (turnAbortRef.current === controller) turnAbortRef.current = null;
+      if (activeStreamSpeakerRef.current === speakerId) activeStreamSpeakerRef.current = "";
     }
   }, [clearTurnIndicators, copy.failed, persistConversationState]);
 
@@ -988,7 +1140,12 @@ export default function ListenPage() {
   }, [stopReflectiveStreaming]);
 
   const handleReflectiveReveal = async (charId: string) => {
-    if (!conversationState || !isReflective || loading.size > 0) return;
+    if (
+      !conversationState ||
+      !isReflective ||
+      loading.size > 0 ||
+      !conversationState.messages.some((message) => message.role === "user")
+    ) return;
     setActiveCharacterId(charId);
     setRevealed((current) => new Set(current).add(charId));
     if (allComments[charId]) {
@@ -1055,6 +1212,7 @@ export default function ListenPage() {
       return;
     }
     setChatOpen(true);
+    setShowPlayerControls(false);
     setChatWasOpened(true);
     setActiveCharacterId(charId);
     if (failedSpeakerId === charId) setFailedSpeakerId("");
@@ -1095,7 +1253,8 @@ export default function ListenPage() {
       !conversationState ||
       submittingUserNote ||
       userSubmissionInFlightRef.current ||
-      (isReflective && loading.size > 0)
+      (isReflective && loading.size > 0) ||
+      (!isReflective && conversationState.turnOwner !== "user")
     ) return;
     if (!isMeaningfulUserInput(content)) {
       setUserNoteError(copy.inputNeedsDetail);
@@ -1121,7 +1280,15 @@ export default function ListenPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Conversation response failed");
-      persistConversationState(data.state as ConversationState);
+      const nextState = data.state as ConversationState;
+      persistConversationState(nextState);
+      if (
+        nextState.condition === "multi_agent" &&
+        nextState.status === "streaming-musician"
+      ) {
+        setChatOpen(false);
+      }
+      setShowInspiration(false);
       recordExperimentEvent("user-message-submitted", "/listen", {
         trialId: conversationState.trialId,
         condition: conversationState.condition,
@@ -1396,22 +1563,42 @@ export default function ListenPage() {
       "right-[13%] bottom-[154px] translate-x-1/2",
     ],
   };
-  const activeStageSlots = isReflective ? reflectiveStageSlotsByCount : stageSlotsByCount;
-  const stageSlots = activeStageSlots[Math.min(selectedChars.length, 4)] || activeStageSlots[4];
+  const compactStageSlotsByCount: Record<number, string[]> = {
+    1: ["left-[22%] bottom-[12px] -translate-x-1/2"],
+    2: [
+      "left-[18%] bottom-[12px] -translate-x-1/2",
+      "right-[18%] bottom-[12px] translate-x-1/2",
+    ],
+    3: [
+      "left-[9%] bottom-[8px] -translate-x-1/2",
+      "left-[29%] bottom-[8px] -translate-x-1/2",
+      "right-[9%] bottom-[8px] translate-x-1/2",
+    ],
+    4: [
+      "left-[7%] bottom-[6px] -translate-x-1/2",
+      "left-[29%] bottom-[6px] -translate-x-1/2",
+      "right-[29%] bottom-[6px] translate-x-1/2",
+      "right-[7%] bottom-[6px] translate-x-1/2",
+    ],
+  };
   const conversationMessages = conversationState?.messages || [];
   const latestMessage = conversationMessages.at(-1);
   const hasUserContribution = conversationMessages.some((message) => message.role === "user");
-  const visualFields = visualBrief?.readiness.presentFields || [];
-  const hasVisualAnchor = visualFields.includes("subject") && (
-    visualFields.includes("space") || visualFields.includes("composition")
-  );
-  const visualBriefReady = Boolean(visualBrief?.readiness.ready);
+  const compactConversationStage = !isReflective && chatOpen && hasUserContribution;
+  const activeStageSlots = isReflective
+    ? reflectiveStageSlotsByCount
+    : compactConversationStage
+      ? compactStageSlotsByCount
+      : stageSlotsByCount;
+  const stageSlots = activeStageSlots[Math.min(selectedChars.length, 4)] || activeStageSlots[4];
   const conversationReady = Boolean(
     conversationState?.status === "ready-to-generate" ||
     conversationState?.phase === "ready"
   );
-  const generationReady = isReflective ? conversationReady : conversationReady || visualBriefReady;
-  const reflectiveCanGenerate = generationReady && Object.keys(allComments).length > 0;
+  const generationReady = conversationReady;
+  const reflectiveCanGenerate = generationReady;
+  const visualEvidenceReady = Boolean(visualBrief?.readiness.ready);
+  const needsMoreUserEvidence = !generationReady && !visualEvidenceReady;
   const generationActionBlocked = isGenerationActionBlocked({
     generating,
     submittingUserNote,
@@ -1419,22 +1606,44 @@ export default function ListenPage() {
     loadingCount: loading.size,
     streamingCount: streaming.size,
   });
-  const canGenerateEarly = Boolean(
-    conversationState?.condition === "multi_agent" &&
-    conversationState.turnPolicy.userMayGenerateEarly &&
-    conversationState.completedUserRounds >= 2 &&
-    conversationState.completedUserRounds < conversationState.turnPolicy.maxUserRounds &&
-    hasUserContribution &&
-    hasVisualAnchor
-  );
   const waitingForNextAgent = Boolean(
     ["streaming-musician", "streaming-guide"].includes(conversationState?.status || "") &&
     conversationState?.queuedSpeakerIds.length
   );
-  const timelineMessages = latestMessage?.role === "facilitator" &&
-    latestMessage.content === facilitatorPlan?.userInvitation
-    ? conversationMessages.slice(0, -1)
-    : conversationMessages;
+  const nextScheduledSpeakerId = conversationState?.queuedSpeakerIds[0] || "";
+  const nextScheduledCharacter = selectedChars.find(
+    (character) => character.id === nextScheduledSpeakerId
+  );
+  const nextScheduledSpeakerName = nextScheduledCharacter
+    ? characterUi[language][nextScheduledCharacter.id as keyof typeof characterUi.zh]?.name ||
+      nextScheduledCharacter.name
+    : "";
+  const musicianTurnActive = waitingForNextAgent || loading.size > 0 || streaming.size > 0;
+  const userTurnActive = Boolean(
+    conversationState?.turnOwner === "user" &&
+    !musicianTurnActive &&
+    !submittingUserNote
+  );
+  const hostControlText = generationReady
+    ? copy.hostReady
+    : musicianTurnActive
+      ? copy.hostListening
+      : hasUserContribution
+        ? copy.hostWriting
+        : copy.hostOpening;
+  const interactionStageLabel = generationReady
+    ? copy.stageReady
+    : hasUserContribution
+      ? copy.stageExploring
+      : copy.stageOpening;
+  const timelineMessages = isReflective
+    ? latestMessage?.role === "facilitator" &&
+      latestMessage.content === facilitatorPlan?.userInvitation
+      ? conversationMessages.slice(0, -1)
+      : conversationMessages
+    : conversationMessages.filter(
+        (message) => message.role !== "guide" && message.role !== "facilitator"
+      );
   const generationStageIndex = Math.min(
     copy.generationStages.length - 1,
     Math.floor((Math.max(generationProgress, 1) / 100) * copy.generationStages.length)
@@ -1470,6 +1679,7 @@ export default function ListenPage() {
             {audioSrc && (
               <audio
                 ref={audioRef}
+                crossOrigin="anonymous"
                 src={audioSrc}
                 preload="auto"
                 autoPlay
@@ -1501,7 +1711,10 @@ export default function ListenPage() {
             <div className="pointer-events-none absolute bottom-[-126px] left-1/2 h-[430px] w-[1120px] -translate-x-1/2 rounded-[50%] border border-[#d09a62]/30 bg-[#6f5949]/18 shadow-[0_30px_120px_rgba(0,0,0,0.52),inset_0_18px_52px_rgba(255,186,98,0.07)]" />
             <div className="pointer-events-none absolute bottom-[-68px] left-1/2 h-[310px] w-[850px] -translate-x-1/2 rounded-[50%] border border-[#bd8756]/24" />
 
-            {!showPlayerControls && !(isReflective && revealed.size > 0) && (
+            {!showPlayerControls &&
+              !(isReflective && revealed.size > 0) &&
+              !(!isReflective && chatOpen) &&
+              !(isReflective && hasUserContribution && visualBrief) && (
               <VisualBriefTrace
                 brief={visualBrief}
                 state={conversationState}
@@ -1509,6 +1722,19 @@ export default function ListenPage() {
                 language={language}
               />
             )}
+
+            {!showPlayerControls &&
+              isReflective &&
+              hasUserContribution &&
+              visualBrief &&
+              revealed.size === 0 && (
+                <div className="absolute left-1/2 top-2 z-[72] w-[min(720px,72vw)] -translate-x-1/2">
+                  <EvidenceSlotCheck
+                    brief={visualBrief}
+                    language={language}
+                  />
+                </div>
+              )}
 
             {showPlayerControls && (
               <div className="absolute left-1/2 top-5 z-[70] flex h-[52px] w-[min(410px,58%)] -translate-x-1/2 items-center gap-3 rounded-full border border-[#ca8f53]/62 bg-[#1e1923]/92 px-3 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur">
@@ -1590,6 +1816,7 @@ export default function ListenPage() {
                   loading={loading.has(character.id)}
                   streaming={streaming.has(character.id)}
                   comment={visibleComments[character.id] || ""}
+                  canOpen={hasUserContribution}
                   stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
                   onOpen={() => void handleReflectiveReveal(character.id)}
                   language={language}
@@ -1608,6 +1835,7 @@ export default function ListenPage() {
                     !loading.has(character.id) &&
                     !streaming.has(character.id)
                   }
+                  compact={compactConversationStage}
                   stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
                   onClick={() => handleReveal(character.id)}
                   onSpeak={() => handleSpeakerPrompt(character.id)}
@@ -1615,41 +1843,43 @@ export default function ListenPage() {
                 />
               ))}
 
-              <div className={`absolute left-1/2 z-30 h-[clamp(238px,19vw,300px)] w-[clamp(238px,19vw,300px)] -translate-x-1/2 ${isReflective ? "bottom-[176px]" : "bottom-[78px]"}`}>
+              <div className={`absolute left-1/2 z-30 h-[clamp(238px,19vw,300px)] w-[clamp(238px,19vw,300px)] origin-bottom -translate-x-1/2 transition duration-500 ${
+                isReflective
+                  ? "bottom-[176px]"
+                  : compactConversationStage
+                    ? "bottom-[8px] scale-[0.82]"
+                    : "bottom-[78px]"
+              }`}>
+                <div className="absolute left-1/2 top-[-34px] h-[300px] w-[clamp(300px,24vw,380px)] -translate-x-1/2">
+                  <CrystalAudioVisualizer audioRef={audioRef} active={isPlaying} mode="pulse">
+                    <button
+                      type="button"
+                      onClick={togglePlay}
+                      className="group/crystal relative flex h-[190px] w-[210px] cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#ffd083]"
+                      aria-label={isPlaying ? copy.pause : copy.play}
+                    >
+                      <div className={`absolute inset-3 rounded-full bg-[#ffc267]/18 blur-2xl transition duration-500 ${isPlaying ? "scale-125 opacity-100" : "scale-95 opacity-45 group-hover/crystal:scale-110 group-hover/crystal:opacity-85"}`} />
+                      <div className={`absolute inset-0 rounded-full border border-[#ffd98b]/32 transition duration-500 ${isPlaying ? "scale-110 opacity-80 shadow-[0_0_54px_rgba(255,196,99,0.48)]" : "scale-95 opacity-35 group-hover/crystal:scale-105 group-hover/crystal:opacity-70"}`} />
+                      <div className="pointer-events-none absolute bottom-[15%] h-[72px] w-[200px] rounded-[50%] border border-[#f3bb75]/42 bg-[#72533f]/42 shadow-[0_18px_66px_rgba(0,0,0,0.46),0_0_34px_rgba(255,195,97,0.16)]" />
+                      <Image
+                        src="/stage-gem-transparent.webp"
+                        alt=""
+                        width={1254}
+                        height={1254}
+                        priority
+                        unoptimized
+                        className="pointer-events-none relative z-10 h-auto w-[clamp(168px,13vw,220px)] opacity-95 transition duration-500 group-hover/crystal:brightness-110"
+                      />
+                    </button>
+                  </CrystalAudioVisualizer>
+                </div>
                 <button
                   type="button"
-                  onClick={togglePlay}
-                  className="group/crystal absolute left-1/2 top-[26px] flex h-[190px] w-[210px] -translate-x-1/2 cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#ffd083]"
-                  aria-label={isPlaying ? copy.pause : copy.play}
-                >
-                  <div className={`absolute inset-3 rounded-full bg-[#ffc267]/18 blur-2xl transition duration-500 ${isPlaying ? "scale-125 opacity-100" : "scale-95 opacity-45 group-hover/crystal:scale-110 group-hover/crystal:opacity-85"}`} />
-                  <div className={`absolute inset-0 rounded-full border border-[#ffd98b]/32 transition duration-500 ${isPlaying ? "scale-110 opacity-80 shadow-[0_0_54px_rgba(255,196,99,0.48)]" : "scale-95 opacity-35 group-hover/crystal:scale-105 group-hover/crystal:opacity-70"}`} />
-                  {CRYSTAL_RING_BARS.map((height, index) => (
-                    <span
-                      key={index}
-                      className="pointer-events-none absolute left-1/2 top-1/2 w-1 origin-bottom rounded-full bg-[#ffc267]"
-                      style={{
-                        height: `${isPlaying ? height : height * 0.42}px`,
-                        opacity: isPlaying ? 0.34 + Math.abs(Math.sin(index * 0.71)) * 0.48 : 0.13,
-                        transform: `translate(-50%, -50%) rotate(${index * 10}deg) translateY(-${isPlaying ? 122 : 100}px)`,
-                        transition: "height 360ms ease, opacity 360ms ease, transform 360ms ease",
-                      }}
-                    />
-                  ))}
-                  <div className="pointer-events-none absolute bottom-[15%] h-[72px] w-[200px] rounded-[50%] border border-[#f3bb75]/42 bg-[#72533f]/42 shadow-[0_18px_66px_rgba(0,0,0,0.46),0_0_34px_rgba(255,195,97,0.16)]" />
-                  <Image
-                    src="/stage-gem-transparent.webp"
-                    alt=""
-                    width={1254}
-                    height={1254}
-                    priority
-                    unoptimized
-                    className={`pointer-events-none relative z-10 h-auto w-[clamp(168px,13vw,220px)] opacity-95 transition duration-500 ${isPlaying ? "scale-[1.05] brightness-110 drop-shadow-[0_0_42px_rgba(255,205,116,0.62)]" : "drop-shadow-[0_0_24px_rgba(255,195,97,0.34)] group-hover/crystal:scale-[1.03] group-hover/crystal:brightness-110"}`}
-                  />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPlayerControls((prev) => !prev)}
+                  onClick={() => {
+                    const next = !showPlayerControls;
+                    setShowPlayerControls(next);
+                    if (next && !isReflective) setChatOpen(false);
+                  }}
                   className="absolute bottom-[-14px] left-1/2 z-40 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-[#c9965d]/46 bg-[#1f1a24]/90 text-[#ffe3bd]"
                   aria-label={showPlayerControls ? copy.collapseProgress : copy.expandProgress}
                 >
@@ -1664,33 +1894,54 @@ export default function ListenPage() {
             </div>
 
             {isReflective && (
-              <div className="absolute bottom-3 left-1/2 z-[92] w-[min(720px,78vw)] -translate-x-1/2 border border-[#b9895d]/52 bg-[#211c26]/94 px-5 py-3 shadow-[0_18px_58px_rgba(0,0,0,0.38)] backdrop-blur">
-                <div className="flex items-center justify-between gap-5">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-3">
-                      <p className="font-serif text-base font-semibold text-[#ffe3bd]">{copy.journalTitle}</p>
-                      <span className="text-[10px] tracking-[0.08em] text-[#b89574]">
-                        {copy.journalProgress} {conversationState?.completedUserRounds || 0} / 4
+              <div
+                className={`left-1/2 z-[92] w-[min(720px,78vw)] border border-[#b9895d]/52 bg-[#211c26]/94 px-5 py-3 shadow-[0_18px_58px_rgba(0,0,0,0.38)] backdrop-blur ${
+                  hasUserContribution
+                    ? "fixed bottom-2"
+                    : "absolute top-4"
+                }`}
+                style={{
+                  transform: "translateX(-50%)",
+                }}
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <p className="font-serif text-base font-semibold text-[#ffe3bd]">{hasUserContribution ? interactionStageLabel : copy.journalTitle}</p>
+                    <span className="h-px min-w-8 flex-1 bg-[#9f7655]/32" />
+                  </div>
+                  {showInspiration ? (
+                    <div className="mt-1 text-[11px] leading-relaxed text-[#d5b99c]">
+                      <span className="text-[#a98d74]">{copy.inspirationHint}</span>
+                      <span className="ml-2">
+                        {copy.inspirationDimensions.map((dimension) => `· ${dimension}`).join("  ")}
                       </span>
                     </div>
-                    <p className="mt-1 truncate text-xs font-medium text-[#e5c39e]">
-                      {generationReady ? facilitatorPlan?.stageSubtitle : facilitatorPlan?.userInvitation || copy.reflectiveTip}
+                  ) : (
+                    <p className="mt-1 text-xs font-medium leading-relaxed text-[#e5c39e]">
+                      {hasUserContribution
+                        ? generationReady
+                          ? facilitatorPlan?.stageSubtitle
+                          : facilitatorPlan?.userInvitation || copy.reflectiveTip
+                        : copy.freeInputHint}
                     </p>
-                  </div>
-                  <div className="flex shrink-0 gap-1.5" aria-label={`${copy.journalProgress} ${conversationState?.completedUserRounds || 0} / 4`}>
-                    {[0, 1, 2, 3].map((index) => (
-                      <span key={index} className={`h-1.5 w-8 ${index < (conversationState?.completedUserRounds || 0) ? "bg-[#efb96f]" : "bg-[#725a49]/58"}`} />
-                    ))}
-                  </div>
+                  )}
                 </div>
+                {submittingUserNote && (
+                  <p className="mt-2 animate-pulse text-xs text-[#e2bb8d]">
+                    {copy.analyzingEvidence}
+                  </p>
+                )}
                 {!generationReady ? (
                   <>
-                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-                      {facilitatorPlan?.sentenceStarters?.slice(0, 3).map((starter) => (
-                        <button key={starter} type="button" onClick={() => setUserNote(starter)} disabled={loading.size > 0 || submittingUserNote} className="border-b border-[#9f7655]/45 py-0.5 text-[11px] text-[#cdb092] transition hover:border-[#ffd18a] hover:text-[#ffe3bd] disabled:opacity-40">
-                          {starter}
-                        </button>
-                      ))}
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowInspiration((current) => !current)}
+                        className="text-[11px] text-[#bfa184] transition hover:text-[#ffe3bd]"
+                        aria-expanded={showInspiration}
+                      >
+                        {showInspiration ? copy.hideInspiration : copy.inspiration}
+                      </button>
                     </div>
                     <div className="mt-2 flex items-center gap-2 border border-[#8c6a50]/48 bg-[#17141b]/76 px-3 py-2">
                       <textarea
@@ -1714,7 +1965,6 @@ export default function ListenPage() {
                     {copy.generate}
                   </button>
                 )}
-                {Object.keys(allComments).length === 0 && <p className="mt-1.5 text-[10px] text-[#b99b80]">{copy.hearAtLeastOne}</p>}
                 {userNoteError && <p className="mt-1.5 text-xs text-[#efb6a5]">{userNoteError}</p>}
                 {generationError && <p className="mt-1.5 text-xs text-[#efb6a5]">{generationError}</p>}
               </div>
@@ -1729,16 +1979,39 @@ export default function ListenPage() {
 
           {!isReflective && (
             <>
-          <aside className={`absolute inset-y-0 right-0 z-[90] min-h-0 shrink-0 overflow-hidden bg-[#1d1923]/94 shadow-[-24px_0_60px_rgba(0,0,0,0.28)] backdrop-blur transition-[width,opacity,border-color] duration-500 lg:relative lg:inset-auto lg:bg-[#1d1923]/88 lg:shadow-none ${
-            chatOpen
-              ? "w-[min(430px,92vw)] border-l border-[#9f6f45]/42 opacity-100 lg:w-[min(430px,34vw)]"
-              : "pointer-events-none w-0 border-l border-transparent opacity-0"
-          }`}>
-            <div className="flex h-full min-w-[360px] flex-col">
-            <header className="relative shrink-0 border-b border-[#9f6f45]/30 px-5 pb-3 pt-4">
-              <p className="font-serif text-xl font-semibold text-[#ffe3bd]">{copy.roomTitle}</p>
+          <aside
+            className={`absolute left-1/2 z-[90] min-h-0 overflow-hidden border border-[#9f6f45]/48 bg-[#1d1923]/94 shadow-[0_24px_70px_rgba(0,0,0,0.42)] backdrop-blur transition-[opacity,transform] duration-500 ${
+              hasUserContribution
+                ? "top-4 h-[min(300px,42vh)] w-[min(780px,76vw)]"
+                : "top-4 h-auto w-[min(640px,78vw)]"
+            } ${
+              chatOpen
+                ? "opacity-100"
+                : "pointer-events-none opacity-0"
+            }`}
+            style={{
+              transform: "translateX(-50%)",
+            }}
+          >
+            <div className={`flex min-w-0 flex-col ${hasUserContribution ? "h-full" : ""}`}>
+            <header className="relative shrink-0 border-b border-[#9f6f45]/30 px-5 py-3">
+              <div className="flex items-baseline gap-3 pr-10">
+                <p className="font-serif text-lg font-semibold text-[#ffe3bd]">
+                  {hasUserContribution ? copy.roomTitle : copy.journalTitle}
+                </p>
+                <p className="text-[11px] font-medium tracking-[0.08em] text-[#d8b080]">
+                  {interactionStageLabel}
+                </p>
+                {hasUserContribution && visualBrief && (
+                  <EvidenceSlotCheck
+                    brief={visualBrief}
+                    language={language}
+                    compact
+                  />
+                )}
+              </div>
               <p className="mt-1 text-xs leading-relaxed text-[#c9aa8c]">
-                {copy.roomSubtitle}
+                {hasUserContribution ? copy.roomSubtitle : copy.freeInputHint}
               </p>
               <button
                 type="button"
@@ -1747,14 +2020,15 @@ export default function ListenPage() {
                 aria-label={copy.closeChat}
                 title={copy.closeChat}
               >
-                →
+                ×
               </button>
-              <p className="mt-3 text-[11px] font-medium tracking-[0.08em] text-[#d8b080]">
-                {copy.goalLabels[facilitatorPlan?.currentGoal || "subject-space"]}
-              </p>
             </header>
 
-            <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <div className={hasUserContribution ? "flex min-h-0 flex-1" : ""}>
+            <div
+              ref={chatScrollRef}
+              className={`min-h-0 overflow-y-auto px-4 ${hasUserContribution ? "flex-1 py-3" : "py-0"}`}
+            >
               {timelineMessages.map((message) => (
                 <ConversationEntry
                   key={message.id}
@@ -1777,7 +2051,7 @@ export default function ListenPage() {
                     selectedChars={selectedChars}
                     language={language}
                   />
-                  <p className="mb-3 text-right text-[10px] text-[#c6a17d]">{copy.visualRecorded}…</p>
+                  <p className="mb-3 text-right text-[10px] text-[#c6a17d]">{copy.analyzingEvidence}</p>
                 </div>
               )}
               {[...streaming].map((speakerId) => (
@@ -1793,97 +2067,86 @@ export default function ListenPage() {
               ))}
             </div>
 
-            <div className="shrink-0 border-t border-[#9f6f45]/32 bg-[#211c26]/96 px-4 py-3">
+            <div className={`flex min-h-0 shrink-0 flex-col overflow-hidden bg-[#211c26]/96 px-4 py-3 ${
+              hasUserContribution
+                ? "w-[min(330px,42%)] border-l border-[#9f6f45]/32"
+                : "border-t border-[#9f6f45]/32"
+            }`}>
+              <div className="shrink-0 border-l-2 border-[#dca45f]/58 pl-3">
+                <p className="text-[10px] font-semibold tracking-[0.12em] text-[#d9ac79]">
+                  {copy.hostLabel}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-[#e6c6a4]">
+                  {hostControlText}
+                </p>
+              </div>
               {["streaming-musician", "streaming-guide"].includes(conversationState?.status || "") &&
                 (conversationState?.queuedSpeakerIds.length || 0) > 0 &&
                 streaming.size === 0 &&
                 loading.size === 0 && (
                   <button
                     type="button"
-                    onClick={() => setChatOpen(false)}
-                    className="mb-3 flex w-full items-center justify-between border-b border-[#c8955e]/45 pb-2 text-left text-xs font-semibold text-[#ffd39a] transition hover:border-[#ffd083] hover:text-[#ffe7c3]"
+                    onClick={() => handleSpeakerPrompt(nextScheduledSpeakerId)}
+                    className="mt-2 flex h-9 w-full shrink-0 items-center justify-between border border-[#c8955e]/48 bg-[#3a2d35]/72 px-3 text-left text-xs font-semibold text-[#ffd39a] transition hover:border-[#ffd083] hover:bg-[#493440] hover:text-[#ffe7c3]"
                   >
-                    <span>{copy.nextSpeakerWaiting}</span>
-                    <span>←</span>
+                    <span>
+                      {copy.nextSpeakerWaiting}
+                      {nextScheduledSpeakerName ? ` · ${nextScheduledSpeakerName}` : ""}
+                    </span>
+                    <span>→</span>
                   </button>
                 )}
-              {facilitatorPlan?.userInvitation && (
+              {userTurnActive && needsMoreUserEvidence && facilitatorPlan?.userInvitation && (
                 <p
                   key={facilitatorPlan.userInvitation}
-                  className="mv-facilitator-cue mb-2 rounded-[6px] border border-[#e4ad68]/50 bg-[#342832]/72 px-3 py-2 text-xs font-medium leading-relaxed text-[#f1d2ad]"
+                  className="mt-2 shrink-0 border-l border-[#9f7655]/42 pl-2 text-[11px] leading-relaxed text-[#bda186]"
                 >
                   {facilitatorPlan.userInvitation}
                 </p>
               )}
-              {facilitatorPlan?.sentenceStarters?.length ? (
-                <div className="mb-2">
-                  <p className="mb-1.5 text-[10px] font-semibold tracking-[0.12em] text-[#b89574]">{copy.starterLabel}</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1">
-                    {facilitatorPlan.sentenceStarters.map((starter) => (
-                      <button
-                        key={starter}
-                        type="button"
-                        onClick={() => setUserNote(starter)}
-                        className="border-b border-[#9f7655]/45 py-0.5 text-left text-[11px] text-[#dfc3a6] transition hover:border-[#ffd18a] hover:text-[#ffe3bd]"
-                      >
-                        {starter}
-                      </button>
-                    ))}
+              {needsMoreUserEvidence && (
+                <div className={hasUserContribution ? "mt-auto pt-2" : "mt-2"}>
+                  <div className={`flex items-center gap-2 rounded-[10px] border px-3 py-1.5 transition duration-300 ${
+                    userTurnActive
+                      ? "mv-user-turn border-[#f1bd76]/85 bg-[#46323b]/72"
+                      : "border-[#6f5a4b]/34 bg-[#18151c]/58 opacity-70"
+                  }`}>
+                    <textarea
+                      value={userNote}
+                      onChange={(event) => {
+                        setUserNote(event.target.value);
+                        setUserNoteError("");
+                      }}
+                      disabled={!userTurnActive}
+                      placeholder={userTurnActive ? copy.feelingPlaceholder : copy.waitingTurn}
+                      rows={1}
+                      className="h-8 min-w-0 flex-1 resize-none bg-transparent text-sm leading-8 text-[#ffe3bd] outline-none placeholder:text-[#927c69] disabled:cursor-not-allowed"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSubmitUserNote}
+                      disabled={!userTurnActive || !userNote.trim() || submittingUserNote}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"
+                      aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
+                    >
+                      ↑
+                    </button>
                   </div>
                 </div>
-              ) : null}
-              <div className={`flex items-end gap-2 rounded-[10px] border px-3 py-2 transition duration-300 ${
-                conversationState?.turnOwner === "user"
-                  ? "mv-user-turn border-[#f1bd76]/85 bg-[#46323b]/72"
-                  : "border-[#8c6a50]/45 bg-[#1c1820]/42"
-              }`}>
-                <textarea
-                  value={userNote}
-                  onChange={(event) => {
-                    setUserNote(event.target.value);
-                    setUserNoteError("");
-                  }}
-                  placeholder={conversationState?.turnOwner === "user" ? copy.feelingPlaceholder : copy.waitingTurn}
-                  rows={2}
-                  className="min-h-[46px] min-w-0 flex-1 resize-none bg-transparent text-sm leading-relaxed text-[#ffe3bd] outline-none placeholder:text-[#927c69]"
-                />
-                <button
-                  type="button"
-                  onClick={handleSubmitUserNote}
-                  disabled={!userNote.trim() || submittingUserNote}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"
-                  aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
-                >
-                  ↑
-                </button>
-              </div>
+              )}
               {userNoteError && <p className="mt-2 text-xs text-[#efb6a5]">{userNoteError}</p>}
               {generationError && <p className="mt-2 text-xs text-[#efb6a5]">{generationError}</p>}
-              {!hasUserContribution && (
-                <p className="mt-2 text-[10px] leading-relaxed text-[#a88e77]">{copy.generateHint}</p>
-              )}
-              <button
-                type="button"
-                onClick={generationReady ? handleContinue : () => setChatOpen(false)}
-                disabled={
-                  generationReady
-                    ? generationActionBlocked
-                    : !waitingForNextAgent
-                }
-                className="mt-2 flex h-12 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 px-5 text-sm font-semibold text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.26)] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61]"
-              >
-                {generationReady ? copy.generate : copy.continueListening}
-              </button>
-              {!generationReady && canGenerateEarly && (
+              {hasUserContribution && generationReady && (
                 <button
                   type="button"
                   onClick={handleContinue}
                   disabled={generationActionBlocked}
-                  className="mt-2 w-full text-center text-xs text-[#d8b18b] transition hover:text-[#ffe0b5] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="mt-auto flex h-10 w-full shrink-0 items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 px-5 text-sm font-semibold text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.26)] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61]"
                 >
-                  {copy.generateEarly}
+                  {copy.generate}
                 </button>
               )}
+            </div>
             </div>
             </div>
           </aside>
@@ -1891,12 +2154,16 @@ export default function ListenPage() {
           {!chatOpen && chatWasOpened && (
             <button
               type="button"
-              onClick={() => setChatOpen(true)}
-              className="absolute right-0 top-1/2 z-[95] flex h-14 w-8 -translate-y-1/2 items-center justify-center rounded-l-full border border-r-0 border-[#b1845d]/48 bg-[#2b242e]/94 text-[#ffe3bd] shadow-[-10px_0_30px_rgba(0,0,0,0.22)]"
+              onClick={() => {
+                setShowPlayerControls(false);
+                setChatOpen(true);
+              }}
+              className="absolute left-1/2 top-3 z-[95] flex h-9 w-9 items-center justify-center rounded-full border border-[#b1845d]/48 bg-[#2b242e]/94 text-[#ffe3bd] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:border-[#ffd083]/70 hover:bg-[#3a2d36]"
+              style={{ transform: "translateX(-50%)" }}
               aria-label={copy.openChat}
               title={copy.openChat}
             >
-              ←
+              …
             </button>
           )}
             </>

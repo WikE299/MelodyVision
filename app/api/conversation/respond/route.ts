@@ -37,8 +37,13 @@ export async function POST(request: NextRequest) {
       previousBrief,
       musicContext: formatMusicContext(body.musicAnalysis || {}),
     });
+    const briefCanConverge =
+      afterUser.completedUserRounds >= 1 &&
+      visualBriefResult.brief.readiness.ready &&
+      afterUser.status !== "ready-to-generate";
     const stateWithBrief = {
       ...afterUser,
+      ...(briefCanConverge ? { phase: "convergence" as const } : {}),
       visualBriefRef: {
         id: visualBriefResult.brief.id,
         version: visualBriefResult.brief.version,
@@ -70,8 +75,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (state.condition === "single_agent") {
-      const nextState = continueReflectiveListening(stateWithBrief);
-      const facilitatorPlan = createReflectivePlan(nextState);
+      const nextState = continueReflectiveListening(
+        stateWithBrief,
+        undefined,
+        visualBriefResult.brief.readiness.ready
+      );
+      const facilitatorPlan = createReflectivePlan(nextState, visualBriefResult.brief);
       await insertConversationSnapshot(nextState, "user-message-scheduled").catch((error) => {
         console.error("User message snapshot failed:", error);
       });

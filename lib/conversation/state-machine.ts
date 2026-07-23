@@ -64,6 +64,12 @@ function assertSelectedMusicians(ids: string[]) {
   return uniqueIds;
 }
 
+export function allSelectedMusiciansContributed(state: ConversationState): boolean {
+  return state.condition !== "multi_agent" || state.selectedMusicianIds.every(
+    (musicianId) => (state.musicianMemory[musicianId]?.publicTurnCount || 0) > 0
+  );
+}
+
 function conversationParticipants(input: CreateConversationStateInput) {
   const condition = input.condition || "multi_agent";
   const selectedMusicianIds = assertSelectedMusicians(input.selectedMusicianIds);
@@ -243,6 +249,25 @@ export function startReflectiveListening(
   };
 }
 
+export function startUserFirstConversation(
+  state: ConversationState,
+  runtime?: ConversationRuntime
+): ConversationState {
+  if (state.status !== "idle" || state.turnOwner !== "system" || state.messages.length > 0) {
+    throw new Error("User-first listening can only start from a new idle conversation");
+  }
+  const { now } = runtimeValues(runtime);
+  return {
+    ...state,
+    phase: "opening",
+    status: "awaiting-user",
+    turnOwner: "user",
+    activeSpeakerIds: [],
+    queuedSpeakerIds: [],
+    updatedAt: now(),
+  };
+}
+
 export function recordReflectiveComment(
   state: ConversationState,
   input: { speakerId: string; content: string },
@@ -283,7 +308,8 @@ export function recordReflectiveComment(
 
 export function continueReflectiveListening(
   state: ConversationState,
-  runtime?: ConversationRuntime
+  runtime?: ConversationRuntime,
+  visualBriefReady = false
 ): ConversationState {
   if (state.condition !== "single_agent") {
     throw new Error("Only reflective listening uses the reflective continuation");
@@ -292,7 +318,9 @@ export function continueReflectiveListening(
     throw new Error("Reflective continuation requires a completed user note");
   }
   const { now } = runtimeValues(runtime);
-  const ready = state.completedUserRounds >= state.turnPolicy.maxUserRounds;
+  const ready =
+    state.completedUserRounds >= state.turnPolicy.maxUserRounds ||
+    (state.completedUserRounds >= 1 && visualBriefReady);
   return {
     ...state,
     phase: ready ? "ready" : "exploration",
@@ -356,10 +384,17 @@ export function recordMusicianMessage(
 
   if (!mustYield) return nextState;
 
-  const reachedRoundLimit = nextState.completedUserRounds >= nextState.turnPolicy.maxUserRounds;
+  const musicianCoverageComplete = allSelectedMusiciansContributed(nextState);
+  const reachedRoundLimit =
+    musicianCoverageComplete && (
+      nextState.phase === "convergence" ||
+      nextState.completedUserRounds >= nextState.turnPolicy.maxUserRounds
+    );
   const invitation = reachedRoundLimit
-    ? "这些画面线索已经聚拢，可以继续生成，也可以再补一句。"
-    : nextState.facilitator.pendingQuestion || "你听见了什么，又看见了怎样的画面？";
+    ? "这些画面线索已经聚拢，可以直接生成画作。"
+    : musicianCoverageComplete
+      ? nextState.facilitator.pendingQuestion || "你听见了什么，又看见了怎样的画面？"
+      : "还有音乐家尚未回应这幅画，请继续听完他们的声音。";
 
   nextState = appendMessage(
     {
@@ -414,7 +449,9 @@ export function recordGuideMessage(
     presentation: "speech-bubble",
     sources: [],
   }, runtime);
-  const reachedRoundLimit = withMessage.completedUserRounds >= withMessage.turnPolicy.maxUserRounds;
+  const reachedRoundLimit =
+    withMessage.phase === "convergence" ||
+    withMessage.completedUserRounds >= withMessage.turnPolicy.maxUserRounds;
   const question = withMessage.facilitator.pendingQuestion;
   return {
     ...withMessage,
@@ -551,6 +588,9 @@ export function requestGeneration(
     state.completedUserRounds >= 2;
   if (!mayGenerateEarly && state.phase !== "ready") {
     throw new Error("Conversation is not ready to generate");
+  }
+  if (!allSelectedMusiciansContributed(state)) {
+    throw new Error("All selected musicians must contribute before generation");
   }
   return {
     ...state,

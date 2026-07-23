@@ -6,6 +6,8 @@ import {
   type ChangeEvent,
   type DragEvent,
   type ReactNode,
+  useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -21,6 +23,7 @@ import {
   type ResearchScoreMetric,
   type ResearchTrialRecord,
 } from "@/lib/research-dashboard";
+import { buildResearchThumbnailUrl } from "@/lib/research-thumbnail";
 
 type View = "overview" | "trials" | "quality";
 
@@ -389,6 +392,8 @@ function ArtworkPreview({
   fallbackUrl: string;
   runId: string;
 }) {
+  const thumbnailUrl = buildResearchThumbnailUrl(imageUrl);
+
   return (
     <div className="min-w-0">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -397,17 +402,31 @@ function ArtworkPreview({
       </div>
       <div className="aspect-video overflow-hidden rounded border border-zinc-200 bg-zinc-100">
         {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt={label}
-            className="h-full w-full object-contain"
-            onError={(event) => {
-              if (fallbackUrl && event.currentTarget.dataset.fallbackApplied !== "true") {
-                event.currentTarget.dataset.fallbackApplied = "true";
-                event.currentTarget.src = fallbackUrl;
-              }
-            }}
-          />
+          <a
+            href={imageUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="block h-full w-full"
+            title="打开高清原图"
+          >
+            <img
+              src={thumbnailUrl}
+              alt={label}
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-contain"
+              onError={(event) => {
+                const fallbackStage = event.currentTarget.dataset.fallbackStage || "thumbnail";
+                if (fallbackStage === "thumbnail" && thumbnailUrl !== imageUrl) {
+                  event.currentTarget.dataset.fallbackStage = "original";
+                  event.currentTarget.src = imageUrl;
+                } else if (fallbackStage !== "remote" && fallbackUrl && fallbackUrl !== imageUrl) {
+                  event.currentTarget.dataset.fallbackStage = "remote";
+                  event.currentTarget.src = fallbackUrl;
+                }
+              }}
+            />
+          </a>
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-zinc-400">没有图像</div>
         )}
@@ -942,8 +961,10 @@ function QualityView({
 
 export default function ResearchDashboardClient({
   initialData,
+  remoteSyncEnabled,
 }: {
   initialData: ResearchDashboardDataset;
+  remoteSyncEnabled: boolean;
 }) {
   const [dataset, setDataset] = useState(initialData);
   const [view, setView] = useState<View>("overview");
@@ -959,6 +980,7 @@ export default function ResearchDashboardClient({
   const [isDragging, setIsDragging] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const autoSyncAttemptedRef = useRef(false);
 
   const filteredTrials = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -984,7 +1006,7 @@ export default function ResearchDashboardClient({
     });
   }, [dataset.trials, filters]);
 
-  const replaceDataset = (next: ResearchDashboardDataset, sourceMessage: string) => {
+  const replaceDataset = useCallback((next: ResearchDashboardDataset, sourceMessage: string) => {
     setDataset(next);
     setFilters({
       ...INITIAL_FILTERS,
@@ -994,7 +1016,7 @@ export default function ResearchDashboardClient({
     });
     setSelectedTrial(null);
     setMessage(sourceMessage);
-  };
+  }, []);
 
   const refreshDatabase = async () => {
     setLoading(true);
@@ -1009,6 +1031,37 @@ export default function ResearchDashboardClient({
       setLoading(false);
     }
   };
+
+  const syncRemoteData = useCallback(async (automatic = false) => {
+    setLoading(true);
+    if (!automatic) setMessage("");
+    try {
+      const response = await fetch("/api/research/remote", { cache: "no-store" });
+      const result = await response.json() as {
+        dataset?: ResearchDashboardDataset;
+        transport?: "live" | "cache";
+        warning?: string;
+        error?: string;
+      };
+      if (!response.ok || !result.dataset) {
+        throw new Error(result.error || "无法同步线上研究数据");
+      }
+      const sourceMessage = result.transport === "cache"
+        ? `线上暂时不可用，已载入最近缓存${result.warning ? `：${result.warning}` : ""}`
+        : "线上数据已同步";
+      replaceDataset(result.dataset, sourceMessage);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "线上同步失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [replaceDataset]);
+
+  useEffect(() => {
+    if (!remoteSyncEnabled || autoSyncAttemptedRef.current) return;
+    autoSyncAttemptedRef.current = true;
+    void syncRemoteData(true);
+  }, [remoteSyncEnabled, syncRemoteData]);
 
   const importSnapshot = async (file: File) => {
     setLoading(true);
@@ -1058,6 +1111,16 @@ export default function ResearchDashboardClient({
             <h1 className="mt-1 text-2xl font-semibold">实验数据后台</h1>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {remoteSyncEnabled && (
+              <button
+                type="button"
+                onClick={() => void syncRemoteData()}
+                disabled={loading}
+                className="rounded bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-50"
+              >
+                {loading ? "同步中…" : "同步线上数据"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void refreshDatabase()}
@@ -1104,7 +1167,13 @@ export default function ResearchDashboardClient({
       >
         <div className="mx-auto flex max-w-[1680px] flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
           <p>
-            数据源：<strong className="text-zinc-700">{dataset.source.kind === "database" ? "本地数据库" : "服务器导出快照"}</strong>
+            数据源：<strong className="text-zinc-700">{
+              dataset.source.kind === "database"
+                ? "本地数据库"
+                : dataset.source.kind === "remote"
+                  ? "线上实验数据库"
+                  : "服务器导出快照"
+            }</strong>
             <span className="mx-2 text-zinc-300">|</span>
             截止 {formatDate(dataset.source.capturedAt, true)}
             <span className="mx-2 text-zinc-300">|</span>
