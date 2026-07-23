@@ -1,6 +1,11 @@
 # MelodyVision
 
 <p align="center">
+  <a href="./README.md"><strong>English</strong></a>
+  · <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <img src="./app/opengraph-image.png" alt="Music traces passing through an amber crystal and becoming a shared visual landscape" width="100%" />
 </p>
 
