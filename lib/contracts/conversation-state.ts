@@ -37,9 +37,9 @@ export interface ConversationTurnPolicy {
 }
 
 export const DEFAULT_CONVERSATION_TURN_POLICY: ConversationTurnPolicy = {
-  maxConsecutiveMusicianMessages: 2,
-  maxMusiciansPerResponse: 2,
-  maxUserRounds: 4,
+  maxConsecutiveMusicianMessages: 4,
+  maxMusiciansPerResponse: 4,
+  maxUserRounds: 2,
   userMayInterrupt: true,
   userMayGenerateEarly: false,
 };

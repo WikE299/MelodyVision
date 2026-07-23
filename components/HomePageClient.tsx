@@ -472,7 +472,6 @@ export default function HomePageClient() {
       const file = new File([blob], `${item.title}.mp3`, { type: blob.type || "audio/mpeg" });
       await handleFileSelect(file, {
         sourceKind: "search",
-        playbackUrl: item.previewUrl,
         fileName: `${item.title}.mp3`,
         fileSize: file.size,
         catalogItemId: item.id,

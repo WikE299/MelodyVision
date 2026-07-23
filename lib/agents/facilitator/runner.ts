@@ -1,6 +1,6 @@
 import { callLLM, type LLMResponse } from "../../llm.ts";
 import type { ConversationState } from "../../contracts/conversation-state.ts";
-import { goalForCompletedRounds, ROUND_GUIDANCE } from "../../conversation/round-protocol.ts";
+import { goalForVisualBrief, ROUND_GUIDANCE } from "../../conversation/round-protocol.ts";
 import {
   FACILITATOR_PROFILE_VERSION,
   type FacilitatorInput,
@@ -44,8 +44,30 @@ export function getEligibleSpeakerIds(state: ConversationState): string[] {
   return fresh.length > 0 ? fresh : byFewestTurns;
 }
 
+function requiredCoverageSpeakerIds(
+  state: ConversationState,
+  eligibleIds: string[]
+): string[] {
+  const eligible = new Set(eligibleIds);
+  return state.selectedMusicianIds.filter(
+    (id) => eligible.has(id) && (state.musicianMemory[id]?.publicTurnCount || 0) === 0
+  );
+}
+
+function maxSpeakersForTurn(state: ConversationState, eligibleCount: number): number {
+  const uncoveredCount = requiredCoverageSpeakerIds(
+    state,
+    getEligibleSpeakerIds(state)
+  ).length;
+  return Math.min(
+    eligibleCount,
+    state.turnPolicy.maxMusiciansPerResponse,
+    uncoveredCount > 0 ? uncoveredCount : 2
+  );
+}
+
 function nextGoal(input: FacilitatorInput): FacilitatorGoal {
-  return goalForCompletedRounds(input.state.completedUserRounds);
+  return goalForVisualBrief(input.visualBrief, input.state.completedUserRounds);
 }
 
 function stageSubtitleFor(
@@ -63,22 +85,24 @@ export function createDeterministicFacilitatorPlan(input: FacilitatorInput): Fac
   if (eligible.length === 0) {
     throw new Error("No musicians are eligible to speak");
   }
-  const count = Math.min(
-    eligible.length,
-    input.state.selectedMusicianIds.length === 1 ? 1 : input.state.turnPolicy.maxMusiciansPerResponse
-  );
-  const speakerIds = eligible.slice(0, count);
+  const requiredCoverage = requiredCoverageSpeakerIds(input.state, eligible);
+  const count = maxSpeakersForTurn(input.state, eligible.length);
+  const speakerIds = requiredCoverage.length > 0
+    ? requiredCoverage.slice(0, count)
+    : eligible.slice(0, count);
   const currentGoal = nextGoal(input);
   const guidance = ROUND_GUIDANCE[currentGoal];
 
   return {
     speakerIds,
-    stageSubtitle: input.state.messages.length === 0
-      ? "我们会把这段音乐慢慢聊成一幅画。先听一两个方向，再从你最先看见的东西开始。"
+    stageSubtitle: input.state.phase === "convergence"
+      ? "你的画面线索已经足够清晰，再听一个回应，我们就把它聚拢起来。"
       : stageSubtitleFor(speakerIds, input.musicianNames),
-    userInvitation: guidance.question,
+    userInvitation: input.state.phase === "convergence"
+      ? "这些线索已经可以形成画面，不需要继续补充。"
+      : guidance.question,
     currentGoal,
-    sentenceStarters: guidance.starters,
+    sentenceStarters: [],
     source: "deterministic-fallback",
     profileVersion: FACILITATOR_PROFILE_VERSION,
   };
@@ -95,20 +119,22 @@ export function buildFacilitatorPrompt(input: FacilitatorInput, eligibleIds: str
   const recent = recentMusicianIds(input.state);
   const currentGoal = nextGoal(input);
   const guidance = ROUND_GUIDANCE[currentGoal];
+  const requiredCoverage = requiredCoverageSpeakerIds(input.state, eligibleIds);
+  const maximum = maxSpeakersForTurn(input.state, eligibleIds.length);
   const briefSummary = input.visualBrief
     ? Object.entries(input.visualBrief.fields).map(([key, field]) =>
         `${key}: ${field.status}${field.value ? ` = ${Array.isArray(field.value) ? field.value.join(" / ") : field.value}` : ""}`
       ).join("\n")
     : "尚无画面记录。";
 
-  return `你是 MelodyVision 共创聆听室的隐形主持人。你不作为人物出现，只负责选择下一位发言者并写舞台字幕。
+  return `你是 MelodyVision 共创聆听室的隐形主持人。你不作为人物出现，只负责选择下一位发言者并写舞台字幕。四类画面目标是你的内部观察框架，不是要用户逐项填写的问卷。
 
 ## 当前状态
 - 对话阶段：${input.state.phase}
 - 用户已参与：${input.state.completedUserRounds} / ${input.state.turnPolicy.maxUserRounds} 轮
 - 最近发言者：${recent.length ? recent.join("、") : "无"}
-- 本轮最多选择：${Math.min(eligibleIds.length, input.state.turnPolicy.maxMusiciansPerResponse)} 位
-- 本轮画面目标：${guidance.question}
+- 本轮选择数量：${requiredCoverage.length > 0 ? `必须覆盖 ${requiredCoverage.length} 位尚未发言者` : `最多 ${maximum} 位`}
+- 当前最值得展开的缺口：${guidance.question}
 
 ## 当前画面记录
 ${briefSummary}
@@ -117,18 +143,21 @@ ${briefSummary}
 ${candidates}
 
 ## 任务
-从允许候选中选择 1-${Math.min(eligibleIds.length, input.state.turnPolicy.maxMusiciansPerResponse)} 位。优先让尚未充分发言且观点不同的人出现，避免连续重复同一人。
+从允许候选中选择 1-${maximum} 位。优先让尚未充分发言且观点不同的人出现，避免连续重复同一人。
+${requiredCoverage.length > 0 ? `本轮必须让这些尚未发言的音乐家全部出现：${requiredCoverage.join("、")}。不得遗漏。` : ""}
 
 返回 JSON，且只能包含：
-{"speakerIds":["候选 id"],"transition":"承接已发生对话的一句主持话","userInvitation":"发言后邀请用户的一句话","sentenceStarters":["句子开头"]}
+{"speakerIds":["候选 id"],"transition":"承接已发生对话的一句主持话","userInvitation":"发言后邀请用户的一句话"}
 
 规则：
 - speakerIds 只能来自允许候选，不得添加其他人物。
 - 不得把音乐家与同名人物、作品或历史事件混淆；候选中的身份说明优先于你的常识联想。
-- userInvitation 不超过 38 个中文字符。
+- userInvitation 不超过 30 个中文字符，使用“如果愿意”“可以再说说”等轻提示语气，不写成必须作答的题目。
 - transition 不超过 52 个中文字符，要说明“刚才聊出了什么、这一轮继续寻找什么”，不能只报姓名。
-- userInvitation 围绕本轮目标 ${currentGoal}，一次只问一个容易回答的问题。参考方向：${guidance.question}
-- sentenceStarters 返回 2-3 个不超过 14 字的自然句子开头，帮助用户开口，不得变成参数标签。
+- userInvitation 围绕当前缺口 ${currentGoal}，一次只问一个容易回答的开放问题。参考方向：${guidance.question}
+- 必须承接用户已经说过的词或关系，不能要求用户按字段、顺序或固定句式作答。
+- 不提供具体场景例子，不用星空、沙漠、森林、人物等意象替用户开题。
+- 如果当前阶段是 convergence，不再打开新方向，只说明线索已经足够并允许用户补充。
 - 不得向用户说出 subject-space、motion-composition、light-color-material、meaning-constraints 或 VisualBrief 等内部名称。
 - 主持人不评论音乐，不总结成最终画面，不使用姓名之外的人格表演。
 - userInvitation 必须给用户真实回答空间，不能只让用户二选一。`;
@@ -153,28 +182,20 @@ function cleanSubtitle(value: unknown, fallback: string): string {
   return cleaned || fallback;
 }
 
-function cleanStarters(value: unknown, fallback: string[]): string[] {
-  if (!Array.isArray(value)) return fallback;
-  const starters = value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.replace(/[\r\n]+/g, " ").trim().slice(0, 18))
-    .filter(Boolean)
-    .slice(0, 3);
-  return starters.length >= 2 ? starters : fallback;
-}
-
 function parsePlan(content: string, input: FacilitatorInput, eligibleIds: string[]): FacilitatorPlan | null {
   try {
     const match = content.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as Record<string, unknown>;
     if (!Array.isArray(parsed.speakerIds)) return null;
-    const maximum = Math.min(eligibleIds.length, input.state.turnPolicy.maxMusiciansPerResponse);
+    const maximum = maxSpeakersForTurn(input.state, eligibleIds.length);
+    const requiredCoverage = requiredCoverageSpeakerIds(input.state, eligibleIds);
     const speakerIds = [...new Set(parsed.speakerIds.filter((id): id is string => typeof id === "string"))];
     if (
       speakerIds.length < 1 ||
       speakerIds.length > maximum ||
-      speakerIds.some((id) => !eligibleIds.includes(id))
+      speakerIds.some((id) => !eligibleIds.includes(id)) ||
+      requiredCoverage.some((id) => !speakerIds.includes(id))
     ) {
       return null;
     }
@@ -183,9 +204,9 @@ function parsePlan(content: string, input: FacilitatorInput, eligibleIds: string
     const plan: FacilitatorPlan = {
       speakerIds,
       stageSubtitle: cleanSubtitle(parsed.transition, fallback.stageSubtitle),
-      userInvitation: cleanSubtitle(parsed.userInvitation, fallback.userInvitation),
+      userInvitation: fallback.userInvitation,
       currentGoal: fallback.currentGoal,
-      sentenceStarters: cleanStarters(parsed.sentenceStarters, fallback.sentenceStarters),
+      sentenceStarters: [],
       source: "model",
       profileVersion: FACILITATOR_PROFILE_VERSION,
     };

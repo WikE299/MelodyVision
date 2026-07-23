@@ -35,9 +35,13 @@ export async function POST(request: NextRequest) {
     if (!profile) {
       return Response.json({ error: "Musician agent not found" }, { status: 404 });
     }
+    const latestUserMessage = [...state.messages]
+      .reverse()
+      .find((message) => message.role === "user");
     const result = await runMusicianAgent({
       profile,
       musicContext: formatMusicContext(body.musicAnalysis || {}),
+      userNote: latestUserMessage?.content,
     });
     const nextState = recordReflectiveComment(state, {
       speakerId,
