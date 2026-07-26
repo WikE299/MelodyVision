@@ -251,7 +251,7 @@ export default function SelectPage() {
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={2} />
 
-        <section className="relative mt-3 flex flex-1 flex-col overflow-hidden rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5 2xl:rounded-[26px]">
+        <section className="relative mt-3 flex flex-1 flex-col overflow-clip rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5 2xl:rounded-[26px]">
           <div className="absolute inset-0">
             <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(19,17,28,0.06),rgba(20,17,25,0.32))]" />
             <div className="absolute left-[3%] right-[3%] top-[29%] flex h-12 items-end justify-center gap-1 opacity-52">

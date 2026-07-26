@@ -34,7 +34,8 @@ test("musician perspectives stay complementary and question-led", () => {
 });
 
 test("showcase keeps a concise expert discussion and visual examples", () => {
-  assert.equal(EXPERT_DISCUSSION_QUESTIONS.length, 5);
+  assert.equal(EXPERT_DISCUSSION_QUESTIONS.length, 6);
+  assert.ok(EXPERT_DISCUSSION_QUESTIONS.some((question) => question.includes("哪些元素不可缺少")));
   assert.equal(IMAGINATION_EXAMPLES.length, 3);
   for (const example of IMAGINATION_EXAMPLES) {
     assert.match(example.src, /^\/formative-study\/.+\.webp$/);

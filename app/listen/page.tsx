@@ -1659,7 +1659,7 @@ export default function ListenPage() {
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={3} />
 
-        <section className="relative mt-3 flex min-h-0 flex-1 overflow-hidden rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
+        <section className="relative mt-3 flex min-h-0 flex-1 overflow-clip rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
           <button
             type="button"
             onClick={() => {
@@ -1675,7 +1675,7 @@ export default function ListenPage() {
           <div className="pointer-events-none absolute left-14 top-3 z-[99] border border-[#9f6f45]/45 bg-[#211c26]/82 px-3 py-2 text-[11px] font-semibold text-[#f5d3a8]">
             {isReflective ? copy.pathA : copy.pathB}
           </div>
-          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-clip">
             {audioSrc && (
               <audio
                 ref={audioRef}
@@ -2151,7 +2151,7 @@ export default function ListenPage() {
             </div>
           </aside>
 
-          {!chatOpen && chatWasOpened && (
+          {!chatOpen && chatWasOpened && !showPlayerControls && (
             <button
               type="button"
               onClick={() => {
