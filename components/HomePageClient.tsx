@@ -646,7 +646,7 @@ export default function HomePageClient() {
                           <p className="mt-0.5 text-[11px] text-[#c9ad91]">{copy.examplesDesc}</p>
                         </div>
                       </div>
-                      <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="grid gap-1.5 md:grid-cols-2 lg:grid-cols-4">
                         {audioCatalog.map((item) => (
                           <CatalogItemCard
                             key={item.id}

@@ -23,7 +23,10 @@ import {
   assessVisualBriefSlots,
   type VisualBriefSlotKey,
 } from "@/lib/visual-brief";
-import { isGenerationActionBlocked } from "@/lib/conversation/generation-guard";
+import {
+  hasAllSelectedMusicianComments,
+  isGenerationActionBlocked,
+} from "@/lib/conversation/generation-guard";
 import { isMeaningfulUserInput } from "@/lib/conversation/user-input";
 import { ensureStudyTrial, startDirectBaseline } from "@/lib/experiment-trial-client";
 import CrystalAudioVisualizer from "@/components/CrystalAudioVisualizer";
@@ -88,6 +91,7 @@ const COPY = {
     reflectiveTip: "先写下你的第一感觉，音乐家会沿着它给出不同回应。",
     journalTitle: "你的画面起点",
     hearAtLeastOne: "至少听取一位音乐家的点评，才能让画面汇合。",
+    hearAllComments: "先听完所有音乐家的回应，再生成这幅画。",
     generateEarly: "用当前线索提前生成",
     startMusic: "触碰水晶，让音乐回到房间",
     visualRecorded: "刚刚记下你的画面",
@@ -167,6 +171,7 @@ const COPY = {
     reflectiveTip: "Begin with your own impression. The musicians will respond along that thread.",
     journalTitle: "Your image begins here",
     hearAtLeastOne: "Hear at least one musician before bringing the image together.",
+    hearAllComments: "Hear every musician's response before generating the artwork.",
     generateEarly: "Generate from Current Cues",
     startMusic: "Touch the crystal and bring the music back into the room",
     visualRecorded: "Your visual cue is now recorded",
@@ -1389,6 +1394,16 @@ export default function ListenPage() {
       turnInFlightRef.current
     ) return;
     const generationState = conversationStateRef.current || conversationState;
+    if (
+      isReflective &&
+      !hasAllSelectedMusicianComments(
+        generationState.selectedMusicianIds,
+        allCommentsRef.current
+      )
+    ) {
+      setGenerationError(copy.hearAllComments);
+      return;
+    }
     cancelActiveTurn();
     setGenerating(true);
     setGenerationProgress(6);
@@ -1596,7 +1611,11 @@ export default function ListenPage() {
     conversationState?.phase === "ready"
   );
   const generationReady = conversationReady;
-  const reflectiveCanGenerate = generationReady;
+  const reflectiveCommentsReady = hasAllSelectedMusicianComments(
+    selectedChars.map((character) => character.id),
+    allComments
+  );
+  const reflectiveCanGenerate = generationReady && reflectiveCommentsReady;
   const visualEvidenceReady = Boolean(visualBrief?.readiness.ready);
   const needsMoreUserEvidence = !generationReady && !visualEvidenceReady;
   const generationActionBlocked = isGenerationActionBlocked({
@@ -1961,9 +1980,16 @@ export default function ListenPage() {
                     </div>
                   </>
                 ) : (
-                  <button type="button" onClick={handleContinue} disabled={!reflectiveCanGenerate || generationActionBlocked} className="mt-3 flex h-11 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:opacity-40">
-                    {copy.generate}
-                  </button>
+                  <>
+                    {!reflectiveCommentsReady && (
+                      <p className="mt-2 text-center text-xs text-[#c8aa8e]">
+                        {copy.hearAllComments}
+                      </p>
+                    )}
+                    <button type="button" onClick={handleContinue} disabled={!reflectiveCanGenerate || generationActionBlocked} className="mt-3 flex h-11 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:opacity-40">
+                      {copy.generate}
+                    </button>
+                  </>
                 )}
                 {userNoteError && <p className="mt-1.5 text-xs text-[#efb6a5]">{userNoteError}</p>}
                 {generationError && <p className="mt-1.5 text-xs text-[#efb6a5]">{generationError}</p>}

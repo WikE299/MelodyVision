@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, type SyntheticEvent } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type MouseEvent as ReactMouseEvent,
+  type SyntheticEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import FlowHeader from "@/components/FlowHeader";
 import { getCharactersByIds, type Character } from "@/lib/characters";
@@ -967,9 +974,10 @@ export default function ResultPage() {
     }
   };
 
-  const handleSelectResultArtwork = (role: GenerationRole, startedAt: number) => {
+  const handleSelectResultArtwork = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    const role = event.currentTarget.dataset.artworkRole as GenerationRole;
     if (role === resultArtworkRole) return;
-    displayedImageLoadStartedAtRef.current = startedAt;
+    displayedImageLoadStartedAtRef.current = event.timeStamp;
     setResultImageStatus("loading");
     setResultArtworkRole(role);
     recordExperimentEvent("result-artwork-switched", "/result", {
@@ -1068,6 +1076,29 @@ export default function ResultPage() {
   const displayedResultImage = canSwitchPairedArtwork && resultArtworkRole === "direct_baseline"
     ? baselineResult?.imageUrl || imageUrl
     : imageUrl;
+  const renderPairedArtworkSwitcher = (className: string) => (
+    <div className={className}>
+      {([
+        ["co_created", copy.viewCoCreated],
+        ["direct_baseline", copy.viewBaseline],
+      ] as Array<[GenerationRole, string]>).map(([role, label]) => (
+        <button
+          key={role}
+          type="button"
+          data-artwork-role={role}
+          onClick={handleSelectResultArtwork}
+          aria-pressed={resultArtworkRole === role}
+          className={`min-w-24 px-4 py-2 font-semibold transition ${
+            resultArtworkRole === role
+              ? "bg-[#f3cf9a] text-[#30242d]"
+              : "text-[#d8b997] hover:bg-[#3a2d32] hover:text-[#ffe3bd]"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#111019] text-[#f8dfbb]">
@@ -1137,7 +1168,13 @@ export default function ResultPage() {
             <p className="absolute left-1/2 top-16 z-50 -translate-x-1/2 text-xs text-[#ff9f9f]">{regenerateError}</p>
           )}
 
-          <div className={`absolute bottom-[96px] top-[56px] flex items-center justify-center xl:top-3 ${studyLocked ? "left-6 right-[338px]" : "inset-x-6"}`}>
+          <div className={`absolute bottom-[96px] flex items-center justify-center ${
+            studyLocked
+              ? "left-6 right-[338px] top-3"
+              : canSwitchPairedArtwork
+                ? "inset-x-6 top-[60px]"
+                : "inset-x-6 top-[56px] xl:top-3"
+          }`}>
             <div className="relative flex h-full w-full items-center justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -1170,6 +1207,9 @@ export default function ResultPage() {
 
           {studyLocked && studyTrial && (
             <aside className="absolute bottom-4 right-4 top-4 z-[65] flex w-[306px] flex-col border border-[#a77b57]/48 bg-[#211c27]/96 p-5 shadow-[-18px_0_60px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+              {canSwitchPairedArtwork && renderPairedArtworkSwitcher(
+                "mb-4 grid grid-cols-2 border border-[#a77b57]/44 bg-[#17131a]/72 p-1 text-xs text-[#ffe3bd]"
+              )}
               {studyPhase === "artwork" ? (
                 <>
                   <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.studyEvaluationTitle}</h2>
@@ -1305,31 +1345,12 @@ export default function ResultPage() {
             </aside>
           )}
 
-          {canSwitchPairedArtwork && (
-            <div className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 border border-[#a77b57]/44 bg-[#1f1923]/90 p-1 text-xs text-[#ffe3bd] shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur">
-              {([
-                ["co_created", copy.viewCoCreated],
-                ["direct_baseline", copy.viewBaseline],
-              ] as Array<[GenerationRole, string]>).map(([role, label]) => (
-                <button
-                  key={role}
-                  type="button"
-                  onClick={(event) => handleSelectResultArtwork(role, event.timeStamp)}
-                  aria-pressed={resultArtworkRole === role}
-                  className={`min-w-24 px-4 py-2 font-semibold transition ${
-                    resultArtworkRole === role
-                      ? "bg-[#f3cf9a] text-[#30242d]"
-                      : "text-[#d8b997] hover:bg-[#3a2d32] hover:text-[#ffe3bd]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+          {canSwitchPairedArtwork && !studyLocked && renderPairedArtworkSwitcher(
+            "absolute left-1/2 top-4 z-50 flex -translate-x-1/2 border border-[#a77b57]/44 bg-[#1f1923]/90 p-1 text-xs text-[#ffe3bd] shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur"
           )}
 
           {!studyLocked && !showPlayer && (
-          <div className={`absolute bottom-1 left-[170px] z-40 h-[76px] overflow-hidden border-y border-[#9f6f45]/22 bg-[#15131c]/48 py-1 backdrop-blur-sm transition-[right] ${showAppendix ? "right-[370px]" : "right-[240px]"}`} aria-label={copy.replayTitle}>
+          <div className={`absolute bottom-1 left-[170px] z-40 h-[76px] overflow-hidden border-y border-[#9f6f45]/22 bg-[#15131c]/48 py-1 backdrop-blur-sm transition-[right] ${showAppendix ? "right-[370px]" : "right-[300px]"}`} aria-label={copy.replayTitle}>
             {danmakuLanes.map((lane, laneIndex) => (
               <div key={laneIndex} className="mv-danmaku-lane h-1/2 overflow-hidden">
                 <div

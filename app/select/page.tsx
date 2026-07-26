@@ -67,16 +67,16 @@ const GUIDE_ORDER = [
 ];
 
 const FIGURE_STYLE: Record<string, string> = {
-  boya: "w-[clamp(136px,10.2vw,172px)] -translate-y-1",
-  jikang: "w-[clamp(132px,10vw,168px)]",
-  caiwenji: "w-[clamp(130px,9.8vw,164px)] -translate-y-2",
-  abing: "w-[clamp(132px,9.9vw,166px)] -translate-y-1",
-  tandun: "w-[clamp(126px,9.4vw,158px)] translate-y-1",
-  bach: "w-[clamp(138px,10.4vw,174px)] translate-y-1",
-  mozart: "w-[clamp(140px,10.5vw,176px)] translate-y-1",
-  beethoven: "w-[clamp(136px,10.2vw,172px)] -translate-y-1",
-  armstrong: "w-[clamp(132px,10vw,168px)]",
-  lennon: "w-[clamp(130px,9.8vw,164px)] translate-y-2",
+  boya: "w-[clamp(116px,10.2vw,172px)] -translate-y-1",
+  jikang: "w-[clamp(112px,10vw,168px)]",
+  caiwenji: "w-[clamp(110px,9.8vw,164px)] -translate-y-2",
+  abing: "w-[clamp(112px,9.9vw,166px)] -translate-y-1",
+  tandun: "w-[clamp(108px,9.4vw,158px)] translate-y-1",
+  bach: "w-[clamp(118px,10.4vw,174px)] translate-y-1",
+  mozart: "w-[clamp(118px,10.5vw,176px)] translate-y-1",
+  beethoven: "w-[clamp(116px,10.2vw,172px)] -translate-y-1",
+  armstrong: "w-[clamp(112px,10vw,168px)]",
+  lennon: "w-[clamp(110px,9.8vw,164px)] translate-y-2",
 };
 
 function CharacterFigure({
@@ -103,19 +103,19 @@ function CharacterFigure({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`group relative flex h-[clamp(328px,45vh,430px)] w-[clamp(104px,8.6vw,144px)] shrink-0 flex-col items-center justify-end transition duration-300 ${
+      className={`group relative flex h-[clamp(328px,45vh,430px)] w-[clamp(88px,8.6vw,144px)] shrink-0 flex-col items-center justify-end transition duration-300 ${
         disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"
       }`}
       aria-pressed={selected}
     >
       <div
-        className={`absolute bottom-[clamp(96px,13.2vh,124px)] h-[clamp(64px,9vh,86px)] w-[clamp(104px,8vw,134px)] rounded-[50%] border transition duration-300 ${
+        className={`absolute bottom-[clamp(96px,13.2vh,124px)] h-[clamp(64px,9vh,86px)] w-[clamp(88px,8vw,134px)] rounded-[50%] border transition duration-300 ${
           selected
             ? "border-[#ffd178]/95 bg-[#ffc15f]/28 shadow-[0_0_38px_rgba(255,193,95,0.9)]"
             : "border-[#8b644a]/44 bg-black/22 shadow-[0_24px_44px_rgba(0,0,0,0.34)] group-hover:border-[#d89d58]/80 group-hover:bg-[#ffc15f]/14"
         }`}
       />
-      <div className="absolute bottom-[clamp(103px,14.1vh,134px)] h-10 w-[clamp(96px,7.4vw,124px)] rounded-[50%] bg-[#f6b45e]/12 blur-md transition duration-300 group-hover:bg-[#f6b45e]/28" />
+      <div className="absolute bottom-[clamp(103px,14.1vh,134px)] h-10 w-[clamp(82px,7.4vw,124px)] rounded-[50%] bg-[#f6b45e]/12 blur-md transition duration-300 group-hover:bg-[#f6b45e]/28" />
       <div
         className={`relative z-10 mb-[clamp(112px,15.2vh,140px)] flex h-[clamp(170px,23vh,218px)] items-end justify-center transition duration-300 ${
           selected
@@ -128,6 +128,7 @@ function CharacterFigure({
           alt={label.name}
           width={512}
           height={512}
+          loading="eager"
           className={`h-auto max-h-[clamp(178px,24vh,230px)] object-contain [filter:drop-shadow(0_0_1px_rgba(62,38,22,0.55))_drop-shadow(0_8px_13px_rgba(0,0,0,0.34))_drop-shadow(0_0_11px_rgba(239,171,91,0.2))] ${FIGURE_STYLE[character.id] || "w-[clamp(132px,9.9vw,166px)]"}`}
         />
       </div>
@@ -315,8 +316,8 @@ export default function SelectPage() {
           </div>
 
           <div className="relative z-20 flex items-center justify-center px-4 pb-3 2xl:px-8 2xl:pb-5">
-            <div className="grid w-full max-w-[min(1370px,calc(100vw-128px))] grid-cols-[minmax(520px,1.25fr)_minmax(170px,0.75fr)_minmax(220px,280px)] items-center gap-3 rounded-[22px] border border-[#d7b18a]/42 bg-[#d7c0aa]/72 px-5 py-3 text-[#302536] shadow-[0_18px_55px_rgba(0,0,0,0.26)] backdrop-blur 2xl:grid-cols-[1.15fr_1.18fr_320px] 2xl:gap-6 2xl:rounded-[28px] 2xl:px-8 2xl:py-4">
-              <div className="flex items-center gap-3 2xl:gap-6">
+            <div className="grid w-full max-w-[min(1370px,calc(100vw-128px))] grid-cols-[minmax(0,1.45fr)_minmax(120px,0.55fr)_minmax(160px,0.65fr)] items-center gap-2 rounded-[22px] border border-[#d7b18a]/42 bg-[#d7c0aa]/72 px-5 py-3 text-[#302536] shadow-[0_18px_55px_rgba(0,0,0,0.26)] backdrop-blur xl:grid-cols-[minmax(520px,1.25fr)_minmax(170px,0.75fr)_minmax(220px,280px)] xl:gap-3 2xl:grid-cols-[1.15fr_1.18fr_320px] 2xl:gap-6 2xl:rounded-[28px] 2xl:px-8 2xl:py-4">
+              <div className="flex min-w-0 items-center gap-3 2xl:gap-6">
                 <div>
                   <p className="whitespace-nowrap text-xl font-semibold 2xl:text-2xl">{copy.selected} {selected.length} / {MAX_SELECTION}</p>
                   <p className="mt-0.5 text-xs text-[#5f5361] 2xl:mt-1 2xl:text-sm">{copy.maxSelected}</p>
@@ -340,7 +341,7 @@ export default function SelectPage() {
                     <span className="text-2xl 2xl:text-3xl">☆</span>
                     {copy.defaultCombo}
                   </button>
-                  <span className="max-w-[clamp(148px,16vw,240px)] truncate whitespace-nowrap text-xs text-[#6b5b59] 2xl:max-w-none 2xl:text-sm">
+                  <span className="hidden max-w-[clamp(148px,16vw,240px)] truncate whitespace-nowrap text-xs text-[#6b5b59] xl:block 2xl:max-w-none 2xl:text-sm">
                     {copy.defaultNames}
                   </span>
                 </div>
