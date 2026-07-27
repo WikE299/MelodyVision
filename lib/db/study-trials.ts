@@ -14,6 +14,9 @@ interface StudyTrialRow {
   id: string;
   participant_id: string;
   session_id: string;
+  study_session_id: string | null;
+  period: number | null;
+  stimulus_id: string;
   condition: InteractiveCondition;
   assignment_method: AssignmentMethod;
   music_profile_id: string;
@@ -31,6 +34,9 @@ function rowToTrial(row: StudyTrialRow): StudyTrial {
     id: row.id,
     participantId: row.participant_id,
     sessionId: row.session_id,
+    studySessionId: row.study_session_id || null,
+    period: row.period === 1 || row.period === 2 ? row.period : null,
+    stimulusId: row.stimulus_id || "",
     condition: row.condition,
     assignmentMethod: row.assignment_method,
     musicProfileId: row.music_profile_id,
@@ -78,6 +84,9 @@ async function insertStudyTrial(
     condition: InteractiveCondition;
     assignmentMethod: AssignmentMethod;
     musicProfileId: string;
+    studySessionId?: string;
+    period?: 1 | 2;
+    stimulusId?: string;
   }
 ): Promise<StudyTrial> {
   const id = input.id || randomUUID();
@@ -85,14 +94,18 @@ async function insertStudyTrial(
   const legacyComparisonOrder: ComparisonOrder = "co_created_left";
   await database.prepare(`
     INSERT INTO study_trials (
-      id, participant_id, session_id, condition, assignment_method,
+      id, participant_id, session_id, study_session_id, period, stimulus_id,
+      condition, assignment_method,
       music_profile_id, co_created_run_id, baseline_run_id,
       protocol_version, comparison_order, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'created', ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'created', ?, ?)
   `).run(
     id,
     input.participantId,
     input.sessionId,
+    input.studySessionId || null,
+    input.period || null,
+    input.stimulusId || "",
     input.condition,
     input.assignmentMethod,
     input.musicProfileId,
@@ -112,6 +125,9 @@ export async function createStudyTrial(input: {
   condition: InteractiveCondition;
   assignmentMethod: AssignmentMethod;
   musicProfileId: string;
+  studySessionId?: string;
+  period?: 1 | 2;
+  stimulusId?: string;
 }): Promise<StudyTrial> {
   const database = await getDatabase();
   return insertStudyTrial(database, input);
@@ -143,6 +159,9 @@ export async function recoverStudyTrial(input: {
   condition: InteractiveCondition;
   assignmentMethod: AssignmentMethod;
   musicProfileId: string;
+  studySessionId?: string;
+  period?: 1 | 2;
+  stimulusId?: string;
 }): Promise<{ trial: StudyTrial; recovered: boolean }> {
   const existing = await getStudyTrial(input.id);
   if (existing) return { trial: existing, recovered: false };
@@ -161,6 +180,28 @@ export async function getStudyTrial(id: string): Promise<StudyTrial | null> {
   const database = await getDatabase();
   const row = (await database.prepare("SELECT * FROM study_trials WHERE id = ?").all(id))[0] as unknown as StudyTrialRow | undefined;
   return row ? rowToTrial(row) : null;
+}
+
+export async function getStudyTrialBySessionPeriod(
+  studySessionId: string,
+  period: 1 | 2
+): Promise<StudyTrial | null> {
+  const database = await getDatabase();
+  const row = (await database.prepare(`
+    SELECT * FROM study_trials
+    WHERE study_session_id = ? AND period = ?
+  `).all(studySessionId, period))[0] as unknown as StudyTrialRow | undefined;
+  return row ? rowToTrial(row) : null;
+}
+
+export async function listStudyTrialsBySession(studySessionId: string): Promise<StudyTrial[]> {
+  const database = await getDatabase();
+  const rows = await database.prepare(`
+    SELECT * FROM study_trials
+    WHERE study_session_id = ?
+    ORDER BY period ASC
+  `).all(studySessionId) as unknown as StudyTrialRow[];
+  return rows.map(rowToTrial);
 }
 
 export async function updateStudyTrial(input: {

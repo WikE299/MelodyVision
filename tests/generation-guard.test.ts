@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isGenerationActionBlocked } from "../lib/conversation/generation-guard.ts";
+import {
+  hasAllSelectedMusicianComments,
+  isGenerationActionBlocked,
+} from "../lib/conversation/generation-guard.ts";
 
 const idleActivity = {
   generating: false,
@@ -24,4 +27,22 @@ test("generation is blocked while the latest conversation state is still changin
   ]) {
     assert.equal(isGenerationActionBlocked(activity), true);
   }
+});
+
+test("reflective generation requires a non-empty comment from every selected musician", () => {
+  assert.equal(
+    hasAllSelectedMusicianComments(["boya", "beethoven"], {
+      boya: "A complete response",
+      beethoven: "  ",
+    }),
+    false
+  );
+  assert.equal(
+    hasAllSelectedMusicianComments(["boya", "beethoven"], {
+      boya: "A complete response",
+      beethoven: "Another complete response",
+    }),
+    true
+  );
+  assert.equal(hasAllSelectedMusicianComments([], {}), false);
 });

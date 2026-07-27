@@ -4,10 +4,12 @@ import { runFacilitatorAgent } from "@/lib/agents/facilitator";
 import { getMusicianAgentProfile } from "@/lib/agents/musicians";
 import { runVisualScribeAgent } from "@/lib/agents/visual-scribe";
 import {
+  canConvergeFromUserEvidence,
   continueReflectiveListening,
   createReflectivePlan,
   parseConversationState,
   recordUserMessage,
+  requestGeneration,
   scheduleMusicianTurn,
 } from "@/lib/conversation";
 import { insertConversationSnapshot, insertVisualBriefVersion } from "@/lib/db/research-data";
@@ -87,6 +89,22 @@ export async function POST(request: NextRequest) {
       return Response.json({
         state: nextState,
         facilitatorPlan,
+        visualBrief: visualBriefResult.brief,
+      });
+    }
+
+    const canConvergeNow = canConvergeFromUserEvidence(
+      stateWithBrief,
+      visualBriefResult.brief.readiness.ready
+    );
+    if (canConvergeNow) {
+      const nextState = requestGeneration(stateWithBrief);
+      await insertConversationSnapshot(nextState, "user-message-converged").catch((error) => {
+        console.error("Converged user message snapshot failed:", error);
+      });
+      return Response.json({
+        state: nextState,
+        facilitatorPlan: null,
         visualBrief: visualBriefResult.brief,
       });
     }

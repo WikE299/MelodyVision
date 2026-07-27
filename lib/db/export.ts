@@ -2,6 +2,8 @@ import { getDatabase } from "./index.ts";
 
 const JSON_COLUMNS = new Set([
   "metadata_json",
+  "sequences_json",
+  "selected_musician_ids_json",
   "selected_characters_json",
   "presets_json",
   "music_analysis_json",
@@ -56,9 +58,12 @@ async function readRows(
 export async function exportExperimentJson() {
   const database = await getDatabase();
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     exportedAt: new Date().toISOString(),
     sessions: await readRows(database, "experiment_sessions"),
+    studySessions: await readRows(database, "study_sessions"),
+    studyAssignmentBlocks: await readRows(database, "study_assignment_blocks", "updated_at"),
+    sessionComparisons: await readRows(database, "session_comparisons"),
     audioAnalyses: await readRows(database, "audio_analyses"),
     conversationSnapshots: await readRows(database, "conversation_snapshots"),
     visualBriefVersions: await readRows(database, "visual_brief_versions"),
@@ -83,6 +88,9 @@ export async function exportExperimentCsv() {
       trial_id: trialId,
       participant_id: trial.participant_id,
       session_id: sessionId,
+      study_session_id: trial.study_session_id,
+      period: trial.period,
+      stimulus_id: trial.stimulus_id,
       condition: trial.condition,
       assignment_method: trial.assignment_method,
       comparison_order: trial.comparison_order,
@@ -110,6 +118,9 @@ export async function exportExperimentCsv() {
     "trial_id",
     "participant_id",
     "session_id",
+    "study_session_id",
+    "period",
+    "stimulus_id",
     "condition",
     "assignment_method",
     "comparison_order",

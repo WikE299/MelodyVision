@@ -3,9 +3,15 @@ import type { NextRequest } from "next/server";
 import { isInteractiveCondition } from "@/lib/contracts";
 import { attachAudioAnalysisToTrial } from "@/lib/db/research-data";
 import {
+  attachTrialToStudySession,
+  getStudyPeriodAssignment,
+  getStudySession,
+} from "@/lib/db/study-sessions";
+import {
   createBalancedStudyTrial,
   createStudyTrial,
   getStudyTrial,
+  getStudyTrialBySessionPeriod,
   recoverStudyTrial,
 } from "@/lib/db/study-trials";
 
@@ -26,7 +32,9 @@ export async function POST(request: NextRequest) {
       const staleTrialId = typeof body.staleTrialId === "string"
         ? body.staleTrialId.trim().slice(0, 100)
         : "";
-      const assignmentMethod = body.assignmentMethod === "balanced_random"
+      const assignmentMethod = body.assignmentMethod === "crossover_block"
+        ? "crossover_block"
+        : body.assignmentMethod === "balanced_random"
         ? "balanced_random"
         : body.assignmentMethod === "demo_choice"
           ? "demo_choice"
@@ -50,6 +58,9 @@ export async function POST(request: NextRequest) {
         condition,
         assignmentMethod,
         musicProfileId,
+        studySessionId: typeof body.studySessionId === "string" ? body.studySessionId.trim() : undefined,
+        period: body.period === 1 || body.period === 2 ? body.period : undefined,
+        stimulusId: typeof body.stimulusId === "string" ? body.stimulusId.trim() : undefined,
       });
       await attachAudioAnalysisToTrial({ sessionId, trialId: result.trial.id, musicProfileId });
       return Response.json(result, { status: result.recovered ? 201 : 200 });
@@ -72,6 +83,48 @@ export async function POST(request: NextRequest) {
       : null;
     if (mode === "demo" && !requestedCondition) {
       return Response.json({ error: "Demo trials require a valid requestedCondition" }, { status: 400 });
+    }
+
+    if (mode === "study" && typeof body.studySessionId === "string") {
+      const studySession = await getStudySession(body.studySessionId.trim());
+      const period = body.period === 1 || body.period === 2 ? body.period : null;
+      if (!studySession || !period) {
+        return Response.json({ error: "A valid study session and period are required" }, { status: 400 });
+      }
+      const assignment = getStudyPeriodAssignment(studySession, period);
+      if (
+        (period === 1 && studySession.currentPeriod !== 1) ||
+        (period === 2 && studySession.currentPeriod !== 2) ||
+        (typeof body.stimulusId === "string" && body.stimulusId !== assignment.stimulusId)
+      ) {
+        return Response.json({ error: "Study period assignment does not match the session" }, { status: 409 });
+      }
+      const existing = await getStudyTrialBySessionPeriod(studySession.id, period);
+      if (existing) {
+        await attachAudioAnalysisToTrial({
+          sessionId,
+          trialId: existing.id,
+          musicProfileId: existing.musicProfileId,
+        });
+        return Response.json({ trial: existing, recovered: true }, { status: 200 });
+      }
+      const trial = await createStudyTrial({
+        participantId: studySession.participantId,
+        sessionId,
+        studySessionId: studySession.id,
+        period,
+        stimulusId: assignment.stimulusId,
+        condition: assignment.condition,
+        assignmentMethod: "crossover_block",
+        musicProfileId,
+      });
+      await attachTrialToStudySession({
+        studySessionId: studySession.id,
+        period,
+        trialId: trial.id,
+      });
+      await attachAudioAnalysisToTrial({ sessionId, trialId: trial.id, musicProfileId });
+      return Response.json({ trial }, { status: 201 });
     }
 
     const identity = participantId || `anonymous-${randomUUID()}`;

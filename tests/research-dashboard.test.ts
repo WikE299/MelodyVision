@@ -3,15 +3,31 @@ import test from "node:test";
 
 import {
   buildResearchDashboardDataset,
+  exportResearchStudySessionsCsv,
   exportResearchTrialsCsv,
   summarizeResearchTrials,
 } from "../lib/research-dashboard.ts";
 
 function fixture() {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     exportedAt: "2026-07-18T00:00:00.000Z",
     sessions: [],
+    studySessions: [
+      {
+        id: "study-current",
+        participant_id: "=unsafe",
+        protocol_version: "v2-15-within-subject-crossover",
+        sequence: "single_x_then_multi_y",
+        status: "period_1",
+        current_period: 1,
+        selected_musician_ids: ["beethoven"],
+        created_at: "2026-07-18T00:00:00.000Z",
+        completed_at: null,
+      },
+    ],
+    studyAssignmentBlocks: [],
+    sessionComparisons: [],
     audioAnalyses: [
       {
         id: "audio-current",
@@ -69,12 +85,15 @@ function fixture() {
         id: "trial-current",
         participant_id: "=unsafe",
         session_id: "session-current",
-        condition: "multi_agent",
-        assignment_method: "demo_choice",
+        study_session_id: "study-current",
+        period: 1,
+        stimulus_id: "track-x",
+        condition: "single_agent",
+        assignment_method: "crossover_block",
         music_profile_id: "music-current",
         co_created_run_id: "co-current",
         baseline_run_id: "base-current",
-        protocol_version: "v2-14-labeled-comparison",
+        protocol_version: "v2-15-within-subject-crossover",
         status: "completed",
         created_at: "2026-07-18T00:00:00.000Z",
         updated_at: "2026-07-18T00:02:00.000Z",
@@ -165,8 +184,10 @@ test("dashboard defaults its summary to the current protocol", () => {
   assert.equal(dataset.summary.artworkScores[0].mean, 5);
   assert.deepEqual(dataset.protocols, [
     "v2-13-blind-comparison",
-    "v2-14-labeled-comparison",
+    "v2-15-within-subject-crossover",
   ]);
+  assert.equal(dataset.studySessions.length, 1);
+  assert.equal(dataset.studySessions[0].firstTrial?.id, "trial-current");
 });
 
 test("legacy missing scores are not treated as zero", () => {
@@ -195,6 +216,15 @@ test("dashboard CSV is one row per trial and neutralizes formulas", () => {
   assert.match(csv, /"'=unsafe"/);
   assert.match(csv, /music_match_score/);
   assert.match(csv, /baseline_failed/);
+});
+
+test("participant CSV keeps both periods on one row and neutralizes formulas", () => {
+  const dataset = buildResearchDashboardDataset(fixture());
+  const csv = exportResearchStudySessionsCsv(dataset.studySessions);
+  assert.equal(csv.trim().split("\n").length, 2);
+  assert.match(csv, /"'=unsafe"/);
+  assert.match(csv, /period_1_condition/);
+  assert.match(csv, /single_agent/);
 });
 
 test("snapshot validation rejects incomplete exports", () => {

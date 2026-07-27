@@ -10,6 +10,9 @@ export async function createStudyTrial(input: {
   participantId?: string;
   musicProfileId: string;
   requestedCondition?: InteractiveCondition;
+  studySessionId?: string;
+  period?: 1 | 2;
+  stimulusId?: string;
 }): Promise<StudyTrial> {
   const response = await fetch("/api/experiment/trial", {
     method: "POST",
@@ -46,6 +49,9 @@ export async function ensureStudyTrial(trial: StudyTrial): Promise<{
       condition: trial.condition,
       assignmentMethod: trial.assignmentMethod,
       musicProfileId: trial.musicProfileId,
+      studySessionId: trial.studySessionId || undefined,
+      period: trial.period || undefined,
+      stimulusId: trial.stimulusId || undefined,
     }),
   });
   const data = await response.json();

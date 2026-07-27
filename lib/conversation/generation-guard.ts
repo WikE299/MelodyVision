@@ -15,3 +15,13 @@ export function isGenerationActionBlocked(activity: GenerationActivity): boolean
     activity.streamingCount > 0
   );
 }
+
+export function hasAllSelectedMusicianComments(
+  selectedMusicianIds: readonly string[],
+  comments: Readonly<Record<string, string>>
+): boolean {
+  return (
+    selectedMusicianIds.length > 0 &&
+    selectedMusicianIds.every((characterId) => Boolean(comments[characterId]?.trim()))
+  );
+}

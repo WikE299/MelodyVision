@@ -22,9 +22,19 @@ import {
   requestRichMusicProfile,
   warmRichAnalysisService,
 } from "@/lib/audio/rich-analysis-client";
-import type { AudioSourceKind, InteractiveCondition } from "@/lib/contracts";
+import type {
+  AudioSourceKind,
+  InteractiveCondition,
+  StudyPeriod,
+} from "@/lib/contracts";
 import { getExperimentSessionId } from "@/lib/experiment-session";
 import { createStudyTrial, startDirectBaseline } from "@/lib/experiment-trial-client";
+import {
+  createOrRecoverStudySession,
+  fetchStudySession,
+  type StudySessionPayload,
+} from "@/lib/experiment-study-client";
+import { startConversationSession } from "@/lib/conversation-client";
 import { recordExperimentEvent } from "@/lib/experiment-events";
 import { useLanguage } from "@/lib/i18n";
 
@@ -44,6 +54,9 @@ interface AudioSelectionContext {
   remoteSourceUrl?: string;
   fileName?: string;
   fileSize?: number;
+  studySessionId?: string;
+  studyPeriod?: StudyPeriod;
+  stimulusId?: string;
 }
 
 const COPY = {
@@ -105,6 +118,17 @@ const COPY = {
     searchConfigMissing: "搜索音乐需要配置 JAMENDO_CLIENT_ID。示例音乐和上传音频仍可使用。",
     artist: "艺术家",
     uploadTitle: "已有音频文件？上传自己的音乐",
+    studyTitle: "准备进入聆听实验",
+    enterStudy: "开始实验",
+    participantLabel: "参与者编号",
+    participantPlaceholder: "请输入实验编号",
+    studyProgress: (period: number) => `第 ${period} / 2 次体验`,
+    startStudy: "开始第一次体验",
+    continueStudy: "继续下一次体验",
+    resumeStudy: "继续当前体验",
+    studyCompleted: "本次实验已经完成",
+    participantRequired: "请输入参与者编号。",
+    studySessionFailed: "实验会话创建失败，请稍后重试。",
   },
   en: {
     productHint: "Choose a sound and turn what you hear into an artwork through guided listening.",
@@ -164,6 +188,17 @@ const COPY = {
     searchConfigMissing: "Music search requires JAMENDO_CLIENT_ID. Examples and uploads still work.",
     artist: "Artist",
     uploadTitle: "Have an audio file? Upload your own music",
+    studyTitle: "Prepare for the listening study",
+    enterStudy: "Begin study",
+    participantLabel: "Participant ID",
+    participantPlaceholder: "Enter the study ID",
+    studyProgress: (period: number) => `Experience ${period} of 2`,
+    startStudy: "Start the first experience",
+    continueStudy: "Continue to the next experience",
+    resumeStudy: "Resume this experience",
+    studyCompleted: "This study session is complete",
+    participantRequired: "Enter a participant ID.",
+    studySessionFailed: "The study session could not be created. Please try again.",
   },
 };
 
@@ -180,6 +215,7 @@ export default function HomePageClient() {
   const router = useRouter();
   const { language } = useLanguage();
   const [studyMode, setStudyMode] = useState<boolean | null>(null);
+  const [studyEntryStarted, setStudyEntryStarted] = useState(false);
   const [selectedPath, setSelectedPath] = useState<ListeningPath | null>(null);
   const [activeInputMode, setActiveInputMode] = useState<InputMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -190,16 +226,42 @@ export default function HomePageClient() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisServiceReady, setAnalysisServiceReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [participantId, setParticipantId] = useState("");
+  const [studyPayload, setStudyPayload] = useState<StudySessionPayload | null>(null);
+  const [studySessionLoading, setStudySessionLoading] = useState(false);
   const copy = COPY[language];
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams(window.location.search);
       setStudyMode(params.get("study") === "1");
+      const requestedParticipant = params.get("participant")?.trim() || "";
+      if (requestedParticipant) setParticipantId(requestedParticipant);
     }, 0);
 
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (studyMode !== true) return;
+    const storedStudySessionId = localStorage.getItem("melodyvisionStudySessionId");
+    if (!storedStudySessionId) return;
+
+    let cancelled = false;
+    void fetchStudySession(storedStudySessionId)
+      .then((payload) => {
+        if (cancelled) return;
+        setStudyPayload(payload);
+        setParticipantId(payload.session.participantId);
+        sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+      })
+      .catch(() => {
+        if (!cancelled) localStorage.removeItem("melodyvisionStudySessionId");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studyMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -228,6 +290,12 @@ export default function HomePageClient() {
       const isStudyMode = params.get("study") === "1";
       if (!isStudyMode && !selectedPath) {
         throw new Error("LISTENING_PATH_REQUIRED");
+      }
+      if (
+        isStudyMode &&
+        (!context.studySessionId || !context.studyPeriod || !context.stimulusId)
+      ) {
+        throw new Error("STUDY_SESSION_REQUIRED");
       }
       const fileName = file?.name || context.fileName || "remote-audio.mp3";
       let fileSize = file?.size || context.fileSize || 0;
@@ -331,15 +399,25 @@ export default function HomePageClient() {
       const trial = await createStudyTrial({
         mode: isStudyMode ? "study" : "demo",
         sessionId,
-        participantId: params.get("participant") || undefined,
+        participantId: isStudyMode
+          ? studyPayload?.session.participantId || participantId || undefined
+          : params.get("participant") || undefined,
         musicProfileId: richResult.value.id,
         requestedCondition: !isStudyMode && selectedPath
           ? CONDITION_BY_PATH[selectedPath]
           : undefined,
+        studySessionId: context.studySessionId,
+        period: context.studyPeriod,
+        stimulusId: context.stimulusId,
       });
       sessionStorage.setItem("studyTrial", JSON.stringify(trial));
       sessionStorage.setItem("studyTrialId", trial.id);
       sessionStorage.setItem("interactiveCondition", trial.condition);
+      if (trial.studySessionId && trial.period) {
+        sessionStorage.setItem("studySessionId", trial.studySessionId);
+        sessionStorage.setItem("studyPeriod", String(trial.period));
+        localStorage.setItem("melodyvisionStudySessionId", trial.studySessionId);
+      }
       recordExperimentEvent("condition-assigned", "/", {
         trialId: trial.id,
         condition: trial.condition,
@@ -373,6 +451,28 @@ export default function HomePageClient() {
       sessionStorage.removeItem("conversationState");
       sessionStorage.removeItem("facilitatorPlan");
       sessionStorage.removeItem("visualBrief");
+      if (trial.studySessionId && trial.period === 2) {
+        const updatedStudy = await fetchStudySession(trial.studySessionId);
+        setStudyPayload(updatedStudy);
+        sessionStorage.setItem("studySession", JSON.stringify(updatedStudy.session));
+        const selectedMusicianIds = updatedStudy.session.selectedMusicianIds;
+        if (selectedMusicianIds.length === 0) {
+          router.push("/select");
+          return;
+        }
+        sessionStorage.setItem("selectedCharacters", JSON.stringify(selectedMusicianIds));
+        const conversation = await startConversationSession({
+          sessionId,
+          trialId: trial.id,
+          musicProfileId: richResult.value.id,
+          condition: trial.condition,
+          selectedMusicianIds,
+        });
+        sessionStorage.setItem("conversationState", JSON.stringify(conversation.state));
+        sessionStorage.setItem("facilitatorPlan", JSON.stringify(conversation.facilitatorPlan));
+        router.push("/listen");
+        return;
+      }
       router.push("/select");
     } catch (err) {
       console.error("Audio analysis failed:", err);
@@ -381,13 +481,21 @@ export default function HomePageClient() {
       setAnalyzing(false);
       setError(err instanceof Error && err.message === "LISTENING_PATH_REQUIRED"
         ? copy.choosePathFirst
+        : err instanceof Error && err.message === "STUDY_SESSION_REQUIRED"
+          ? copy.studySessionFailed
         : err instanceof Error && err.message === "RICH_ANALYSIS_UNAVAILABLE"
           ? copy.richAnalysisUnavailable
           : copy.analyzeFailed);
     }
   };
 
-  const handleCatalogSelect = async (item: AudioCatalogItem) => {
+  const handleCatalogSelect = async (
+    item: AudioCatalogItem,
+    studyContext?: Pick<
+      AudioSelectionContext,
+      "studySessionId" | "studyPeriod" | "stimulusId"
+    >
+  ) => {
     if (analyzing) return;
     setAnalyzing(true);
     setError(null);
@@ -409,6 +517,7 @@ export default function HomePageClient() {
           source: item.source,
           sourceUrl: item.sourceUrl,
         },
+        ...studyContext,
       });
     } catch (err) {
       console.error("Preset audio failed:", err);
@@ -490,6 +599,151 @@ export default function HomePageClient() {
     }
   };
 
+  const beginOrResumeStudy = async () => {
+    if (analyzing || studySessionLoading) return;
+    const normalizedParticipantId = participantId.trim();
+    if (!studyPayload && !normalizedParticipantId) {
+      setError(copy.participantRequired);
+      return;
+    }
+
+    setStudySessionLoading(true);
+    setError(null);
+    try {
+      let payload = studyPayload;
+      if (!payload) {
+        const deviceSessionId = await getExperimentSessionId();
+        payload = await createOrRecoverStudySession({
+          participantId: normalizedParticipantId,
+          deviceSessionId,
+        });
+        setStudyPayload(payload);
+        localStorage.setItem("melodyvisionStudySessionId", payload.session.id);
+        sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+      }
+      if (
+        payload.session.status === "completed" ||
+        payload.session.status === "comparing" ||
+        payload.session.status === "baseline_review"
+      ) {
+        const latest = payload.periodResults.find((item) => item.trial.period === 2)
+          || payload.periodResults.at(-1);
+        if (latest?.coCreated?.imageUrl) {
+          sessionStorage.setItem("studyTrial", JSON.stringify(latest.trial));
+          sessionStorage.setItem("studyTrialId", latest.trial.id);
+          sessionStorage.setItem("interactiveCondition", latest.trial.condition);
+          sessionStorage.setItem("generatedImageUrl", latest.coCreated.imageUrl);
+          sessionStorage.setItem("generatedImagePrompt", latest.coCreated.prompt || "");
+          sessionStorage.setItem("audioSrc", latest.audioUrl);
+          sessionStorage.setItem("audioFileName", latest.musicName);
+          sessionStorage.setItem("imageGenerationMeta", JSON.stringify({
+            runId: latest.coCreated.runId,
+            trialId: latest.trial.id,
+          }));
+        }
+        router.push("/result");
+        return;
+      }
+
+      const currentPeriodResult = payload.periodResults.find(
+        (item) => item.trial.period === payload!.session.currentPeriod
+      );
+      if (currentPeriodResult?.musicProfile) {
+        const selectedMusicianIds = payload.session.selectedMusicianIds;
+        sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+        sessionStorage.setItem("studyTrial", JSON.stringify(currentPeriodResult.trial));
+        sessionStorage.setItem("studyTrialId", currentPeriodResult.trial.id);
+        sessionStorage.setItem("studySessionId", payload.session.id);
+        sessionStorage.setItem("studyPeriod", String(currentPeriodResult.trial.period || 1));
+        sessionStorage.setItem("interactiveCondition", currentPeriodResult.trial.condition);
+        sessionStorage.setItem("experimentSessionId", currentPeriodResult.trial.sessionId);
+        sessionStorage.setItem("audioSrc", currentPeriodResult.audioUrl);
+        sessionStorage.setItem("audioFileName", currentPeriodResult.musicName);
+        sessionStorage.setItem("musicProfile", JSON.stringify(currentPeriodResult.musicProfile));
+        sessionStorage.setItem(
+          "musicAnalysis",
+          JSON.stringify(currentPeriodResult.compatibilityAnalysis || {})
+        );
+        sessionStorage.setItem("selectedCharacters", JSON.stringify(selectedMusicianIds));
+
+        if (currentPeriodResult.coCreated?.imageUrl) {
+          sessionStorage.setItem("generatedImageUrl", currentPeriodResult.coCreated.imageUrl);
+          sessionStorage.setItem("generatedImagePrompt", currentPeriodResult.coCreated.prompt || "");
+          sessionStorage.setItem("imageGenerationMeta", JSON.stringify({
+            runId: currentPeriodResult.coCreated.runId,
+            trialId: currentPeriodResult.trial.id,
+          }));
+          router.push("/result");
+          return;
+        }
+
+        if (currentPeriodResult.conversationState) {
+          sessionStorage.setItem(
+            "conversationState",
+            JSON.stringify(currentPeriodResult.conversationState)
+          );
+          sessionStorage.setItem(
+            "facilitatorPlan",
+            JSON.stringify(currentPeriodResult.facilitatorPlan)
+          );
+          if (currentPeriodResult.visualBrief) {
+            sessionStorage.setItem(
+              "visualBrief",
+              JSON.stringify(currentPeriodResult.visualBrief)
+            );
+          }
+          sessionStorage.setItem("comments", JSON.stringify(
+            Object.fromEntries(
+              currentPeriodResult.conversationState.messages
+                .filter((message) => message.role === "musician" || message.role === "guide")
+                .map((message) => [message.speakerId, message.content])
+            )
+          ));
+          router.push("/listen");
+          return;
+        }
+
+        if (selectedMusicianIds.length > 0) {
+          const conversation = await startConversationSession({
+            sessionId: currentPeriodResult.trial.sessionId,
+            trialId: currentPeriodResult.trial.id,
+            musicProfileId: currentPeriodResult.musicProfile.id,
+            condition: currentPeriodResult.trial.condition,
+            selectedMusicianIds,
+          });
+          sessionStorage.setItem("conversationState", JSON.stringify(conversation.state));
+          sessionStorage.setItem("facilitatorPlan", JSON.stringify(conversation.facilitatorPlan));
+          router.push("/listen");
+          return;
+        }
+
+        router.push("/select");
+        return;
+      }
+
+      const assignment = payload.assignments.find(
+        (item) => item.period === payload!.session.currentPeriod
+      );
+      const catalogItem = assignment
+        ? audioCatalog.find((item) => item.id === assignment.stimulusId)
+        : null;
+      if (!assignment || !catalogItem) {
+        throw new Error("Assigned study stimulus is unavailable");
+      }
+      await handleCatalogSelect(catalogItem, {
+        studySessionId: payload.session.id,
+        studyPeriod: assignment.period,
+        stimulusId: assignment.stimulusId,
+      });
+    } catch (studyError) {
+      console.error("Study start failed:", studyError);
+      setAnalyzing(false);
+      setError(copy.studySessionFailed);
+    } finally {
+      setStudySessionLoading(false);
+    }
+  };
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#15111c] text-[#f8dfbb]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_52%,rgba(255,176,86,0.28),transparent_26%),radial-gradient(circle_at_18%_85%,rgba(255,183,92,0.2),transparent_20%),linear-gradient(135deg,#191526_0%,#302638_44%,#12111b_100%)]" />
@@ -501,7 +755,7 @@ export default function HomePageClient() {
       <div className="relative z-10 flex min-h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader activeStep={1} />
 
-        <section className="relative mt-2 flex flex-1 items-center justify-center rounded-[42px] border border-[#9f6f45]/75 bg-[#261f2a]/45 px-10 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <section className="relative mt-2 flex flex-1 items-center justify-center rounded-[42px] border border-[#9f6f45]/75 bg-[#261f2a]/45 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:px-10">
           <div className="absolute inset-0 overflow-hidden rounded-[42px]">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_34%,rgba(255,211,138,0.28),transparent_22%),radial-gradient(circle_at_50%_76%,rgba(255,167,77,0.2),transparent_30%),linear-gradient(180deg,rgba(30,25,38,0.08),rgba(18,15,27,0.42))]" />
             <div className="absolute left-[8%] right-[8%] top-[44%] h-px bg-[#f0b45e]/18" />
@@ -555,11 +809,11 @@ export default function HomePageClient() {
             <div className="absolute top-[388px] h-[126px] w-[820px] rounded-[50%] border border-[#e1a763]/35 bg-[#85664d]/36 shadow-[0_30px_90px_rgba(0,0,0,0.4)]" />
             <div className="absolute top-[418px] h-[68px] w-[720px] rounded-[50%] bg-[#f5b75e]/18 blur-md" />
             <div className="relative z-10 w-full max-w-[820px] pb-2">
-              <p className="mb-4 text-center text-sm text-[#ffe0ad]/78">{copy.productHint}</p>
+              <p className="mb-4 text-center text-sm font-medium text-[#ffe7bd]/95 drop-shadow-[0_2px_5px_rgba(17,12,20,0.92)]">{copy.productHint}</p>
               {studyMode === false && !selectedPath && (
                 <div className="mb-3">
-                  <p className="text-center font-serif text-2xl font-semibold text-[#ffe5bd]">{copy.pathTitle}</p>
-                  <p className="mb-4 mt-1 text-center text-xs text-[#c9ad91]">{copy.pathIntro}</p>
+                  <p className="text-center font-serif text-2xl font-semibold text-[#ffe5bd] drop-shadow-[0_2px_5px_rgba(17,12,20,0.92)]">{copy.pathTitle}</p>
+                  <p className="mb-4 mt-1 text-center text-xs text-[#ead0b2] drop-shadow-[0_2px_4px_rgba(17,12,20,0.92)]">{copy.pathIntro}</p>
                   <div className="grid grid-cols-2 gap-3">
                     {(["A", "B"] as ListeningPath[]).map((path) => {
                       const pathCopy = copy.paths[path];
@@ -574,20 +828,83 @@ export default function HomePageClient() {
                             sessionStorage.setItem("listeningPath", path);
                             sessionStorage.setItem("interactiveCondition", CONDITION_BY_PATH[path]);
                           }}
-                          className="group min-h-[118px] border border-[#d7a66d]/40 bg-[#211c27]/82 px-6 py-4 text-left text-[#d6bd9f] transition hover:-translate-y-1 hover:border-[#ffd083]/76 hover:bg-[#352936] hover:shadow-[0_18px_40px_rgba(0,0,0,0.28)]"
+                          className="group min-h-[118px] border border-[#d7a66d]/40 bg-[#211c27]/82 px-3 py-3 text-left text-[#d6bd9f] transition hover:-translate-y-1 hover:border-[#ffd083]/76 hover:bg-[#352936] hover:shadow-[0_18px_40px_rgba(0,0,0,0.28)] sm:px-6 sm:py-4"
                         >
                           <span className="block text-xs font-semibold text-[#d6ae7f]">{pathCopy.title}</span>
-                          <span className="mt-1 block text-lg font-semibold text-[#ffe5bd]">{pathCopy.label}</span>
-                          <span className="mt-2 block text-xs leading-relaxed text-current/72">{pathCopy.description}</span>
+                          <span className="mt-1 block text-base font-semibold text-[#ffe5bd] sm:text-lg">{pathCopy.label}</span>
+                          <span className="mt-2 block text-[11px] leading-relaxed text-current/72 sm:text-xs">{pathCopy.description}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
               )}
-              {(studyMode === true || selectedPath) && (
-                <>
+              {studyMode === true && (
+                <div className="mx-auto w-full max-w-[620px] border border-[#d7a66d]/42 bg-[#211c27]/88 px-6 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.3)] backdrop-blur">
+                  <div className="flex items-start justify-between gap-5 border-b border-[#d7a66d]/24 pb-4">
+                    <div>
+                      <p className="font-serif text-2xl font-semibold text-[#ffe5bd]">{copy.studyTitle}</p>
+                    </div>
+                    {studyPayload && (
+                      <span className="shrink-0 border border-[#e2b273]/40 bg-[#3a2c34] px-3 py-1.5 text-xs font-semibold text-[#ffe1b2]">
+                        {copy.studyProgress(studyPayload.session.currentPeriod)}
+                      </span>
+                    )}
+                  </div>
+
+                  {!studyEntryStarted ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudyEntryStarted(true);
+                        setError(null);
+                      }}
+                      className="mt-5 flex h-14 w-full items-center justify-center gap-3 border border-[#ffd083] bg-[#ffd083] px-5 text-base font-semibold text-[#2c2028] shadow-[0_0_30px_rgba(255,194,103,0.26)] transition hover:bg-[#ffe0a6]"
+                    >
+                      <span>{copy.enterStudy}</span>
+                      <span aria-hidden>→</span>
+                    </button>
+                  ) : (
+                    <>
+                      <label className="mt-4 block">
+                        <span className="mb-1.5 block text-xs text-[#c6a989]">{copy.participantLabel}</span>
+                        <input
+                          autoFocus
+                          value={participantId}
+                          onChange={(event) => setParticipantId(event.target.value)}
+                          disabled={Boolean(studyPayload) || analyzing || studySessionLoading}
+                          placeholder={copy.participantPlaceholder}
+                          className="h-12 w-full border border-[#c99a68]/45 bg-[#16121d]/88 px-4 text-sm text-[#ffe8c8] outline-none transition placeholder:text-[#8f7864] focus:border-[#ffd083] disabled:cursor-not-allowed disabled:opacity-70"
+                        />
+                      </label>
+
+                      {studyPayload?.session.status === "completed" ? (
+                        <p className="mt-5 border border-[#8fb58b]/38 bg-[#26342b]/70 px-4 py-3 text-center text-sm text-[#cce6c8]">
+                          {copy.studyCompleted}
+                        </p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void beginOrResumeStudy()}
+                          disabled={analyzing || studySessionLoading}
+                          className="mt-5 flex h-14 w-full items-center justify-center gap-3 border border-[#ffd083] bg-[#ffd083] px-5 text-base font-semibold text-[#2c2028] shadow-[0_0_30px_rgba(255,194,103,0.26)] transition hover:bg-[#ffe0a6] disabled:cursor-not-allowed disabled:opacity-55"
+                        >
+                          <span>
+                            {studyPayload
+                              ? studyPayload.session.status === "between_periods"
+                                ? copy.continueStudy
+                                : copy.resumeStudy
+                              : copy.startStudy}
+                          </span>
+                          <span aria-hidden>→</span>
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {studyMode === false && selectedPath && (
+                <>
                 <div className="mb-3 flex items-center justify-between border-b border-[#d7a66d]/28 pb-2">
                   <div>
                     <span className="text-[10px] text-[#aa8b6d]">{copy.selectedPath}</span>
@@ -609,7 +926,6 @@ export default function HomePageClient() {
                     {copy.changePath}
                   </button>
                 </div>
-              )}
               <p className="mb-2 text-center text-xs text-[#d8bb9a]">{copy.audioEntryTitle}</p>
               <div className="grid grid-cols-3 gap-3">
                 {INPUT_MODES.map((mode) => {
@@ -623,7 +939,7 @@ export default function HomePageClient() {
                       disabled={analyzing}
                       aria-expanded={active}
                       onClick={() => setActiveInputMode((current) => (current === mode ? null : mode))}
-                      className={`relative min-h-[86px] rounded-[20px] border px-5 py-4 text-left transition ${
+                      className={`relative min-h-[86px] rounded-[20px] border px-2 py-3 text-left transition sm:px-5 sm:py-4 ${
                         active
                           ? "border-[#ffd083] bg-[#4e382f]/92 text-[#fff1d5] shadow-[0_0_34px_rgba(255,194,103,0.38)]"
                           : "border-[#d7a66d]/40 bg-[#211c27]/74 text-[#d6bd9f] hover:border-[#ffd083]/70 hover:bg-[#302737]"
@@ -646,7 +962,7 @@ export default function HomePageClient() {
                           <p className="mt-0.5 text-[11px] text-[#c9ad91]">{copy.examplesDesc}</p>
                         </div>
                       </div>
-                      <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="grid gap-1.5 md:grid-cols-2 lg:grid-cols-4">
                         {audioCatalog.map((item) => (
                           <CatalogItemCard
                             key={item.id}

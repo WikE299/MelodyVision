@@ -5,7 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-test("legacy study databases migrate to the labeled-comparison protocol", async () => {
+test("legacy study databases migrate to the within-subject crossover schema", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "melodyvision-study-migration-"));
   const databasePath = path.join(directory, "melodyvision.sqlite");
   const legacy = new DatabaseSync(databasePath);
@@ -58,15 +58,30 @@ test("legacy study databases migrate to the labeled-comparison protocol", async 
     ).all("legacy-trial"))[0];
     const newTables = await database.prepare(`
       SELECT name FROM sqlite_master
-      WHERE type = 'table' AND name IN ('labeled_comparisons', 'manipulation_checks')
+      WHERE type = 'table' AND name IN (
+        'labeled_comparisons',
+        'manipulation_checks',
+        'session_comparisons',
+        'study_assignment_blocks',
+        'study_sessions'
+      )
       ORDER BY name
     `).all();
 
     assert.equal(trialColumns.some((column) => column.name === "protocol_version"), true);
+    assert.equal(trialColumns.some((column) => column.name === "study_session_id"), true);
+    assert.equal(trialColumns.some((column) => column.name === "period"), true);
+    assert.equal(trialColumns.some((column) => column.name === "stimulus_id"), true);
     assert.equal(evaluationColumns.some((column) => column.name === "immersion_score"), true);
     assert.equal(evaluationColumns.some((column) => column.name === "satisfaction_score"), true);
     assert.equal(migratedTrial.protocol_version, "v2-13-blind-comparison");
-    assert.deepEqual(newTables.map((table) => table.name), ["labeled_comparisons", "manipulation_checks"]);
+    assert.deepEqual(newTables.map((table) => table.name), [
+      "labeled_comparisons",
+      "manipulation_checks",
+      "session_comparisons",
+      "study_assignment_blocks",
+      "study_sessions",
+    ]);
   } finally {
     delete process.env.MELODYVISION_DATA_DIR;
     await rm(directory, { recursive: true, force: true });

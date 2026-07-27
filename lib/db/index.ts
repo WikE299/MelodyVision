@@ -218,6 +218,9 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       id TEXT PRIMARY KEY,
       participant_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
+      study_session_id TEXT,
+      period INTEGER,
+      stimulus_id TEXT NOT NULL DEFAULT '',
       condition TEXT NOT NULL,
       assignment_method TEXT NOT NULL,
       music_profile_id TEXT NOT NULL,
@@ -228,6 +231,48 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS study_assignment_blocks (
+      id TEXT PRIMARY KEY,
+      protocol_version TEXT NOT NULL,
+      stimulus_pair_key TEXT NOT NULL,
+      sequences_json TEXT NOT NULL,
+      next_position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS study_sessions (
+      id TEXT PRIMARY KEY,
+      participant_id TEXT NOT NULL,
+      device_session_id TEXT NOT NULL,
+      protocol_version TEXT NOT NULL,
+      sequence TEXT NOT NULL,
+      status TEXT NOT NULL,
+      current_period INTEGER NOT NULL DEFAULT 1,
+      stimulus_x_id TEXT NOT NULL,
+      stimulus_y_id TEXT NOT NULL,
+      selected_musician_ids_json TEXT NOT NULL DEFAULT '[]',
+      first_trial_id TEXT,
+      second_trial_id TEXT,
+      assignment_block_id TEXT NOT NULL,
+      assignment_position INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS session_comparisons (
+      id TEXT PRIMARY KEY,
+      study_session_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expression_support_choice TEXT NOT NULL,
+      immersion_choice TEXT NOT NULL,
+      creative_freedom_choice TEXT NOT NULL,
+      overall_choice TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      FOREIGN KEY (study_session_id) REFERENCES study_sessions(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS baseline_jobs (
@@ -313,6 +358,15 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
     CREATE INDEX IF NOT EXISTS idx_study_trials_participant
       ON study_trials(participant_id, created_at);
 
+    CREATE INDEX IF NOT EXISTS idx_study_sessions_participant
+      ON study_sessions(participant_id, protocol_version, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_study_sessions_status
+      ON study_sessions(protocol_version, status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_assignment_blocks_pair
+      ON study_assignment_blocks(protocol_version, stimulus_pair_key, created_at);
+
     CREATE INDEX IF NOT EXISTS idx_artwork_evaluations_trial
       ON artwork_evaluations(trial_id, created_at);
 
@@ -340,8 +394,16 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
   ensureColumn(database, "visual_brief_versions", "trial_id", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "interaction_events", "trial_id", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "study_trials", "protocol_version", "TEXT NOT NULL DEFAULT 'v2-13-blind-comparison'");
+  ensureColumn(database, "study_trials", "study_session_id", "TEXT");
+  ensureColumn(database, "study_trials", "period", "INTEGER");
+  ensureColumn(database, "study_trials", "stimulus_id", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "artwork_evaluations", "immersion_score", "INTEGER");
   ensureColumn(database, "artwork_evaluations", "satisfaction_score", "INTEGER");
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_study_trials_session_period
+      ON study_trials(study_session_id, period)
+      WHERE study_session_id IS NOT NULL AND period IS NOT NULL;
+  `);
 
   return wrapSQLiteDatabase(database);
 }

@@ -14,6 +14,7 @@ import {
 } from "react";
 import {
   buildResearchDashboardDataset,
+  exportResearchStudySessionsCsv,
   exportResearchTrialsCsv,
   summarizeResearchTrials,
   type ResearchChoiceMetric,
@@ -21,6 +22,7 @@ import {
   type ResearchDashboardDataset,
   type ResearchDataIssue,
   type ResearchScoreMetric,
+  type ResearchStudySessionRecord,
   type ResearchTrialRecord,
 } from "@/lib/research-dashboard";
 import { buildResearchThumbnailUrl } from "@/lib/research-thumbnail";
@@ -66,8 +68,8 @@ const DATE_INPUT_FORMATTER = new Intl.DateTimeFormat("en-US", {
 });
 
 const CONDITION_LABELS: Record<ResearchCondition, string> = {
-  multi_agent: "路径 A · 音乐家共创",
-  single_agent: "路径 B · 单人引导",
+  multi_agent: "音乐家共同聆听",
+  single_agent: "单一共创引导",
   unknown: "未知条件",
 };
 
@@ -76,6 +78,16 @@ const STATUS_LABELS: Record<string, string> = {
   interacting: "交互中",
   generating: "生成中",
   evaluating: "评价中",
+  completed: "已完成",
+};
+
+const STUDY_SESSION_STATUS_LABELS: Record<string, string> = {
+  created: "等待体验 1",
+  period_1: "体验 1 进行中",
+  between_periods: "等待体验 2",
+  period_2: "体验 2 进行中",
+  comparing: "体验对比中",
+  baseline_review: "参照对比中",
   completed: "已完成",
 };
 
@@ -140,10 +152,27 @@ function choiceLabel(value: string | null | undefined): string {
   return "未采集";
 }
 
+function sessionChoiceLabel(value: unknown): string {
+  if (value === "period_1") return "体验 1";
+  if (value === "period_2") return "体验 2";
+  if (value === "tie") return "两者相近";
+  return "未采集";
+}
+
 function protocolLabel(value: string, currentProtocolVersion: string): string {
   if (value === currentProtocolVersion) return "当前实验版本";
   if (value === "v2-13-blind-comparison") return "历史版本 · 盲测流程";
   return `历史版本 · ${value}`;
+}
+
+function sequenceLabel(value: string): string {
+  const labels: Record<string, string> = {
+    single_x_then_multi_y: "单一引导 X → 音乐家共听 Y",
+    multi_x_then_single_y: "音乐家共听 X → 单一引导 Y",
+    single_y_then_multi_x: "单一引导 Y → 音乐家共听 X",
+    multi_y_then_single_x: "音乐家共听 Y → 单一引导 X",
+  };
+  return labels[value] || value || "未记录";
 }
 
 function meanScore(
@@ -298,8 +327,8 @@ function ConditionComparison({ trials }: { trials: ResearchTrialRecord[] }) {
         <thead className="bg-zinc-50 text-xs text-zinc-500">
           <tr>
             <th className="w-36 px-4 py-3 font-medium">评价维度</th>
-            <th className="px-4 py-3 font-medium">路径 A · 音乐家共创（n={multiCount}）</th>
-            <th className="px-4 py-3 font-medium">路径 B · 单人引导（n={singleCount}）</th>
+            <th className="px-4 py-3 font-medium">音乐家共同聆听（n={multiCount}）</th>
+            <th className="px-4 py-3 font-medium">单一共创引导（n={singleCount}）</th>
           </tr>
         </thead>
         <tbody>
@@ -690,10 +719,12 @@ function textValue(value: unknown): string {
 function OverviewView({
   trials,
   allTrials,
+  studySessions,
   currentProtocolVersion,
 }: {
   trials: ResearchTrialRecord[];
   allTrials: ResearchTrialRecord[];
+  studySessions: ResearchStudySessionRecord[];
   currentProtocolVersion: string;
 }) {
   const summary = useMemo(() => summarizeResearchTrials(trials), [trials]);
@@ -711,6 +742,10 @@ function OverviewView({
   );
   const errorTrials = allTrials.filter(
     (trial) => trial.issues.some((item) => item.severity === "error")
+  );
+  const completedSessions = studySessions.filter((session) => session.complete);
+  const sessionIssues = studySessions.filter((session) =>
+    session.issues.some((item) => item.severity === "error")
   );
 
   return (
@@ -733,6 +768,71 @@ function OverviewView({
           当前样本量较小，结果只用于观察趋势，不代表统计显著性。
         </div>
       </section>
+
+      {studySessions.length > 0 && (
+        <section>
+          <SectionTitle
+            title="组内配对实验进度"
+            description="一行代表一位参与者；两次体验必须都完成，才会进入配对分析。"
+          />
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <SummaryCard label="参与者" value={String(studySessions.length)} detail="已创建双体验会话" tone="zinc" />
+            <SummaryCard label="完整配对" value={String(completedSessions.length)} detail="两次体验与最终比较均完成" tone="teal" />
+            <SummaryCard label="需要检查" value={String(sessionIssues.length)} detail="存在缺失周期或比较记录" tone="rose" />
+          </div>
+          <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
+            <table className="w-full min-w-[1060px] text-left text-xs">
+              <thead className="bg-zinc-50 text-zinc-500">
+                <tr>
+                  <th className="px-3 py-3 font-medium">参与者</th>
+                  <th className="px-3 py-3 font-medium">分配序列</th>
+                  <th className="px-3 py-3 font-medium">体验 1</th>
+                  <th className="px-3 py-3 font-medium">体验 2</th>
+                  <th className="px-3 py-3 font-medium">最终偏好</th>
+                  <th className="px-3 py-3 font-medium">状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studySessions.map((session) => (
+                  <tr key={session.id} className="border-t border-zinc-100 text-zinc-700">
+                    <td className="px-3 py-3 font-mono text-[11px]" title={session.participantId}>
+                      {shortId(session.participantId)}
+                    </td>
+                    <td className="px-3 py-3">{sequenceLabel(session.sequence)}</td>
+                    {[session.firstTrial, session.secondTrial].map((trial, index) => (
+                      <td key={index} className="px-3 py-3">
+                        {trial ? (
+                          <>
+                            <p className="font-semibold text-zinc-900">{CONDITION_LABELS[trial.condition]}</p>
+                            <p className="mt-1 max-w-48 truncate text-[10px] text-zinc-500" title={trial.musicTitle}>
+                              {trial.musicTitle}
+                            </p>
+                            <p className={`mt-1 text-[10px] ${trial.questionnaireComplete ? "text-emerald-700" : "text-amber-700"}`}>
+                              {trial.questionnaireComplete ? "评价完整" : "评价未完成"}
+                            </p>
+                          </>
+                        ) : (
+                          <span className="text-zinc-400">尚未开始</span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-3 py-3">
+                      {session.comparison
+                        ? sessionChoiceLabel(session.comparison.overall_choice)
+                        : "未采集"}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={session.complete ? "text-emerald-700" : "text-amber-700"}>
+                        {STUDY_SESSION_STATUS_LABELS[session.status] || session.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section>
         <SectionTitle
@@ -867,9 +967,11 @@ function TrialsView({
 
 function QualityView({
   trials,
+  studySessions,
   onSelect,
 }: {
   trials: ResearchTrialRecord[];
+  studySessions: ResearchStudySessionRecord[];
   onSelect: (trial: ResearchTrialRecord) => void;
 }) {
   const allIssues = trials.flatMap((trial) => trial.issues);
@@ -910,6 +1012,41 @@ function QualityView({
           </div>
         )}
       </section>
+
+      {studySessions.some((session) => session.issues.length > 0) && (
+        <section>
+          <SectionTitle
+            title="配对实验异常"
+            description="参与者级问题，例如缺少其中一次体验或缺少最终体验对比。"
+          />
+          <div className="overflow-x-auto border-y border-zinc-200 bg-white">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="bg-zinc-50 text-xs text-zinc-500">
+                <tr>
+                  <th className="px-4 py-3 font-medium">参与者</th>
+                  <th className="px-4 py-3 font-medium">实验状态</th>
+                  <th className="px-4 py-3 font-medium">问题</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studySessions
+                  .filter((session) => session.issues.length > 0)
+                  .map((session) => (
+                    <tr key={session.id} className="border-t border-zinc-100">
+                      <td className="px-4 py-3 font-mono text-xs text-zinc-600">
+                        {shortId(session.participantId)}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-700">{session.status}</td>
+                      <td className="px-4 py-3 text-rose-700">
+                        {session.issues.map((item) => item.label).join("；")}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section>
         <SectionTitle title="异常记录" description={`${issues.length} 个真实异常，可按单次体验追溯。`} />
@@ -1005,6 +1142,18 @@ export default function ResearchDashboardClient({
       return true;
     });
   }, [dataset.trials, filters]);
+  const filteredTrialIds = useMemo(
+    () => new Set(filteredTrials.map((trial) => trial.id)),
+    [filteredTrials]
+  );
+  const filteredStudySessions = useMemo(
+    () => dataset.studySessions.filter((session) =>
+      [session.firstTrial, session.secondTrial].some(
+        (trial) => trial && filteredTrialIds.has(trial.id)
+      )
+    ),
+    [dataset.studySessions, filteredTrialIds]
+  );
 
   const replaceDataset = useCallback((next: ResearchDashboardDataset, sourceMessage: string) => {
     setDataset(next);
@@ -1046,6 +1195,24 @@ export default function ResearchDashboardClient({
       if (!response.ok || !result.dataset) {
         throw new Error(result.error || "无法同步线上研究数据");
       }
+      if (result.transport === "cache" && automatic) {
+        setMessage("线上同步暂时不可用，已保留当前本地数据。");
+        return;
+      }
+      const localCurrentCount = dataset.trials.filter(
+        (trial) => trial.protocolVersion === dataset.currentProtocolVersion
+      ).length;
+      const remoteCurrentCount = result.dataset.trials.filter(
+        (trial) => trial.protocolVersion === result.dataset?.currentProtocolVersion
+      ).length;
+      if (
+        result.transport === "cache" &&
+        localCurrentCount > 0 &&
+        remoteCurrentCount === 0
+      ) {
+        setMessage("线上同步暂时不可用，旧缓存未覆盖当前本地实验数据。");
+        return;
+      }
       const sourceMessage = result.transport === "cache"
         ? `线上暂时不可用，已载入最近缓存${result.warning ? `：${result.warning}` : ""}`
         : "线上数据已同步";
@@ -1055,7 +1222,7 @@ export default function ResearchDashboardClient({
     } finally {
       setLoading(false);
     }
-  }, [replaceDataset]);
+  }, [dataset.currentProtocolVersion, dataset.trials, replaceDataset]);
 
   useEffect(() => {
     if (!remoteSyncEnabled || autoSyncAttemptedRef.current) return;
@@ -1095,9 +1262,12 @@ export default function ResearchDashboardClient({
   };
 
   const exportCsv = () => {
+    const hasPairedSessions = filteredStudySessions.length > 0;
     downloadText(
-      exportResearchTrialsCsv(filteredTrials),
-      `melodyvision-research-${dataset.source.capturedAt.slice(0, 10)}.csv`,
+      hasPairedSessions
+        ? exportResearchStudySessionsCsv(filteredStudySessions)
+        : exportResearchTrialsCsv(filteredTrials),
+      `melodyvision-${hasPairedSessions ? "participants" : "trials"}-${dataset.source.capturedAt.slice(0, 10)}.csv`,
       "text/csv;charset=utf-8"
     );
   };
@@ -1142,7 +1312,7 @@ export default function ResearchDashboardClient({
               onClick={exportCsv}
               className="rounded bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
             >
-              导出筛选 CSV
+              {filteredStudySessions.length > 0 ? "导出参与者宽表" : "导出筛选 CSV"}
             </button>
             <input
               ref={fileInputRef}
@@ -1178,6 +1348,7 @@ export default function ResearchDashboardClient({
             截止 {formatDate(dataset.source.capturedAt, true)}
             <span className="mx-2 text-zinc-300">|</span>
             共 {dataset.trials.length} 次体验
+            {dataset.studySessions.length > 0 && <> · {dataset.studySessions.length} 位参与者</>}
           </p>
           <p>{isDragging ? "松开即可载入 JSON 快照" : message || "可将实验导出 JSON 拖到此处"}</p>
         </div>
@@ -1236,8 +1407,8 @@ export default function ResearchDashboardClient({
                 className="h-9 w-full rounded border border-zinc-300 bg-white px-2 text-sm"
               >
                 <option value="all">全部体验路径</option>
-                <option value="multi_agent">路径 A · 音乐家共创</option>
-                <option value="single_agent">路径 B · 单人引导</option>
+                <option value="multi_agent">音乐家共同聆听</option>
+                <option value="single_agent">单一共创引导</option>
                 <option value="unknown">未知</option>
               </select>
             </FilterField>
@@ -1323,11 +1494,18 @@ export default function ResearchDashboardClient({
             <OverviewView
               trials={filteredTrials}
               allTrials={dataset.trials}
+              studySessions={filteredStudySessions}
               currentProtocolVersion={dataset.currentProtocolVersion}
             />
           )}
           {view === "trials" && <TrialsView trials={filteredTrials} onSelect={setSelectedTrial} />}
-          {view === "quality" && <QualityView trials={filteredTrials} onSelect={setSelectedTrial} />}
+          {view === "quality" && (
+            <QualityView
+              trials={filteredTrials}
+              studySessions={filteredStudySessions}
+              onSelect={setSelectedTrial}
+            />
+          )}
         </div>
       </div>
 

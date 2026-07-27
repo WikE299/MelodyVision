@@ -70,6 +70,19 @@ export function allSelectedMusiciansContributed(state: ConversationState): boole
   );
 }
 
+export function canConvergeFromUserEvidence(
+  state: ConversationState,
+  visualBriefReady: boolean
+): boolean {
+  return (
+    state.condition === "multi_agent" &&
+    visualBriefReady &&
+    state.turnPolicy.userMayGenerateEarly &&
+    state.completedUserRounds >= 2 &&
+    allSelectedMusiciansContributed(state)
+  );
+}
+
 function conversationParticipants(input: CreateConversationStateInput) {
   const condition = input.condition || "multi_agent";
   const selectedMusicianIds = assertSelectedMusicians(input.selectedMusicianIds);
