@@ -12,6 +12,9 @@ import {
 } from "@/lib/characters";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 import { recordExperimentEvent } from "@/lib/experiment-events";
+import { startConversationSession } from "@/lib/conversation-client";
+import { saveStudySessionMusicians } from "@/lib/experiment-study-client";
+import type { StudyTrial } from "@/lib/contracts";
 
 const DEFAULT_COMBO = ["boya", "beethoven", "abing", "armstrong"];
 const MAX_SELECTION = 4;
@@ -103,7 +106,7 @@ function CharacterFigure({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`group relative flex h-[clamp(328px,45vh,430px)] w-[clamp(88px,8.6vw,144px)] shrink-0 flex-col items-center justify-end transition duration-300 ${
+      className={`group relative flex h-[clamp(328px,45vh,430px)] w-[clamp(88px,8.6vw,144px)] shrink-0 snap-center flex-col items-center justify-end transition duration-300 ${
         disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"
       }`}
       aria-pressed={selected}
@@ -213,7 +216,17 @@ export default function SelectPage() {
       const condition = sessionStorage.getItem("interactiveCondition") === "single_agent"
         ? "single_agent"
         : "multi_agent";
+      const studyTrial = JSON.parse(
+        sessionStorage.getItem("studyTrial") || "null"
+      ) as StudyTrial | null;
       sessionStorage.setItem("experimentSessionId", sessionId);
+      if (studyTrial?.studySessionId) {
+        const studyPayload = await saveStudySessionMusicians(
+          studyTrial.studySessionId,
+          selected
+        );
+        sessionStorage.setItem("studySession", JSON.stringify(studyPayload.session));
+      }
       recordExperimentEvent("musicians-selected", "/select", {
         musicianIds: selected,
         count: selected.length,
@@ -221,20 +234,13 @@ export default function SelectPage() {
         condition,
       });
 
-      const conversationResponse = await fetch("/api/conversation/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          trialId,
-          musicProfileId,
-          condition,
-          selectedMusicianIds: selected,
-          preparedSummaries: {},
-        }),
+      const conversation = await startConversationSession({
+        sessionId,
+        trialId,
+        musicProfileId,
+        condition,
+        selectedMusicianIds: selected,
       });
-      if (!conversationResponse.ok) throw new Error("Conversation initialization failed");
-      const conversation = await conversationResponse.json();
       sessionStorage.setItem("conversationState", JSON.stringify(conversation.state));
       sessionStorage.setItem("facilitatorPlan", JSON.stringify(conversation.facilitatorPlan));
       router.push("/listen");
@@ -299,8 +305,8 @@ export default function SelectPage() {
               )}
             </div>
 
-            <div className="relative -mt-2 flex min-h-0 flex-1 translate-y-[-90px] items-end justify-center 2xl:translate-y-[-98px]">
-              <div className="flex w-full max-w-[min(1450px,calc(100vw-72px))] items-end justify-between gap-0.5 2xl:gap-1">
+            <div className="relative -mt-2 flex min-h-0 flex-1 translate-y-[-90px] snap-x items-end justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:justify-center 2xl:translate-y-[-98px]">
+              <div className="flex w-max min-w-max items-end justify-start gap-1 px-3 lg:w-full lg:min-w-0 lg:max-w-[min(1450px,calc(100vw-72px))] lg:justify-between lg:gap-0.5 lg:px-0 2xl:gap-1">
                 {guides.map((character) => (
                   <CharacterFigure
                     key={character.id}
@@ -315,21 +321,23 @@ export default function SelectPage() {
             </div>
           </div>
 
-          <div className="relative z-20 flex items-center justify-center px-4 pb-3 2xl:px-8 2xl:pb-5">
-            <div className="grid w-full max-w-[min(1370px,calc(100vw-128px))] grid-cols-[minmax(0,1.45fr)_minmax(120px,0.55fr)_minmax(160px,0.65fr)] items-center gap-2 rounded-[22px] border border-[#d7b18a]/42 bg-[#d7c0aa]/72 px-5 py-3 text-[#302536] shadow-[0_18px_55px_rgba(0,0,0,0.26)] backdrop-blur xl:grid-cols-[minmax(520px,1.25fr)_minmax(170px,0.75fr)_minmax(220px,280px)] xl:gap-3 2xl:grid-cols-[1.15fr_1.18fr_320px] 2xl:gap-6 2xl:rounded-[28px] 2xl:px-8 2xl:py-4">
-              <div className="flex min-w-0 items-center gap-3 2xl:gap-6">
+          <div className="relative z-20 flex items-center justify-center px-3 pb-3 lg:px-4 2xl:px-8 2xl:pb-5">
+            <div className="grid w-full grid-cols-[minmax(0,1fr)_130px] items-center gap-2 rounded-[22px] border border-[#d7b18a]/42 bg-[#d7c0aa]/72 px-3 py-2.5 text-[#302536] shadow-[0_18px_55px_rgba(0,0,0,0.26)] backdrop-blur lg:max-w-[min(1370px,calc(100vw-128px))] lg:grid-cols-[minmax(0,1.45fr)_minmax(120px,0.55fr)_minmax(160px,0.65fr)] lg:px-5 lg:py-3 xl:grid-cols-[minmax(520px,1.25fr)_minmax(170px,0.75fr)_minmax(220px,280px)] xl:gap-3 2xl:grid-cols-[1.15fr_1.18fr_320px] 2xl:gap-6 2xl:rounded-[28px] 2xl:px-8 2xl:py-4">
+              <div className="flex min-w-0 items-center gap-1.5 lg:gap-3 2xl:gap-6">
                 <div>
-                  <p className="whitespace-nowrap text-xl font-semibold 2xl:text-2xl">{copy.selected} {selected.length} / {MAX_SELECTION}</p>
-                  <p className="mt-0.5 text-xs text-[#5f5361] 2xl:mt-1 2xl:text-sm">{copy.maxSelected}</p>
+                  <p className="whitespace-nowrap text-base font-semibold lg:text-xl 2xl:text-2xl">{copy.selected} {selected.length} / {MAX_SELECTION}</p>
+                  <p className="mt-0.5 hidden text-xs text-[#5f5361] lg:block 2xl:mt-1 2xl:text-sm">{copy.maxSelected}</p>
                 </div>
                 <button
                   type="button"
                   onClick={clearSelection}
                   disabled={selected.length === 0 || generating}
-                  className="flex items-center gap-2 whitespace-nowrap border-l border-[#9e8976]/50 pl-4 text-base transition hover:text-[#7b4c20] disabled:cursor-not-allowed disabled:opacity-45 2xl:gap-3 2xl:pl-7 2xl:text-lg"
+                  className="flex items-center gap-2 whitespace-nowrap border-l border-[#9e8976]/50 pl-2 text-base transition hover:text-[#7b4c20] disabled:cursor-not-allowed disabled:opacity-45 lg:pl-4 2xl:gap-3 2xl:pl-7 2xl:text-lg"
+                  aria-label={copy.clear}
+                  title={copy.clear}
                 >
                   <span className="text-2xl 2xl:text-3xl">↻</span>
-                  {copy.clear}
+                  <span className="hidden lg:inline">{copy.clear}</span>
                 </button>
                 <div className="flex min-w-0 items-center gap-2 border-l border-[#9e8976]/50 pl-3 2xl:gap-3 2xl:pl-6">
                   <button
@@ -337,9 +345,11 @@ export default function SelectPage() {
                     onClick={applyDefaultCombo}
                     disabled={generating}
                     className="flex items-center gap-2 whitespace-nowrap text-base transition hover:text-[#7b4c20] disabled:cursor-not-allowed disabled:opacity-45 2xl:gap-3 2xl:text-lg"
+                    aria-label={copy.defaultCombo}
+                    title={copy.defaultCombo}
                   >
                     <span className="text-2xl 2xl:text-3xl">☆</span>
-                    {copy.defaultCombo}
+                    <span className="hidden lg:inline">{copy.defaultCombo}</span>
                   </button>
                   <span className="hidden max-w-[clamp(148px,16vw,240px)] truncate whitespace-nowrap text-xs text-[#6b5b59] xl:block 2xl:max-w-none 2xl:text-sm">
                     {copy.defaultNames}
@@ -347,7 +357,7 @@ export default function SelectPage() {
                 </div>
               </div>
 
-              <div className="flex min-h-[62px] items-center justify-center gap-3 2xl:min-h-[88px] 2xl:gap-4">
+              <div className="hidden min-h-[62px] items-center justify-center gap-3 lg:flex 2xl:min-h-[88px] 2xl:gap-4">
                 {selectedCharacters.length === 0 ? (
                   <p className="text-base text-[#6d6170]">{copy.empty}</p>
                 ) : (
@@ -383,7 +393,7 @@ export default function SelectPage() {
                   type="button"
                   onClick={handleContinue}
                   disabled={selected.length === 0 || generating}
-                  className={`flex h-14 items-center justify-between rounded-2xl border px-5 text-base font-semibold transition 2xl:h-20 2xl:px-8 2xl:text-xl ${
+                  className={`flex h-12 items-center justify-between rounded-2xl border px-3 text-sm font-semibold transition lg:h-14 lg:px-5 lg:text-base 2xl:h-20 2xl:px-8 2xl:text-xl ${
                     selected.length > 0 && !generating
                       ? "border-[#f9c979] bg-[#2c2435] text-[#ffe4b7] shadow-[0_0_28px_rgba(255,188,92,0.5)] hover:bg-[#362b3f]"
                       : "border-[#bba28b] bg-[#8c7d73]/42 text-[#756a68] cursor-not-allowed"
@@ -392,7 +402,7 @@ export default function SelectPage() {
                   <span>{generating ? copy.entering : copy.enter}</span>
                   <span className="text-2xl 2xl:text-3xl">→</span>
                 </button>
-                <p className="text-center text-xs text-[#6a5b5a]">{copy.helper}</p>
+                <p className="hidden text-center text-xs text-[#6a5b5a] lg:block">{copy.helper}</p>
               </div>
             </div>
           </div>

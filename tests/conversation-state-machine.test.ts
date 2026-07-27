@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canConvergeFromUserEvidence,
   continueReflectiveListening,
   createConversationState,
   recordMusicianMessage,
@@ -338,6 +339,34 @@ test("multi-agent conversations may generate early only after two user rounds", 
   const ready = requestGeneration(state, runtime);
   assert.equal(ready.status, "ready-to-generate");
   assert.equal(ready.completedUserRounds, 2);
+});
+
+test("multi-agent conversations converge after two user rounds when the visual brief is ready", () => {
+  const runtime = testRuntime();
+  let state = createConversationState({
+    sessionId: "session-converged",
+    musicProfileId: "music-converged",
+    selectedMusicianIds: ["boya", "beethoven"],
+    turnPolicy: { userMayGenerateEarly: true },
+  }, runtime);
+
+  state = scheduleMusicianTurn(state, {
+    ...createDeterministicFacilitatorPlan({ state, musicianNames }),
+    speakerOrder: ["boya", "beethoven"],
+  }, runtime);
+  state = recordMusicianMessage(state, { speakerId: "boya", content: "第一位回应。" }, runtime);
+  state = recordMusicianMessage(state, { speakerId: "beethoven", content: "第二位回应。" }, runtime);
+  state = recordUserMessage(state, "第一轮用户表达。", runtime);
+  state = scheduleMusicianTurn(state, {
+    ...createDeterministicFacilitatorPlan({ state, musicianNames }),
+    speakerOrder: ["boya"],
+  }, runtime);
+  state = recordMusicianMessage(state, { speakerId: "boya", content: "收束回应。" }, runtime);
+  state = recordUserMessage(state, "第二轮用户补充。", runtime);
+
+  assert.equal(canConvergeFromUserEvidence(state, false), false);
+  assert.equal(canConvergeFromUserEvidence(state, true), true);
+  assert.equal(requestGeneration(state, runtime).status, "ready-to-generate");
 });
 
 test("reflective listening records independent comments with at most two user notes", () => {

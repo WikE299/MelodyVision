@@ -6,6 +6,9 @@ export interface RawExperimentExport {
   schemaVersion: number;
   exportedAt: string;
   sessions: RawRecord[];
+  studySessions: RawRecord[];
+  studyAssignmentBlocks: RawRecord[];
+  sessionComparisons: RawRecord[];
   audioAnalyses: RawRecord[];
   conversationSnapshots: RawRecord[];
   visualBriefVersions: RawRecord[];
@@ -95,6 +98,9 @@ export interface ResearchTrialRecord {
   id: string;
   participantId: string;
   sessionId: string;
+  studySessionId: string;
+  period: number | null;
+  stimulusId: string;
   condition: ResearchCondition;
   assignmentMethod: string;
   protocolVersion: string;
@@ -131,6 +137,23 @@ export interface ResearchTrialRecord {
   issues: ResearchDataIssue[];
 }
 
+export interface ResearchStudySessionRecord {
+  id: string;
+  participantId: string;
+  protocolVersion: string;
+  sequence: string;
+  status: string;
+  currentPeriod: number;
+  selectedMusicianIds: string[];
+  createdAt: string;
+  completedAt: string;
+  firstTrial: ResearchTrialRecord | null;
+  secondTrial: ResearchTrialRecord | null;
+  comparison: RawRecord | null;
+  complete: boolean;
+  issues: ResearchDataIssue[];
+}
+
 export interface ResearchDashboardDataset {
   source: {
     kind: "database" | "snapshot" | "remote";
@@ -141,6 +164,7 @@ export interface ResearchDashboardDataset {
   protocols: string[];
   summary: ResearchSummary;
   trials: ResearchTrialRecord[];
+  studySessions: ResearchStudySessionRecord[];
   dataQualityIssues: ResearchDataIssue[];
 }
 
@@ -475,6 +499,9 @@ function buildTrial(
     id: trialId,
     participantId: text(trial.participant_id),
     sessionId,
+    studySessionId: text(trial.study_session_id),
+    period: numberOrNull(trial.period),
+    stimulusId: text(trial.stimulus_id),
     condition: condition(trial.condition),
     assignmentMethod: text(trial.assignment_method),
     protocolVersion,
@@ -520,6 +547,9 @@ export function parseExperimentExport(value: unknown): RawExperimentExport {
     schemaVersion,
     exportedAt: text(value.exportedAt) || new Date().toISOString(),
     sessions: rows(value.sessions),
+    studySessions: rows(value.studySessions),
+    studyAssignmentBlocks: rows(value.studyAssignmentBlocks),
+    sessionComparisons: rows(value.sessionComparisons),
     audioAnalyses: rows(value.audioAnalyses),
     conversationSnapshots: rows(value.conversationSnapshots),
     visualBriefVersions: rows(value.visualBriefVersions),
@@ -544,6 +574,49 @@ export function buildResearchDashboardDataset(
     .map((trial) => buildTrial(trial, data))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const dataQualityIssues = trials.flatMap((trial) => trial.issues);
+  const studySessions = data.studySessions
+    .map<ResearchStudySessionRecord>((session) => {
+      const id = text(session.id);
+      const pairedTrials = trials.filter((trial) => trial.studySessionId === id);
+      const firstTrial = pairedTrials.find((trial) => trial.period === 1) || null;
+      const secondTrial = pairedTrials.find((trial) => trial.period === 2) || null;
+      const comparison = data.sessionComparisons.find(
+        (item) => text(item.study_session_id) === id
+      ) || null;
+      const issues: ResearchDataIssue[] = [];
+      if (!firstTrial) {
+        issues.push(issue(id, "missing_period_1", "缺少第一次体验 Trial", "error"));
+      }
+      if (!secondTrial && ["period_2", "comparing", "baseline_review", "completed"].includes(text(session.status))) {
+        issues.push(issue(id, "missing_period_2", "缺少第二次体验 Trial", "error"));
+      }
+      if (text(session.status) === "completed" && !comparison) {
+        issues.push(issue(id, "missing_session_comparison", "实验已完成但缺少体验对比", "error"));
+      }
+      return {
+        id,
+        participantId: text(session.participant_id),
+        protocolVersion: text(session.protocol_version),
+        sequence: text(session.sequence),
+        status: text(session.status),
+        currentPeriod: numberOrNull(session.current_period) || 1,
+        selectedMusicianIds: Array.isArray(session.selected_musician_ids)
+          ? session.selected_musician_ids.filter((value): value is string => typeof value === "string")
+          : [],
+        createdAt: text(session.created_at),
+        completedAt: text(session.completed_at),
+        firstTrial,
+        secondTrial,
+        comparison,
+        complete: text(session.status) === "completed"
+          && Boolean(firstTrial?.questionnaireComplete)
+          && Boolean(secondTrial?.questionnaireComplete)
+          && Boolean(comparison),
+        issues,
+      };
+    })
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  dataQualityIssues.push(...studySessions.flatMap((session) => session.issues));
   const protocols = [...new Set(trials.map((trial) => trial.protocolVersion))].sort();
   const defaultTrials = trials.filter(
     (trial) => trial.protocolVersion === CURRENT_STUDY_PROTOCOL_VERSION
@@ -558,6 +631,7 @@ export function buildResearchDashboardDataset(
     protocols,
     summary: summarizeResearchTrials(defaultTrials),
     trials,
+    studySessions,
     dataQualityIssues,
   };
 }
@@ -573,6 +647,9 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
     "trial_id",
     "participant_id",
     "session_id",
+    "study_session_id",
+    "period",
+    "stimulus_id",
     "condition",
     "assignment_method",
     "protocol_version",
@@ -601,6 +678,9 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
       trial_id: trial.id,
       participant_id: trial.participantId,
       session_id: trial.sessionId,
+      study_session_id: trial.studySessionId,
+      period: trial.period,
+      stimulus_id: trial.stimulusId,
       condition: trial.condition,
       assignment_method: trial.assignmentMethod,
       protocol_version: trial.protocolVersion,
@@ -630,5 +710,92 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
     }
     return headers.map((header) => csvValue(values[header])).join(",");
   });
+  return `\uFEFF${headers.join(",")}\n${lines.join("\n")}\n`;
+}
+
+export function exportResearchStudySessionsCsv(
+  sessions: ResearchStudySessionRecord[]
+): string {
+  const headers = [
+    "study_session_id",
+    "participant_id",
+    "protocol_version",
+    "sequence",
+    "status",
+    "created_at",
+    "completed_at",
+    "period_1_trial_id",
+    "period_1_condition",
+    "period_1_stimulus_id",
+    "period_1_music_title",
+    "period_1_questionnaire_complete",
+    "period_1_co_created_total_ms",
+    "period_1_baseline_total_ms",
+    ...ARTWORK_SCORE_FIELDS.map(([field]) => `period_1_${field}`),
+    ...MANIPULATION_SCORE_FIELDS.map(([field]) => `period_1_${field}`),
+    "period_2_trial_id",
+    "period_2_condition",
+    "period_2_stimulus_id",
+    "period_2_music_title",
+    "period_2_questionnaire_complete",
+    "period_2_co_created_total_ms",
+    "period_2_baseline_total_ms",
+    ...ARTWORK_SCORE_FIELDS.map(([field]) => `period_2_${field}`),
+    ...MANIPULATION_SCORE_FIELDS.map(([field]) => `period_2_${field}`),
+    "expression_support_choice",
+    "immersion_choice",
+    "creative_freedom_choice",
+    "overall_choice",
+    "comparison_reason",
+    "session_complete",
+    "issue_codes",
+  ];
+
+  const trialValues = (
+    values: Record<string, unknown>,
+    prefix: "period_1" | "period_2",
+    trial: ResearchTrialRecord | null
+  ) => {
+    values[`${prefix}_trial_id`] = trial?.id;
+    values[`${prefix}_condition`] = trial?.condition;
+    values[`${prefix}_stimulus_id`] = trial?.stimulusId;
+    values[`${prefix}_music_title`] = trial?.musicTitle;
+    values[`${prefix}_questionnaire_complete`] = trial?.questionnaireComplete;
+    values[`${prefix}_co_created_total_ms`] = trial?.coCreatedRun?.totalMs;
+    values[`${prefix}_baseline_total_ms`] = trial?.baselineRun?.totalMs;
+    for (const [field] of ARTWORK_SCORE_FIELDS) {
+      values[`${prefix}_${field}`] = trial?.artworkEvaluation?.[field];
+    }
+    for (const [field] of MANIPULATION_SCORE_FIELDS) {
+      values[`${prefix}_${field}`] = trial?.manipulationCheck?.[field];
+    }
+  };
+
+  const lines = sessions.map((session) => {
+    const values: Record<string, unknown> = {
+      study_session_id: session.id,
+      participant_id: session.participantId,
+      protocol_version: session.protocolVersion,
+      sequence: session.sequence,
+      status: session.status,
+      created_at: session.createdAt,
+      completed_at: session.completedAt,
+      expression_support_choice: session.comparison?.expression_support_choice,
+      immersion_choice: session.comparison?.immersion_choice,
+      creative_freedom_choice: session.comparison?.creative_freedom_choice,
+      overall_choice: session.comparison?.overall_choice,
+      comparison_reason: session.comparison?.reason,
+      session_complete: session.complete,
+      issue_codes: [
+        ...session.issues,
+        ...(session.firstTrial?.issues || []),
+        ...(session.secondTrial?.issues || []),
+      ].map((item) => item.code).join("|"),
+    };
+    trialValues(values, "period_1", session.firstTrial);
+    trialValues(values, "period_2", session.secondTrial);
+    return headers.map((header) => csvValue(values[header])).join(",");
+  });
+
   return `\uFEFF${headers.join(",")}\n${lines.join("\n")}\n`;
 }

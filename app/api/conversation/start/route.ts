@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
       turnPolicy: {
         maxUserRounds: condition === "multi_agent" ? 4 : 2,
         userMayInterrupt: condition !== "multi_agent",
-        userMayGenerateEarly: false,
+        userMayGenerateEarly: condition === "multi_agent",
       },
       ...(condition === "single_agent" ? { guideId: SINGLE_GUIDE_ID } : {}),
     });

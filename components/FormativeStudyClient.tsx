@@ -2,7 +2,8 @@ import Image from "next/image";
 import styles from "./FormativeStudyClient.module.css";
 
 import {
-  EXPERT_DISCUSSION_QUESTIONS,
+  ARTICULATION_STEPS,
+  FORMATIVE_DISCUSSION_QUESTIONS,
   IMAGINATION_EXAMPLES,
   MUSICIAN_PERSPECTIVES,
   RESONANCE_CASES,
@@ -11,8 +12,8 @@ import {
 const CONCEPT_STEPS = [
   ["01", "听见音乐", "旋律、节奏、音色进入身体"],
   ["02", "出现画面", "一个地点、人物、动作或光线"],
-  ["03", "共同聆听", "音乐家用不同视角帮助追问"],
-  ["04", "逐渐说清", "用户保留、修改或拒绝解释"],
+  ["03", "尝试描述", "把短暂而模糊的意象说出来"],
+  ["04", "拆解元素", "辨认主体、空间、光色与动作"],
   ["05", "成为图像", "画面被具象化，但仍属于用户"],
 ] as const;
 
@@ -23,13 +24,14 @@ export default function FormativeStudyClient() {
     <main id="top" className={styles.page}>
       <nav className={styles.navigation} aria-label="页面导航">
         <a className={styles.brand} href="#top">
-          <span>MV</span>
-          <b>MelodyVision</b>
+          <span>共</span>
+          <b>共鸣</b>
         </a>
         <div className={styles.navLinks}>
           <a href="#origin">研究初衷</a>
           <a href="#listen">聆听体验</a>
           <a href="#cases">真实案例</a>
+          <a href="#gap">表达断点</a>
           <a href="#ensemble">多音乐家</a>
           <a href="#questions">讨论问题</a>
         </div>
@@ -45,7 +47,7 @@ export default function FormativeStudyClient() {
           sizes="100vw"
         />
         <div className={styles.heroCopy}>
-          <span>MelodyVision · Resonance</span>
+          <span>Formative Study · Resonance</span>
           <h1 id="hero-title">共鸣</h1>
           <p>听见一首音乐时，<br />你脑海里出现了什么？</p>
           <a href="#origin">从这个问题开始</a>
@@ -64,8 +66,8 @@ export default function FormativeStudyClient() {
             也可能只是颜色、材质和运动。这个画面往往私人、短暂、难以描述，却是音乐体验中非常真实的一部分。
           </p>
           <p>
-            MelodyVision 想做的不是替用户解释音乐，也不是把音高机械地换成颜色。
-            它希望邀请多位音乐家与用户一起聆听，通过不同的追问，帮助用户辨认并具象化自己已经感受到的画面。
+            这项形成性研究想了解：人是否愿意把这样的内在画面表达出来；当画面难以说清时，
+            怎样的聆听、追问与共同理解，能够帮助它逐渐变得具体，同时不覆盖原本的个人感受。
           </p>
         </div>
         <div className={styles.conceptPath} aria-label="从音乐到用户画面的概念路径">
@@ -171,15 +173,49 @@ export default function FormativeStudyClient() {
         </div>
       </section>
 
+      <section id="gap" className={styles.articulation}>
+        <div className={styles.sectionHeading}>
+          <span>04 · 表达的断点</span>
+          <h2>脑海里“有画面”，不等于能够把它完整说出来。</h2>
+        </div>
+        <p className={styles.articulationLead}>
+          内在意象常常先以气氛、方向或一个瞬间整体出现。真正困难的部分，是把这个整体转换成主体、
+          场景、构图、光色、材质、动作与叙事等可以被描绘的决定。
+        </p>
+        <div className={styles.articulationFlow}>
+          {ARTICULATION_STEPS.map((step, index) => (
+            <article key={step.id}>
+              <span>0{index + 1} · {step.stage}</span>
+              <strong>{step.example}</strong>
+              <p>{step.insight}</p>
+            </article>
+          ))}
+        </div>
+        <div className={styles.bridge}>
+          <div>
+            <span>单一视角的限制</span>
+            <p>一个人或一种分析方式，往往只抓住节奏、情绪、文化联想或场景中的一部分，也可能过早把模糊感受固定成一个答案。</p>
+          </div>
+          <strong aria-hidden="true">→</strong>
+          <div>
+            <span>需要被验证的帮助方式</span>
+            <p>让几位音乐家从互补角度分别追问同一段音乐，再由聆听者比较、保留、修改或拒绝，是否能更完整地说清自己的画面？</p>
+          </div>
+        </div>
+        <p className={styles.bridgeConclusion}>
+          因此，多位音乐家不是为了增加“权威意见”，而是为了覆盖一幅画面所需要的不同线索。
+        </p>
+      </section>
+
       <section id="ensemble" className={styles.ensemble}>
         <div className={styles.ensembleIntro}>
           <div className={styles.sectionHeading}>
-            <span>04 · 为什么引入多音乐家</span>
-            <h2>不是让专家替用户决定，而是让不同的耳朵帮助用户继续想象。</h2>
+            <span>05 · 为什么需要多位音乐家</span>
+            <h2>一位聆听者很难同时听见结构、触感、语境与故事。</h2>
           </div>
           <p>
-            单一模型很容易迅速给出一个看似完整的答案。多位音乐家的意义，是把聆听拆成几种互补的追问，
-            让用户有机会发现、修正或拒绝解释。画面的主导权始终留在用户手里。
+            多位音乐家的价值不在于人数，而在于分工：他们从同一段声音中找出不同证据，
+            帮助聆听者把模糊感受拆成可以判断的画面线索。最终采用哪些线索，仍由聆听者决定。
           </p>
         </div>
         <div className={styles.userVoice}>
@@ -205,11 +241,11 @@ export default function FormativeStudyClient() {
 
       <section id="questions" className={styles.questions}>
         <div className={styles.sectionHeading}>
-          <span>05 · 希望与专家讨论</span>
+          <span>06 · 希望一起讨论</span>
           <h2>真正需要验证的，是这些问题。</h2>
         </div>
         <ol>
-          {EXPERT_DISCUSSION_QUESTIONS.map((question, index) => (
+          {FORMATIVE_DISCUSSION_QUESTIONS.map((question, index) => (
             <li key={question}>
               <span>{String(index + 1).padStart(2, "0")}</span>
               <p>{question}</p>
@@ -219,7 +255,7 @@ export default function FormativeStudyClient() {
       </section>
 
       <section className={styles.closing}>
-        <span>MelodyVision</span>
+        <span>形成性研究材料</span>
         <h2>让音乐引发的画面，不再只停留在一个人的脑海里。</h2>
         <p>
           这项研究关注的不是“AI 能不能画得更漂亮”，而是人能否在共同聆听中更好地理解、表达并保有自己的音乐想象。
@@ -227,7 +263,7 @@ export default function FormativeStudyClient() {
       </section>
 
       <footer className={styles.footer}>
-        <span>MelodyVision · Resonance Concept Material</span>
+        <span>共鸣 · Formative Study Material</span>
         <div>
           {RESONANCE_CASES.map((item) => (
             <a key={item.id} href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceLabel}</a>

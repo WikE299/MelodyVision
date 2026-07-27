@@ -180,6 +180,7 @@
 .origin,
 .imaginations,
 .cases,
+.articulation,
 .questions {
   padding: 104px max(34px, calc((100% - 1280px) / 2));
 }
@@ -544,6 +545,108 @@
   text-decoration: none;
 }
 
+.articulation {
+  scroll-margin-top: 64px;
+  background: var(--paper);
+}
+
+.articulationLead {
+  max-width: 780px;
+  margin: 52px 0 54px auto;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 2;
+}
+
+.articulationFlow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+
+.articulationFlow article {
+  position: relative;
+  min-height: 250px;
+  padding: 28px 26px;
+  border-right: 1px solid var(--line);
+}
+
+.articulationFlow article:last-child {
+  border-right: 0;
+  background: var(--cool);
+}
+
+.articulationFlow article:not(:last-child)::after {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: -8px;
+  width: 15px;
+  height: 15px;
+  border-top: 1px solid #9da9a6;
+  border-right: 1px solid #9da9a6;
+  background: var(--paper);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.articulationFlow article > span,
+.bridge span {
+  color: var(--red);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.articulationFlow strong {
+  display: block;
+  margin: 28px 0 20px;
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 23px;
+  line-height: 1.55;
+}
+
+.articulationFlow p,
+.bridge p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.bridge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+  margin-top: 46px;
+  padding: 30px;
+  border: 1px solid var(--ink);
+}
+
+.bridge > strong {
+  color: var(--red);
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 34px;
+  text-align: center;
+}
+
+.bridge p {
+  margin-top: 11px;
+  color: var(--ink-soft);
+}
+
+.bridgeConclusion {
+  max-width: 820px;
+  margin: 42px 0 0 auto;
+  color: var(--red);
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
 .ensemble {
   scroll-margin-top: 64px;
   padding: 104px max(34px, calc((100% - 1280px) / 2));
@@ -903,6 +1006,7 @@
   .origin,
   .imaginations,
   .cases,
+  .articulation,
   .questions,
   .ensemble,
   .listening {
@@ -997,6 +1101,51 @@
 
   .caseCopy h3 {
     font-size: 22px;
+  }
+
+  .articulationLead {
+    margin: 36px 0 40px;
+  }
+
+  .articulationFlow {
+    grid-template-columns: 1fr;
+  }
+
+  .articulationFlow article {
+    min-height: 0;
+    padding: 24px 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .articulationFlow article:last-child {
+    border-bottom: 0;
+  }
+
+  .articulationFlow article:not(:last-child)::after {
+    display: none;
+  }
+
+  .articulationFlow strong {
+    margin: 18px 0 13px;
+    font-size: 21px;
+  }
+
+  .bridge {
+    display: block;
+    margin-top: 34px;
+    padding: 24px 20px;
+  }
+
+  .bridge > strong {
+    display: block;
+    margin: 20px 0;
+    transform: rotate(90deg);
+  }
+
+  .bridgeConclusion {
+    margin-top: 32px;
+    font-size: 23px;
   }
 
   .userVoice {

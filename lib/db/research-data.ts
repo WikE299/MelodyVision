@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ConversationState, VisualBrief } from "../contracts";
-import { getDatabase, toJson } from "./index";
+import { getDatabase, toJson } from "./index.ts";
 
 export async function upsertExperimentSession(input: {
   id: string;
@@ -71,6 +71,78 @@ export async function attachAudioAnalysisToTrial(input: {
   await database.prepare("UPDATE audio_analyses SET trial_id = ? WHERE id = ?")
     .run(input.trialId, match.id);
   return true;
+}
+
+export async function getAudioAnalysisForTrial(trialId: string): Promise<{
+  musicProfile: unknown;
+  compatibilityAnalysis: unknown;
+} | null> {
+  const database = await getDatabase();
+  const row = (await database.prepare(`
+    SELECT music_profile_json, compatibility_analysis_json
+    FROM audio_analyses
+    WHERE trial_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).all(trialId))[0];
+  if (!row) return null;
+
+  const parse = (value: unknown) => {
+    if (typeof value !== "string") return value ?? null;
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      return null;
+    }
+  };
+
+  return {
+    musicProfile: parse(row.music_profile_json),
+    compatibilityAnalysis: parse(row.compatibility_analysis_json),
+  };
+}
+
+export async function getConversationRecoveryForTrial(trialId: string): Promise<{
+  state: ConversationState;
+  visualBrief: VisualBrief | null;
+} | null> {
+  const database = await getDatabase();
+  const [snapshotRows, briefRows] = await Promise.all([
+    database.prepare(`
+      SELECT state_json
+      FROM conversation_snapshots
+      WHERE trial_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).all(trialId),
+    database.prepare(`
+      SELECT brief_json
+      FROM visual_brief_versions
+      WHERE trial_id = ?
+      ORDER BY version DESC, created_at DESC
+      LIMIT 1
+    `).all(trialId),
+  ]);
+  const snapshot = snapshotRows[0];
+  if (!snapshot) return null;
+
+  const parse = (value: unknown): unknown => {
+    if (typeof value !== "string") return value ?? null;
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      return null;
+    }
+  };
+  const state = parse(snapshot.state_json);
+  if (!state || typeof state !== "object" || Array.isArray(state)) return null;
+  const visualBrief = parse(briefRows[0]?.brief_json);
+  return {
+    state: state as ConversationState,
+    visualBrief: visualBrief && typeof visualBrief === "object" && !Array.isArray(visualBrief)
+      ? visualBrief as VisualBrief
+      : null,
+  };
 }
 
 export async function insertConversationSnapshot(

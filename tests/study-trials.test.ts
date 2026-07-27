@@ -152,7 +152,7 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
     const exported = await exports.exportExperimentJson();
     assert.equal(restored?.baselineRunId, "run-baseline");
     assert.equal(restored?.coCreatedRunId, "run-co-created");
-    assert.equal(restored?.protocolVersion, "v2-14-labeled-comparison");
+    assert.equal(restored?.protocolVersion, "v2-15-within-subject-crossover");
     assert.equal(restored?.status, "completed");
     assert.equal(job?.status, "completed");
     assert.equal(result?.generationRole, "direct_baseline");
@@ -161,7 +161,7 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
     assert.equal(evaluation.comparison?.overall_choice, "co_created");
     assert.equal(evaluation.labeledComparison?.imagination_match_choice, "co_created");
     assert.equal(evaluation.manipulation?.articulation_support_score, 4);
-    assert.equal(exported.schemaVersion, 4);
+    assert.equal(exported.schemaVersion, 5);
     assert.equal(exported.labeledComparisons.length, 1);
     assert.equal(exported.manipulationChecks.length, 1);
     assert.equal(exported.trials.length, 14);

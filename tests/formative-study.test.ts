@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import test from "node:test";
 
 import {
-  EXPERT_DISCUSSION_QUESTIONS,
+  ARTICULATION_STEPS,
+  FORMATIVE_DISCUSSION_QUESTIONS,
   IMAGINATION_EXAMPLES,
   MUSICIAN_PERSPECTIVES,
   RESONANCE_CASES,
@@ -33,9 +34,11 @@ test("musician perspectives stay complementary and question-led", () => {
   }
 });
 
-test("showcase keeps a concise expert discussion and visual examples", () => {
-  assert.equal(EXPERT_DISCUSSION_QUESTIONS.length, 6);
-  assert.ok(EXPERT_DISCUSSION_QUESTIONS.some((question) => question.includes("哪些元素不可缺少")));
+test("showcase keeps a concise formative discussion and visual examples", () => {
+  assert.equal(FORMATIVE_DISCUSSION_QUESTIONS.length, 6);
+  assert.ok(FORMATIVE_DISCUSSION_QUESTIONS.some((question) => question.includes("哪些元素不可缺少")));
+  assert.equal(ARTICULATION_STEPS.length, 3);
+  assert.equal(new Set(ARTICULATION_STEPS.map((step) => step.id)).size, 3);
   assert.equal(IMAGINATION_EXAMPLES.length, 3);
   for (const example of IMAGINATION_EXAMPLES) {
     assert.match(example.src, /^\/formative-study\/.+\.webp$/);

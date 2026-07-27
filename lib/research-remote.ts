@@ -16,6 +16,8 @@ export interface RemoteSupabaseResearchConfig {
 
 const JSON_COLUMNS = new Set([
   "metadata_json",
+  "sequences_json",
+  "selected_musician_ids_json",
   "selected_characters_json",
   "presets_json",
   "music_analysis_json",
@@ -37,6 +39,9 @@ const JSON_COLUMNS = new Set([
 
 const SUPABASE_TABLES = {
   sessions: "experiment_sessions",
+  studySessions: "study_sessions",
+  studyAssignmentBlocks: "study_assignment_blocks",
+  sessionComparisons: "session_comparisons",
   audioAnalyses: "audio_analyses",
   conversationSnapshots: "conversation_snapshots",
   visualBriefVersions: "visual_brief_versions",
@@ -164,7 +169,7 @@ export async function fetchSupabaseResearchExport(
     async ([key, table]) => [key, await fetchSupabaseTable(config, table, fetcher)] as const
   ));
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     exportedAt: new Date().toISOString(),
     ...Object.fromEntries(entries),
   };

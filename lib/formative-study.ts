@@ -28,6 +28,13 @@ export type MusicianPerspective = {
   contribution: string;
 };
 
+export type ArticulationStep = {
+  id: string;
+  stage: string;
+  example: string;
+  insight: string;
+};
+
 export const RESONANCE_CASES: ResonanceCase[] = [
   {
     id: "kandinsky",
@@ -125,13 +132,34 @@ export const MUSICIAN_PERSPECTIVES: MusicianPerspective[] = [
   },
 ];
 
-export const EXPERT_DISCUSSION_QUESTIONS = [
+export const ARTICULATION_STEPS: ArticulationStep[] = [
+  {
+    id: "feeling",
+    stage: "先感到",
+    example: "“它很开阔，像有什么正在向前推。”",
+    insight: "情绪、力度与运动已经出现，但还不是一幅可以描绘的画面。",
+  },
+  {
+    id: "glimpse",
+    stage: "再看见",
+    example: "“像一道光穿过很远的水面。”",
+    insight: "场景开始浮现，但主体、空间关系和细节仍然模糊。",
+  },
+  {
+    id: "describe",
+    stage: "需要说清",
+    example: "“光从哪里来？水面如何运动？画面里还有谁？”",
+    insight: "要形成画面，需要把整体感受拆成多个彼此关联的视觉决定。",
+  },
+];
+
+export const FORMATIVE_DISCUSSION_QUESTIONS = [
   "人在聆听音乐时，脑海中的画面通常由什么触发？",
   "人是否愿意把这种私人、模糊的画面表达或可视化出来？",
   "当一个人想把脑海中的音乐画面描绘成一幅作品时，主体、场景、构图、光色、材质、动作和叙事中，哪些元素不可缺少？",
-  "什么时候，多位音乐家的共同聆听会真正帮助用户看清自己的想象？",
+  "当一个人难以独自说清画面时，哪些追问最有帮助？",
+  "什么时候，多位音乐家的共同聆听会比单一视角更有帮助？",
   "怎样避免专业解释、文化标签或生成模型覆盖用户原本的感受？",
-  "一个音乐视觉化系统，应当保留多少不确定性与想象空间？",
 ] as const;
 
 export const IMAGINATION_EXAMPLES = [

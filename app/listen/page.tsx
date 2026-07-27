@@ -88,6 +88,7 @@ const COPY = {
     userNoteFailed: "这句话没有送达，请稍后重试。",
     pathA: "聆听路径 A",
     pathB: "聆听路径 B",
+    studyExperience: (period: number) => `第 ${period} / 2 次体验`,
     reflectiveTip: "先写下你的第一感觉，音乐家会沿着它给出不同回应。",
     journalTitle: "你的画面起点",
     hearAtLeastOne: "至少听取一位音乐家的点评，才能让画面汇合。",
@@ -168,6 +169,7 @@ const COPY = {
     userNoteFailed: "Your note did not send. Please try again.",
     pathA: "Listening Path A",
     pathB: "Listening Path B",
+    studyExperience: (period: number) => `Experience ${period} of 2`,
     reflectiveTip: "Begin with your own impression. The musicians will respond along that thread.",
     journalTitle: "Your image begins here",
     hearAtLeastOne: "Hear at least one musician before bringing the image together.",
@@ -318,6 +320,7 @@ function getInitialListenState() {
       visualBrief: null as VisualBrief | null,
       resonantCharacterIds: [] as string[],
       facilitatorPlan: null as FacilitatorPlan | null,
+      studyTrial: null as StudyTrial | null,
     };
   }
 
@@ -328,6 +331,7 @@ function getInitialListenState() {
   let visualBrief: VisualBrief | null = null;
   let resonantCharacterIds: string[] = [];
   let facilitatorPlan: FacilitatorPlan | null = null;
+  let studyTrial: StudyTrial | null = null;
   try {
     const parsed = JSON.parse(sessionStorage.getItem("selectedCharacters") || "[]");
     ids = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
@@ -362,6 +366,11 @@ function getInitialListenState() {
   } catch {
     facilitatorPlan = null;
   }
+  try {
+    studyTrial = JSON.parse(sessionStorage.getItem("studyTrial") || "null") as StudyTrial | null;
+  } catch {
+    studyTrial = null;
+  }
   if (conversationState) {
     for (const message of conversationState.messages) {
       if (message.role === "musician" || message.role === "guide") {
@@ -378,6 +387,7 @@ function getInitialListenState() {
     visualBrief,
     resonantCharacterIds,
     facilitatorPlan,
+    studyTrial,
   };
 }
 
@@ -546,7 +556,7 @@ function GuideFigure({
         <button
           type="button"
           onClick={onSpeak}
-          className="pointer-events-auto absolute left-1/2 top-[-24px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/96 px-3.5 py-2 shadow-[0_0_28px_rgba(255,208,131,0.55)] transition hover:-translate-y-1 hover:bg-[#fff0d4]"
+          className="mv-speaker-bubble-cue pointer-events-auto absolute left-1/2 top-[-24px] z-30 flex items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/96 px-3.5 py-2 transition hover:bg-[#fff0d4]"
           aria-label={language === "zh" ? `听${label.name}说` : `Hear ${label.name}`}
         >
           {[0, 1, 2].map((dot) => (
@@ -559,7 +569,7 @@ function GuideFigure({
         </button>
       )}
       {(loading || streaming) && (
-        <div className="absolute left-1/2 top-[-24px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/92 px-3.5 py-2 shadow-[0_0_28px_rgba(255,208,131,0.48)]">
+        <div className="mv-speaker-bubble-cue absolute left-1/2 top-[-24px] z-30 flex items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/92 px-3.5 py-2">
           {[0, 1, 2].map((dot) => (
             <span
               key={dot}
@@ -642,7 +652,7 @@ function ReflectiveGuideFigure({
         <button
           type="button"
           onClick={onOpen}
-          className="pointer-events-auto absolute left-1/2 top-[-20px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/94 px-3.5 py-2 shadow-[0_0_26px_rgba(255,208,131,0.46)] transition hover:-translate-y-1 hover:bg-[#fff1d6]"
+          className="mv-speaker-bubble-cue pointer-events-auto absolute left-1/2 top-[-20px] z-30 flex items-center gap-1.5 rounded-full border border-[#ffd083]/80 bg-[#ffe0bd]/94 px-3.5 py-2 transition hover:bg-[#fff1d6]"
           aria-label={language === "zh" ? `听${label.name}说` : `Hear ${label.name}`}
         >
           {[0, 1, 2].map((dot) => (
@@ -870,6 +880,7 @@ export default function ListenPage() {
   const trialRecoveryRef = useRef<Promise<StudyTrial | null> | null>(null);
   const reflectiveTimerRef = useRef<number | null>(null);
   const isReflective = conversationState?.condition === "single_agent";
+  const isFormalStudy = Boolean(initialState.studyTrial?.studySessionId);
 
   useEffect(() => {
     if (!conversationState) {
@@ -1679,20 +1690,24 @@ export default function ListenPage() {
         <FlowHeader activeStep={3} />
 
         <section className="relative mt-3 flex min-h-0 flex-1 overflow-clip rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
-          <button
-            type="button"
-            onClick={() => {
-              if (conversationMessages.length > 0 && !window.confirm(copy.changeGuidesConfirm)) return;
-              router.push("/select");
-            }}
-            className="absolute left-3 top-3 z-[100] flex h-9 w-9 items-center justify-center rounded-full border border-[#9f6f45]/45 bg-[#211c26]/82 text-lg text-[#f5d3a8] transition hover:border-[#ffd083]/80 hover:bg-[#382b32]"
-            aria-label={copy.returnToGuides}
-            title={copy.returnToGuides}
-          >
-            ←
-          </button>
-          <div className="pointer-events-none absolute left-14 top-3 z-[99] border border-[#9f6f45]/45 bg-[#211c26]/82 px-3 py-2 text-[11px] font-semibold text-[#f5d3a8]">
-            {isReflective ? copy.pathA : copy.pathB}
+          {!isFormalStudy && (
+            <button
+              type="button"
+              onClick={() => {
+                if (conversationMessages.length > 0 && !window.confirm(copy.changeGuidesConfirm)) return;
+                router.push("/select");
+              }}
+              className="absolute left-3 top-3 z-[100] flex h-9 w-9 items-center justify-center rounded-full border border-[#9f6f45]/45 bg-[#211c26]/82 text-lg text-[#f5d3a8] transition hover:border-[#ffd083]/80 hover:bg-[#382b32]"
+              aria-label={copy.returnToGuides}
+              title={copy.returnToGuides}
+            >
+              ←
+            </button>
+          )}
+          <div className={`pointer-events-none absolute top-3 z-[99] border border-[#9f6f45]/45 bg-[#211c26]/82 px-3 py-2 text-[11px] font-semibold text-[#f5d3a8] ${isFormalStudy ? "left-3" : "left-14"}`}>
+            {isFormalStudy
+              ? copy.studyExperience(initialState.studyTrial?.period || 1)
+              : isReflective ? copy.pathA : copy.pathB}
           </div>
           <div className="relative min-h-0 min-w-0 flex-1 overflow-clip">
             {audioSrc && (
@@ -2009,7 +2024,7 @@ export default function ListenPage() {
             className={`absolute left-1/2 z-[90] min-h-0 overflow-hidden border border-[#9f6f45]/48 bg-[#1d1923]/94 shadow-[0_24px_70px_rgba(0,0,0,0.42)] backdrop-blur transition-[opacity,transform] duration-500 ${
               hasUserContribution
                 ? "top-4 h-[min(300px,42vh)] w-[min(780px,76vw)]"
-                : "top-4 h-auto w-[min(640px,78vw)]"
+                : "top-0 h-auto w-[min(640px,78vw)]"
             } ${
               chatOpen
                 ? "opacity-100"

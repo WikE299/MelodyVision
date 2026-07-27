@@ -14,11 +14,18 @@ import { getCharactersByIds, type Character } from "@/lib/characters";
 import { getExperimentSessionId } from "@/lib/experiment-session";
 import { recordExperimentEvent } from "@/lib/experiment-events";
 import { startDirectBaseline } from "@/lib/experiment-trial-client";
+import {
+  fetchStudySession,
+  saveStudySessionComparison,
+  type StudySessionPayload,
+} from "@/lib/experiment-study-client";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
 import type {
   ConversationState,
   GenerationRole,
   MusicProfile,
+  SessionComparisonChoice,
+  StudySession,
   StudyTrial,
   VisualBrief,
   VisualBriefFieldKey,
@@ -84,7 +91,14 @@ interface FeedbackState {
   freeText: string;
 }
 
-type StudyPhase = "artwork" | "comparison" | "manipulation" | "completed";
+type StudyPhase =
+  | "artwork"
+  | "comparison"
+  | "manipulation"
+  | "period_complete"
+  | "session_comparison"
+  | "baseline_review"
+  | "completed";
 type RatingKey =
   | "musicMatchScore"
   | "imaginationMatchScore"
@@ -203,6 +217,25 @@ const COPY = {
     viewBaseline: "音乐直生作品",
     imageLoading: "作品加载中",
     imageLoadFailed: "作品加载失败，请重新切换后再试",
+    periodEvaluationIntro: "先独立评价这一轮生成结果，提交后再回顾刚才的互动过程。",
+    continueProcessReview: "提交并评价互动过程",
+    periodCompleteTitle: "第一次体验已完成",
+    periodCompleteIntro: "稍作停顿后，进入另一段音乐与另一种聆听体验。",
+    nextExperience: "进入第二次体验",
+    sessionComparisonTitle: "回顾两次聆听体验",
+    sessionComparisonIntro: "比较两次过程如何帮助你把音乐变成画面，不需要判断系统采用了什么方式。",
+    experienceOne: "体验一",
+    experienceTwo: "体验二",
+    expressionSupportCompare: "哪次体验更帮助我表达脑海中的画面",
+    immersionCompare: "哪次体验让我更沉浸于音乐",
+    creativeFreedomCompare: "哪次体验给我更多自由发挥的空间",
+    overallExperienceCompare: "总体更喜欢哪次体验",
+    sessionComparisonReason: "简单说说你偏好这次体验的原因",
+    submitSessionComparison: "提交体验对比",
+    baselineReviewTitle: (period: number) => `查看体验 ${period} 的音乐直生参照`,
+    baselineReviewIntro: "这一步只比较同一段音乐的共创作品与音乐分析直接生成作品。",
+    nextBaseline: "继续查看体验二",
+    finishStudy: "完成实验",
   },
   en: {
     audioName: "Music",
@@ -303,6 +336,25 @@ const COPY = {
     viewBaseline: "Music-only",
     imageLoading: "Loading artwork",
     imageLoadFailed: "Artwork failed to load. Switch away and try again.",
+    periodEvaluationIntro: "Rate this outcome independently, then reflect on the interaction you just completed.",
+    continueProcessReview: "Submit and review the interaction",
+    periodCompleteTitle: "The first experience is complete",
+    periodCompleteIntro: "Take a short pause, then continue with another piece of music and listening experience.",
+    nextExperience: "Begin the second experience",
+    sessionComparisonTitle: "Reflect on both listening experiences",
+    sessionComparisonIntro: "Compare how each process helped turn music into imagery without guessing how the system worked.",
+    experienceOne: "Experience one",
+    experienceTwo: "Experience two",
+    expressionSupportCompare: "Which experience better helped me express the image in my mind",
+    immersionCompare: "Which experience immersed me more deeply in the music",
+    creativeFreedomCompare: "Which experience gave me more room for creative freedom",
+    overallExperienceCompare: "Which experience did I prefer overall",
+    sessionComparisonReason: "Briefly explain your preference",
+    submitSessionComparison: "Submit experience comparison",
+    baselineReviewTitle: (period: number) => `Review the music-only reference for experience ${period}`,
+    baselineReviewIntro: "This step compares the co-created artwork with a music-only result for the same track.",
+    nextBaseline: "Continue to experience two",
+    finishStudy: "Complete study",
   },
 };
 
@@ -321,6 +373,7 @@ function getInitialResultState() {
       conversationState: null as ConversationState | null,
       musicProfile: null as MusicProfile | null,
       studyTrial: null as StudyTrial | null,
+      studySession: null as StudySession | null,
       generatedTime: "",
     };
   }
@@ -340,6 +393,9 @@ function getInitialResultState() {
   const conversationState = JSON.parse(sessionStorage.getItem("conversationState") || "null") as ConversationState | null;
   const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
   const studyTrial = JSON.parse(sessionStorage.getItem("studyTrial") || "null") as StudyTrial | null;
+  const studySession = JSON.parse(
+    sessionStorage.getItem("studySession") || "null"
+  ) as StudySession | null;
   const usePreviewData = !imageUrl && window.location.search.includes("page05-gallery-result");
 
   return {
@@ -369,6 +425,7 @@ function getInitialResultState() {
     conversationState,
     musicProfile,
     studyTrial,
+    studySession,
     generatedTime: new Date().toLocaleString("zh-CN", {
       month: "2-digit",
       day: "2-digit",
@@ -417,6 +474,7 @@ function ScoreRow({
             key={score}
             type="button"
             onClick={() => onChange(score)}
+            aria-label={`${label}：${score}`}
             aria-pressed={value === score}
             className={`h-8 border text-xs font-semibold transition ${
               value === score
@@ -451,11 +509,18 @@ function ComparisonChoiceRow({
     <div>
       <p className="mb-1.5 text-xs text-[#d7b99b]">{label}</p>
       <div className="grid grid-cols-3 gap-1.5">
-        {(["co_created", "direct_baseline", "tie"] as ComparisonChoice[]).map((choice) => (
+        {(["co_created", "direct_baseline", "tie"] as ComparisonChoice[]).map((choice) => {
+          const choiceLabel = choice === "tie"
+            ? sameLabel
+            : choice === "co_created"
+              ? coCreatedLabel
+              : baselineLabel;
+          return (
           <button
             key={choice}
             type="button"
             onClick={() => onChange(choice)}
+            aria-label={`${label}：${choiceLabel}`}
             aria-pressed={value === choice}
             className={`h-8 border text-xs font-semibold transition ${
               value === choice
@@ -463,13 +528,57 @@ function ComparisonChoiceRow({
                 : "border-[#8f6b52]/44 bg-[#211b25] text-[#c8aa8e] hover:border-[#ffd083]/70"
             }`}
           >
-            {choice === "tie"
-              ? sameLabel
-              : choice === "co_created"
-                ? coCreatedLabel
-                : baselineLabel}
+            {choiceLabel}
           </button>
-        ))}
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SessionChoiceRow({
+  label,
+  value,
+  firstLabel,
+  secondLabel,
+  sameLabel,
+  onChange,
+}: {
+  label: string;
+  value: SessionComparisonChoice | null;
+  firstLabel: string;
+  secondLabel: string;
+  sameLabel: string;
+  onChange: (choice: SessionComparisonChoice) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs leading-relaxed text-[#d7b99b]">{label}</p>
+      <div className="grid grid-cols-3 gap-1.5">
+        {(["period_1", "period_2", "tie"] as SessionComparisonChoice[]).map((choice) => {
+          const choiceLabel = choice === "period_1"
+            ? firstLabel
+            : choice === "period_2"
+              ? secondLabel
+              : sameLabel;
+          return (
+          <button
+            key={choice}
+            type="button"
+            onClick={() => onChange(choice)}
+            aria-label={`${label}：${choiceLabel}`}
+            aria-pressed={value === choice}
+            className={`h-8 border text-xs font-semibold transition ${
+              value === choice
+                ? "border-[#ffd083] bg-[#ffd083] text-[#2b2230]"
+                : "border-[#8f6b52]/44 bg-[#211b25] text-[#c8aa8e] hover:border-[#ffd083]/70"
+            }`}
+          >
+            {choiceLabel}
+          </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -498,6 +607,8 @@ export default function ResultPage() {
   const [conversationState] = useState(initialState.conversationState);
   const [musicProfile] = useState(initialState.musicProfile);
   const [studyTrial, setStudyTrial] = useState(initialState.studyTrial);
+  const [studySession, setStudySession] = useState(initialState.studySession);
+  const [studySessionPayload, setStudySessionPayload] = useState<StudySessionPayload | null>(null);
   const [generatedTime] = useState(initialState.generatedTime);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -544,6 +655,23 @@ export default function ResultPage() {
     articulationSupportScore: null,
     dialogueExperienceScore: null,
   });
+  const [sessionComparison, setSessionComparison] = useState<{
+    expressionSupportChoice: SessionComparisonChoice | null;
+    immersionChoice: SessionComparisonChoice | null;
+    creativeFreedomChoice: SessionComparisonChoice | null;
+    overallChoice: SessionComparisonChoice | null;
+    reason: string;
+  }>({
+    expressionSupportChoice: null,
+    immersionChoice: null,
+    creativeFreedomChoice: null,
+    overallChoice: null,
+    reason: "",
+  });
+  const [baselineReviewPeriod, setBaselineReviewPeriod] = useState<1 | 2>(1);
+  const [studyDisplayPeriod, setStudyDisplayPeriod] = useState<1 | 2>(
+    initialState.studyTrial?.period || 1
+  );
   const [studySaving, setStudySaving] = useState(false);
   const [studyError, setStudyError] = useState("");
   const [resultArtworkRole, setResultArtworkRole] = useState<GenerationRole>("co_created");
@@ -564,6 +692,72 @@ export default function ResultPage() {
   }, [imageUrl, initialState.debugInfo?.meta?.runId, initialState.studyTrial?.condition, initialState.studyTrial?.id, router]);
 
   const studyTrialId = studyTrial?.id;
+  const studySessionId = studyTrial?.studySessionId || studySession?.id || null;
+
+  useEffect(() => {
+    if (!studySessionId) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const refreshStudySession = async () => {
+      try {
+        const payload = await fetchStudySession(studySessionId);
+        if (!active) return;
+        setStudySessionPayload(payload);
+        setStudySession(payload.session);
+        sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+        if (payload.comparison) {
+          setSessionComparison({
+            expressionSupportChoice: payload.comparison.expressionSupportChoice,
+            immersionChoice: payload.comparison.immersionChoice,
+            creativeFreedomChoice: payload.comparison.creativeFreedomChoice,
+            overallChoice: payload.comparison.overallChoice,
+            reason: payload.comparison.reason,
+          });
+        }
+        if (payload.session.status === "between_periods") {
+          setStudyPhase("period_complete");
+        } else if (payload.session.status === "comparing") {
+          setStudyPhase("session_comparison");
+        } else if (payload.session.status === "baseline_review") {
+          const firstReviewed = payload.periodResults[0]?.trial
+            ? await fetch(
+                `/api/experiment/evaluation?trialId=${encodeURIComponent(
+                  payload.periodResults[0].trial.id
+                )}`,
+                { cache: "no-store" }
+              ).then((response) => response.json())
+            : null;
+          setBaselineReviewPeriod(firstReviewed?.labeledComparison ? 2 : 1);
+          setStudyPhase("baseline_review");
+        } else if (payload.session.status === "completed") {
+          setStudyPhase("completed");
+        }
+
+        const baselinesReady = payload.periodResults.length === 2
+          && payload.periodResults.every((item) => Boolean(item.baseline?.imageUrl));
+        const baselineStillRunning = payload.periodResults.some((item) =>
+          !item.baseline?.imageUrl &&
+          (!item.baselineJob || ["pending", "running"].includes(item.baselineJob.status))
+        );
+        if (
+          !baselinesReady &&
+          baselineStillRunning &&
+          ["comparing", "baseline_review"].includes(payload.session.status)
+        ) {
+          timer = setTimeout(refreshStudySession, 2500);
+        }
+      } catch {
+        if (active) timer = setTimeout(refreshStudySession, 3500);
+      }
+    };
+
+    void refreshStudySession();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [studySessionId]);
 
   useEffect(() => {
     if (!studyTrialId) return;
@@ -593,14 +787,14 @@ export default function ResultPage() {
             return Number.isInteger(parsed) && parsed >= 1 && parsed <= 5 ? parsed : null;
           };
           if (evaluationData.manipulation) {
-            setStudyPhase("completed");
+            if (!studySessionId) setStudyPhase("completed");
             setManipulationRatings({
               perspectiveMultiplicityScore: restoredScore(evaluationData.manipulation.perspective_multiplicity_score),
               articulationSupportScore: restoredScore(evaluationData.manipulation.articulation_support_score),
               dialogueExperienceScore: restoredScore(evaluationData.manipulation.dialogue_experience_score),
             });
           } else if (evaluationData.labeledComparison) {
-            setStudyPhase("manipulation");
+            if (!studySessionId) setStudyPhase("manipulation");
             setComparison({
               musicMatchChoice: evaluationData.labeledComparison.music_match_choice as ComparisonChoice,
               imaginationMatchChoice: evaluationData.labeledComparison.imagination_match_choice as ComparisonChoice,
@@ -610,7 +804,7 @@ export default function ResultPage() {
           } else if (evaluationData.comparison) {
             setStudyPhase("completed");
           } else if (evaluationData.artwork) {
-            setStudyPhase("comparison");
+            setStudyPhase(studySessionId ? "manipulation" : "comparison");
             setStudyRatings({
               musicMatchScore: restoredScore(evaluationData.artwork.music_match_score),
               imaginationMatchScore: restoredScore(evaluationData.artwork.imagination_match_score),
@@ -634,7 +828,7 @@ export default function ResultPage() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [studyTrialId]);
+  }, [studySessionId, studyTrialId]);
 
   useEffect(() => {
     const baselineImageUrl = baselineResult?.imageUrl;
@@ -718,6 +912,7 @@ export default function ResultPage() {
       runId: debugInfo?.meta?.runId || null,
     });
     sessionStorage.clear();
+    localStorage.removeItem("melodyvisionStudySessionId");
     router.push("/");
   };
 
@@ -867,7 +1062,7 @@ export default function ResultPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || copy.evaluationError);
-      setStudyPhase("comparison");
+      setStudyPhase(studyTrial.studySessionId ? "manipulation" : "comparison");
       recordExperimentEvent("artwork-evaluation-submitted", "/result", {
         trialId: studyTrial.id,
         condition: studyTrial.condition,
@@ -880,8 +1075,13 @@ export default function ResultPage() {
   };
 
   const submitComparison = async () => {
+    const comparisonTrial = studyTrial?.studySessionId
+      ? studySessionPayload?.periodResults.find(
+          (item) => item.trial.period === baselineReviewPeriod
+        )?.trial || null
+      : studyTrial;
     if (
-      !studyTrial ||
+      !comparisonTrial ||
       !comparison.musicMatchChoice ||
       !comparison.imaginationMatchChoice ||
       !comparison.overallChoice ||
@@ -895,7 +1095,7 @@ export default function ResultPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           stage: "comparison",
-          trialId: studyTrial.id,
+          trialId: comparisonTrial.id,
           musicMatchChoice: comparison.musicMatchChoice,
           imaginationMatchChoice: comparison.imaginationMatchChoice,
           overallChoice: comparison.overallChoice,
@@ -904,10 +1104,31 @@ export default function ResultPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || copy.evaluationError);
-      setStudyPhase("manipulation");
+      if (studyTrial?.studySessionId) {
+        if (baselineReviewPeriod === 1) {
+          setBaselineReviewPeriod(2);
+          setStudyDisplayPeriod(2);
+          setComparison({
+            musicMatchChoice: null,
+            imaginationMatchChoice: null,
+            overallChoice: null,
+            reason: "",
+          });
+          setResultArtworkRole("co_created");
+          setStudyPhase("baseline_review");
+        } else {
+          const payload = await fetchStudySession(studyTrial.studySessionId);
+          setStudySessionPayload(payload);
+          setStudySession(payload.session);
+          sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+          setStudyPhase("completed");
+        }
+      } else {
+        setStudyPhase("manipulation");
+      }
       recordExperimentEvent("labeled-baseline-comparison-submitted", "/result", {
-        trialId: studyTrial.id,
-        condition: studyTrial.condition,
+        trialId: comparisonTrial.id,
+        condition: comparisonTrial.condition,
       });
     } catch (error) {
       setStudyError(error instanceof Error ? error.message : copy.evaluationError);
@@ -936,7 +1157,15 @@ export default function ResultPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || copy.evaluationError);
-      setStudyPhase("completed");
+      let nextPhase: StudyPhase = "completed";
+      if (studyTrial.studySessionId) {
+        const payload = await fetchStudySession(studyTrial.studySessionId);
+        setStudySessionPayload(payload);
+        setStudySession(payload.session);
+        sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+        nextPhase = studyTrial.period === 1 ? "period_complete" : "session_comparison";
+      }
+      setStudyPhase(nextPhase);
       const completedTrial = { ...studyTrial, status: "completed" as const };
       setStudyTrial(completedTrial);
       sessionStorage.setItem("studyTrial", JSON.stringify(completedTrial));
@@ -951,18 +1180,98 @@ export default function ResultPage() {
     }
   };
 
+  const continueToSecondExperience = () => {
+    const preservedKeys = new Set([
+      "experimentSessionId",
+      "studySessionId",
+      "studySession",
+      "selectedCharacters",
+    ]);
+    for (const key of Object.keys(sessionStorage)) {
+      if (!preservedKeys.has(key)) sessionStorage.removeItem(key);
+    }
+    recordExperimentEvent("study-period-transitioned", "/result", {
+      studySessionId,
+      fromPeriod: 1,
+      toPeriod: 2,
+    });
+    router.push(
+      `/?study=1&participant=${encodeURIComponent(studySession?.participantId || "")}`
+    );
+  };
+
+  const submitStudyComparison = async () => {
+    if (
+      !studySessionId ||
+      !sessionComparison.expressionSupportChoice ||
+      !sessionComparison.immersionChoice ||
+      !sessionComparison.creativeFreedomChoice ||
+      !sessionComparison.overallChoice ||
+      studySaving
+    ) return;
+    setStudySaving(true);
+    setStudyError("");
+    try {
+      const payload = await saveStudySessionComparison({
+        studySessionId,
+        expressionSupportChoice: sessionComparison.expressionSupportChoice,
+        immersionChoice: sessionComparison.immersionChoice,
+        creativeFreedomChoice: sessionComparison.creativeFreedomChoice,
+        overallChoice: sessionComparison.overallChoice,
+        reason: sessionComparison.reason,
+      });
+      setStudySessionPayload(payload);
+      setStudySession(payload.session);
+      sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+      setBaselineReviewPeriod(1);
+      setStudyDisplayPeriod(1);
+      setResultArtworkRole("co_created");
+      setComparison({
+        musicMatchChoice: null,
+        imaginationMatchChoice: null,
+        overallChoice: null,
+        reason: "",
+      });
+      setStudyPhase("baseline_review");
+      recordExperimentEvent("study-session-comparison-submitted", "/result", {
+        studySessionId,
+      });
+    } catch (error) {
+      setStudyError(error instanceof Error ? error.message : copy.evaluationError);
+    } finally {
+      setStudySaving(false);
+    }
+  };
+
   const retryBaseline = async () => {
-    if (!studyTrial || !musicProfile || studySaving) return;
+    if (!studyTrial || studySaving) return;
+    const crossoverTarget = studyTrial.studySessionId
+      ? studySessionPayload?.periodResults.find(
+          (item) => item.trial.period === baselineReviewPeriod
+        ) || null
+      : null;
+    const targetTrial = crossoverTarget?.trial || studyTrial;
+    const targetProfile = crossoverTarget?.musicProfile || musicProfile;
+    const targetAnalysis = crossoverTarget?.compatibilityAnalysis
+      || (debugInfo?.musicAnalysis || {}) as Record<string, unknown>;
+    if (!targetProfile) {
+      setStudyError(copy.baselineFailed);
+      return;
+    }
     setStudySaving(true);
     setStudyError("");
     setBaselineStatus("running");
     try {
       const result = await startDirectBaseline({
-        trial: studyTrial,
-        musicProfile,
-        musicAnalysis: (debugInfo?.musicAnalysis || {}) as Record<string, unknown>,
+        trial: targetTrial,
+        musicProfile: targetProfile,
+        musicAnalysis: targetAnalysis,
       });
-      if (result?.imageUrl) {
+      if (studyTrial.studySessionId) {
+        const payload = await fetchStudySession(studyTrial.studySessionId);
+        setStudySessionPayload(payload);
+        setStudySession(payload.session);
+      } else if (result?.imageUrl) {
         setBaselineResult(result as BaselineResult);
         setBaselineStatus("completed");
       }
@@ -991,11 +1300,15 @@ export default function ResultPage() {
     displayedImageLoadStartedAtRef.current = null;
     setResultImageStatus("loaded");
     recordExperimentEvent("result-image-loaded", "/result", {
-      trialId: studyTrial?.id || null,
+      trialId: crossoverPeriodResult?.trial.id || studyTrial?.id || null,
       runId:
-        resultArtworkRole === "direct_baseline"
-          ? baselineResult?.runId || null
-          : debugInfo?.meta?.runId || null,
+        crossoverFinalPhase
+          ? resultArtworkRole === "direct_baseline"
+            ? crossoverPeriodResult?.baseline?.runId || null
+            : crossoverPeriodResult?.coCreated?.runId || null
+          : resultArtworkRole === "direct_baseline"
+            ? baselineResult?.runId || null
+            : debugInfo?.meta?.runId || null,
       role: resultArtworkRole,
       loadMs: startedAt === null ? null : Math.max(0, Math.round(event.timeStamp - startedAt)),
     });
@@ -1007,11 +1320,15 @@ export default function ResultPage() {
     displayedImageLoadStartedAtRef.current = null;
     setResultImageStatus("error");
     recordExperimentEvent("result-image-load-failed", "/result", {
-      trialId: studyTrial?.id || null,
+      trialId: crossoverPeriodResult?.trial.id || studyTrial?.id || null,
       runId:
-        resultArtworkRole === "direct_baseline"
-          ? baselineResult?.runId || null
-          : debugInfo?.meta?.runId || null,
+        crossoverFinalPhase
+          ? resultArtworkRole === "direct_baseline"
+            ? crossoverPeriodResult?.baseline?.runId || null
+            : crossoverPeriodResult?.coCreated?.runId || null
+          : resultArtworkRole === "direct_baseline"
+            ? baselineResult?.runId || null
+            : debugInfo?.meta?.runId || null,
       role: resultArtworkRole,
       loadMs: startedAt === null ? null : Math.max(0, Math.round(event.timeStamp - startedAt)),
     });
@@ -1065,17 +1382,43 @@ export default function ResultPage() {
     danmakuMessages.filter((_, index) => index % 2 === 0),
     danmakuMessages.filter((_, index) => index % 2 === 1),
   ].filter((lane) => lane.length > 0);
+  const crossoverPeriodResult = studySessionPayload?.periodResults.find(
+    (item) => item.trial.period === studyDisplayPeriod
+  ) || null;
+  const crossoverFinalPhase = Boolean(
+    studyTrial?.studySessionId &&
+    ["session_comparison", "baseline_review", "completed"].includes(studyPhase)
+  );
   const studyLocked = Boolean(studyTrial && studyPhase !== "completed");
-  const pairedArtworkReady = baselineStatus === "completed" && Boolean(baselineResult?.imageUrl);
-  const comparisonReady = studyPhase === "comparison" && pairedArtworkReady;
+  const pairedArtworkReady = crossoverFinalPhase
+    ? Boolean(crossoverPeriodResult?.coCreated?.imageUrl && crossoverPeriodResult?.baseline?.imageUrl)
+    : baselineStatus === "completed" && Boolean(baselineResult?.imageUrl);
+  const comparisonReady = ["comparison", "baseline_review"].includes(studyPhase)
+    && pairedArtworkReady;
+  const comparisonBaselineFailed = studyPhase === "baseline_review"
+    ? crossoverPeriodResult?.baselineJob?.status === "failed"
+    : baselineStatus === "failed";
+  const comparisonBaselineMissing = studyPhase === "baseline_review"
+    && crossoverPeriodResult?.baselineJob?.status === "completed"
+    && !crossoverPeriodResult.baseline?.imageUrl;
   const canSwitchPairedArtwork = Boolean(
     studyTrial &&
-    studyPhase !== "artwork" &&
+    (studyPhase === "comparison" || studyPhase === "baseline_review" || studyPhase === "completed") &&
     pairedArtworkReady
   );
-  const displayedResultImage = canSwitchPairedArtwork && resultArtworkRole === "direct_baseline"
-    ? baselineResult?.imageUrl || imageUrl
-    : imageUrl;
+  const displayedResultImage = crossoverFinalPhase
+    ? resultArtworkRole === "direct_baseline"
+      ? crossoverPeriodResult?.baseline?.imageUrl || crossoverPeriodResult?.coCreated?.imageUrl || imageUrl
+      : crossoverPeriodResult?.coCreated?.imageUrl || imageUrl
+    : canSwitchPairedArtwork && resultArtworkRole === "direct_baseline"
+      ? baselineResult?.imageUrl || imageUrl
+      : imageUrl;
+  const displayedAudioUrl = crossoverFinalPhase
+    ? crossoverPeriodResult?.audioUrl || audioUrl
+    : audioUrl;
+  const displayedAudioName = crossoverFinalPhase
+    ? crossoverPeriodResult?.musicName || audioName
+    : audioName;
   const renderPairedArtworkSwitcher = (className: string) => (
     <div className={className}>
       {([
@@ -1090,6 +1433,34 @@ export default function ResultPage() {
           aria-pressed={resultArtworkRole === role}
           className={`min-w-24 px-4 py-2 font-semibold transition ${
             resultArtworkRole === role
+              ? "bg-[#f3cf9a] text-[#30242d]"
+              : "text-[#d8b997] hover:bg-[#3a2d32] hover:text-[#ffe3bd]"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  const renderStudyPeriodSwitcher = (className: string) => (
+    <div className={className}>
+      {([
+        [1, copy.experienceOne],
+        [2, copy.experienceTwo],
+      ] as Array<[1 | 2, string]>).map(([period, label]) => (
+        <button
+          key={period}
+          type="button"
+          onClick={() => {
+            audioRef.current?.pause();
+            setIsAudioPlaying(false);
+            setStudyDisplayPeriod(period);
+            setResultArtworkRole("co_created");
+            setResultImageStatus("loading");
+          }}
+          aria-pressed={studyDisplayPeriod === period}
+          className={`min-w-24 px-4 py-2 font-semibold transition ${
+            studyDisplayPeriod === period
               ? "bg-[#f3cf9a] text-[#30242d]"
               : "text-[#d8b997] hover:bg-[#3a2d32] hover:text-[#ffe3bd]"
           }`}
@@ -1207,15 +1578,20 @@ export default function ResultPage() {
 
           {studyLocked && studyTrial && (
             <aside className="absolute bottom-4 right-4 top-4 z-[65] flex w-[306px] flex-col border border-[#a77b57]/48 bg-[#211c27]/96 p-5 shadow-[-18px_0_60px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+              {studyPhase === "session_comparison" && renderStudyPeriodSwitcher(
+                "mb-4 grid grid-cols-2 border border-[#a77b57]/44 bg-[#17131a]/72 p-1 text-xs text-[#ffe3bd]"
+              )}
               {canSwitchPairedArtwork && renderPairedArtworkSwitcher(
                 "mb-4 grid grid-cols-2 border border-[#a77b57]/44 bg-[#17131a]/72 p-1 text-xs text-[#ffe3bd]"
               )}
               {studyPhase === "artwork" ? (
                 <>
                   <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.studyEvaluationTitle}</h2>
-                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.studyEvaluationIntro}</p>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
+                    {studyTrial.studySessionId ? copy.periodEvaluationIntro : copy.studyEvaluationIntro}
+                  </p>
                   <p className="mt-1.5 text-[11px] text-[#a98c72]">{copy.degreeScale}</p>
-                  <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
+                  <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                     {([
                       ["musicMatchScore", copy.musicMatch],
                       ["imaginationMatchScore", copy.imaginationMatch],
@@ -1238,16 +1614,30 @@ export default function ResultPage() {
                     disabled={studySaving || Object.values(studyRatings).some((value) => value === null)}
                     className="mt-4 h-11 border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {studySaving ? copy.submitting : copy.continueComparison}
+                    {studySaving
+                      ? copy.submitting
+                      : studyTrial.studySessionId
+                        ? copy.continueProcessReview
+                        : copy.continueComparison}
                   </button>
                 </>
-              ) : studyPhase === "comparison" ? (
+              ) : studyPhase === "comparison" || studyPhase === "baseline_review" ? (
                 <>
-                  <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.comparisonTitle}</h2>
-                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.comparisonIntro}</p>
-                  {baselineStatus === "failed" ? (
+                  <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">
+                    {studyPhase === "baseline_review"
+                      ? copy.baselineReviewTitle(baselineReviewPeriod)
+                      : copy.comparisonTitle}
+                  </h2>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
+                    {studyPhase === "baseline_review"
+                      ? copy.baselineReviewIntro
+                      : copy.comparisonIntro}
+                  </p>
+                  {comparisonBaselineFailed ? (
                     <div className="flex flex-1 flex-col items-center justify-center text-center">
-                      <p className="text-sm text-[#efb6a5]">{copy.baselineFailed}</p>
+                      <p className="text-sm text-[#efb6a5]">
+                        {crossoverPeriodResult?.baselineJob?.error || copy.baselineFailed}
+                      </p>
                       <button
                         type="button"
                         onClick={retryBaseline}
@@ -1257,6 +1647,13 @@ export default function ResultPage() {
                         {copy.retryBaseline}
                       </button>
                     </div>
+                  ) : comparisonBaselineMissing ? (
+                    <div className="flex flex-1 flex-col items-center justify-center text-center">
+                      <p className="text-sm text-[#efb6a5]">{copy.baselineFailed}</p>
+                      <p className="mt-2 max-w-xs text-xs leading-relaxed text-[#cdb297]">
+                        生成任务已完成，但作品记录缺失。请保留当前参与者编号并联系研究者检查数据。
+                      </p>
+                    </div>
                   ) : !comparisonReady ? (
                     <div className="flex flex-1 flex-col items-center justify-center text-center">
                       <div className="h-10 w-10 animate-spin rounded-full border border-[#a97950]/42 border-t-[#ffd083]" />
@@ -1264,7 +1661,7 @@ export default function ResultPage() {
                     </div>
                   ) : (
                     <>
-                      <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
+                      <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
                         <ComparisonChoiceRow
                           label={copy.comparisonMusic}
                           value={comparison.musicMatchChoice}
@@ -1307,17 +1704,23 @@ export default function ResultPage() {
                         }
                         className="mt-4 h-11 border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        {studySaving ? copy.submitting : copy.submitComparison}
+                        {studySaving
+                          ? copy.submitting
+                          : studyPhase === "baseline_review" && baselineReviewPeriod === 1
+                            ? copy.nextBaseline
+                            : studyPhase === "baseline_review"
+                              ? copy.finishStudy
+                              : copy.submitComparison}
                       </button>
                     </>
                   )}
                 </>
-              ) : (
+              ) : studyPhase === "manipulation" ? (
                 <>
                   <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.manipulationTitle}</h2>
                   <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">{copy.manipulationIntro}</p>
                   <p className="mt-1.5 text-[11px] text-[#a98c72]">{copy.agreementScale}</p>
-                  <div className="mt-5 flex-1 space-y-5 overflow-y-auto pr-1">
+                  <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
                     {([
                       ["perspectiveMultiplicityScore", copy.perspectiveMultiplicity],
                       ["articulationSupportScore", copy.articulationSupport],
@@ -1340,14 +1743,120 @@ export default function ResultPage() {
                     {studySaving ? copy.submitting : copy.submitManipulation}
                   </button>
                 </>
-              )}
+              ) : studyPhase === "period_complete" ? (
+                <div className="flex flex-1 flex-col items-center justify-center text-center">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full border border-[#ffd083]/52 bg-[#4b3444] text-xl text-[#ffe3bd]">
+                    ✓
+                  </span>
+                  <h2 className="mt-5 font-serif text-xl font-semibold text-[#ffe3bd]">
+                    {copy.periodCompleteTitle}
+                  </h2>
+                  <p className="mt-3 text-sm leading-relaxed text-[#cdb297]">
+                    {copy.periodCompleteIntro}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={continueToSecondExperience}
+                    className="mt-7 h-11 w-full border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d]"
+                  >
+                    {copy.nextExperience}
+                  </button>
+                </div>
+              ) : studyPhase === "session_comparison" ? (
+                <>
+                  <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">
+                    {copy.sessionComparisonTitle}
+                  </h2>
+                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
+                    {copy.sessionComparisonIntro}
+                  </p>
+                  <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                    <SessionChoiceRow
+                      label={copy.expressionSupportCompare}
+                      value={sessionComparison.expressionSupportChoice}
+                      firstLabel={copy.experienceOne}
+                      secondLabel={copy.experienceTwo}
+                      sameLabel={copy.same}
+                      onChange={(value) => setSessionComparison((current) => ({
+                        ...current,
+                        expressionSupportChoice: value,
+                      }))}
+                    />
+                    <SessionChoiceRow
+                      label={copy.immersionCompare}
+                      value={sessionComparison.immersionChoice}
+                      firstLabel={copy.experienceOne}
+                      secondLabel={copy.experienceTwo}
+                      sameLabel={copy.same}
+                      onChange={(value) => setSessionComparison((current) => ({
+                        ...current,
+                        immersionChoice: value,
+                      }))}
+                    />
+                    <SessionChoiceRow
+                      label={copy.creativeFreedomCompare}
+                      value={sessionComparison.creativeFreedomChoice}
+                      firstLabel={copy.experienceOne}
+                      secondLabel={copy.experienceTwo}
+                      sameLabel={copy.same}
+                      onChange={(value) => setSessionComparison((current) => ({
+                        ...current,
+                        creativeFreedomChoice: value,
+                      }))}
+                    />
+                    <SessionChoiceRow
+                      label={copy.overallExperienceCompare}
+                      value={sessionComparison.overallChoice}
+                      firstLabel={copy.experienceOne}
+                      secondLabel={copy.experienceTwo}
+                      sameLabel={copy.same}
+                      onChange={(value) => setSessionComparison((current) => ({
+                        ...current,
+                        overallChoice: value,
+                      }))}
+                    />
+                    <textarea
+                      value={sessionComparison.reason}
+                      onChange={(event) => setSessionComparison((current) => ({
+                        ...current,
+                        reason: event.target.value,
+                      }))}
+                      placeholder={copy.sessionComparisonReason}
+                      className="h-20 w-full resize-none border border-[#8f6b52]/44 bg-[#17131a] p-3 text-xs text-[#ffe3bd] outline-none placeholder:text-[#9f8066] focus:border-[#ffd083]/70"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={submitStudyComparison}
+                    disabled={
+                      studySaving ||
+                      !sessionComparison.expressionSupportChoice ||
+                      !sessionComparison.immersionChoice ||
+                      !sessionComparison.creativeFreedomChoice ||
+                      !sessionComparison.overallChoice
+                    }
+                    className="mt-4 h-11 border border-[#ffd083]/58 bg-[#4b3444] px-4 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {studySaving ? copy.submitting : copy.submitSessionComparison}
+                  </button>
+                </>
+              ) : null}
               {studyError && <p className="mt-3 text-xs text-[#efb6a5]">{studyError}</p>}
             </aside>
           )}
 
-          {canSwitchPairedArtwork && !studyLocked && renderPairedArtworkSwitcher(
+          {crossoverFinalPhase && !studyLocked ? (
+            <div className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 gap-2 text-xs text-[#ffe3bd]">
+              {renderStudyPeriodSwitcher(
+                "grid grid-cols-2 border border-[#a77b57]/44 bg-[#1f1923]/90 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur"
+              )}
+              {canSwitchPairedArtwork && renderPairedArtworkSwitcher(
+                "grid grid-cols-2 border border-[#a77b57]/44 bg-[#1f1923]/90 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur"
+              )}
+            </div>
+          ) : canSwitchPairedArtwork && !studyLocked ? renderPairedArtworkSwitcher(
             "absolute left-1/2 top-4 z-50 flex -translate-x-1/2 border border-[#a77b57]/44 bg-[#1f1923]/90 p-1 text-xs text-[#ffe3bd] shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur"
-          )}
+          ) : null}
 
           {!studyLocked && !showPlayer && (
           <div className={`absolute bottom-1 left-[170px] z-40 h-[76px] overflow-hidden border-y border-[#9f6f45]/22 bg-[#15131c]/48 py-1 backdrop-blur-sm transition-[right] ${showAppendix ? "right-[370px]" : "right-[300px]"}`} aria-label={copy.replayTitle}>
@@ -1390,11 +1899,11 @@ export default function ResultPage() {
           </div>
           )}
 
-          {audioUrl && (
+          {displayedAudioUrl && (
               <>
                 <audio
                   ref={audioRef}
-                  src={audioUrl}
+                  src={displayedAudioUrl}
                   preload="auto"
                   onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
                   onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
@@ -1411,7 +1920,7 @@ export default function ResultPage() {
                       {isAudioPlaying ? "Ⅱ" : "▶"}
                     </button>
                     <span className="min-w-[120px]">
-                      <span className="block text-sm font-semibold text-[#ffe3bd]">{audioName}</span>
+                      <span className="block text-sm font-semibold text-[#ffe3bd]">{displayedAudioName}</span>
                       <span className="block text-xs text-[#c8aa8e]">
                         {audioBlocked ? copy.clickMusic : isAudioPlaying ? copy.playingWithImage : copy.clickAudio}
                       </span>

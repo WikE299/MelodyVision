@@ -1,5 +1,15 @@
 import type { NextRequest } from "next/server";
-import { getStudyTrial } from "@/lib/db/study-trials";
+import {
+  getStudyTrial,
+  listStudyTrialsBySession,
+  updateStudyTrial,
+} from "@/lib/db/study-trials";
+import {
+  completeStudyPeriod,
+  getStudySession,
+  getStudySessionComparison,
+  updateStudySession,
+} from "@/lib/db/study-sessions";
 import {
   getTrialEvaluationState,
   saveArtworkEvaluation,
@@ -68,6 +78,18 @@ export async function POST(request: NextRequest) {
       if (!musicMatchChoice || !imaginationMatchChoice || !overallChoice || !trial.baselineRunId || !trial.coCreatedRunId) {
         return Response.json({ error: "A complete labeled comparison is required" }, { status: 400 });
       }
+      if (trial.studySessionId) {
+        const [session, sessionComparison] = await Promise.all([
+          getStudySession(trial.studySessionId),
+          getStudySessionComparison(trial.studySessionId),
+        ]);
+        if (session?.status !== "baseline_review" || !sessionComparison) {
+          return Response.json(
+            { error: "The cross-experience comparison must be completed first" },
+            { status: 409 }
+          );
+        }
+      }
       await saveLabeledComparison({
         trialId,
         musicMatchChoice,
@@ -75,6 +97,29 @@ export async function POST(request: NextRequest) {
         overallChoice,
         reason: typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : "",
       });
+      if (trial.studySessionId) {
+        await updateStudyTrial({ id: trial.id, status: "completed" });
+        const pairedTrials = await listStudyTrialsBySession(trial.studySessionId);
+        const pairedStates = await Promise.all(
+          pairedTrials.map((item) => getTrialEvaluationState(item.id))
+        );
+        if (
+          pairedTrials.length === 2 &&
+          pairedStates.every((state) =>
+            Boolean(
+              state.artwork &&
+              state.manipulation &&
+              state.labeledComparison
+            )
+          )
+        ) {
+          await updateStudySession({
+            id: trial.studySessionId,
+            status: "completed",
+            completed: true,
+          });
+        }
+      }
       return Response.json({ saved: true, stage: "comparison" });
     }
 
@@ -87,12 +132,25 @@ export async function POST(request: NextRequest) {
       if (scores.some((value) => value === null)) {
         return Response.json({ error: "All interaction check scores are required" }, { status: 400 });
       }
+      const evaluationState = await getTrialEvaluationState(trialId);
+      if (!evaluationState.artwork) {
+        return Response.json(
+          { error: "The artwork evaluation must be completed first" },
+          { status: 409 }
+        );
+      }
       await saveManipulationCheck({
         trialId,
         perspectiveMultiplicityScore: scores[0]!,
         articulationSupportScore: scores[1]!,
         dialogueExperienceScore: scores[2]!,
       });
+      if (trial.studySessionId && trial.period) {
+        await completeStudyPeriod({
+          studySessionId: trial.studySessionId,
+          period: trial.period,
+        });
+      }
       return Response.json({ saved: true, stage: "manipulation" });
     }
 
