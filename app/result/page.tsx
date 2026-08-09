@@ -592,6 +592,7 @@ export default function ResultPage() {
   const resultViewRecordedRef = useRef(false);
   const comparisonExposureRecordedRef = useRef(false);
   const baselinePreloadOutcomesRef = useRef(new Set<string>());
+  const baselineAutoStartAttemptedRef = useRef(new Set<string>());
   const displayedImageLoadStartedAtRef = useRef<number | null>(null);
   const mounted = useHydrated();
   const [initialState] = useState(getInitialResultState);
@@ -694,6 +695,48 @@ export default function ResultPage() {
   const studyTrialId = studyTrial?.id;
   const studySessionId = studyTrial?.studySessionId || studySession?.id || null;
 
+  const startEligibleBaseline = useCallback(async (
+    targetTrial: StudyTrial,
+    targetProfile: MusicProfile,
+    targetAnalysis: Record<string, unknown>
+  ) => {
+    if (baselineAutoStartAttemptedRef.current.has(targetTrial.id)) return;
+    baselineAutoStartAttemptedRef.current.add(targetTrial.id);
+    setBaselineStatus("running");
+    recordExperimentEvent("baseline-generation-deferred-started", "/result", {
+      trialId: targetTrial.id,
+      condition: targetTrial.condition,
+      checkpoint: targetTrial.studySessionId
+        ? "second_artwork_evaluation_completed"
+        : "artwork_evaluation_completed",
+    });
+    try {
+      const result = await startDirectBaseline({
+        trial: targetTrial,
+        musicProfile: targetProfile,
+        musicAnalysis: targetAnalysis,
+      });
+      if (result?.imageUrl) {
+        setBaselineResult(result as BaselineResult);
+        setBaselineStatus("completed");
+      } else if (result?.job?.status) {
+        setBaselineStatus(result.job.status);
+      }
+      recordExperimentEvent("baseline-generation-deferred-requested", "/result", {
+        trialId: targetTrial.id,
+        condition: targetTrial.condition,
+      });
+    } catch (error) {
+      baselineAutoStartAttemptedRef.current.delete(targetTrial.id);
+      console.warn("Deferred baseline did not start:", error);
+      recordExperimentEvent("baseline-generation-deferred-failed", "/result", {
+        trialId: targetTrial.id,
+        condition: targetTrial.condition,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!studySessionId) return;
     let active = true;
@@ -719,6 +762,15 @@ export default function ResultPage() {
           setStudyPhase("period_complete");
         } else if (payload.session.status === "comparing") {
           setStudyPhase("session_comparison");
+          for (const item of payload.periodResults) {
+            if (!item.baselineJob && item.musicProfile) {
+              void startEligibleBaseline(
+                item.trial,
+                item.musicProfile,
+                item.compatibilityAnalysis || {}
+              );
+            }
+          }
         } else if (payload.session.status === "baseline_review") {
           const firstReviewed = payload.periodResults[0]?.trial
             ? await fetch(
@@ -730,6 +782,15 @@ export default function ResultPage() {
             : null;
           setBaselineReviewPeriod(firstReviewed?.labeledComparison ? 2 : 1);
           setStudyPhase("baseline_review");
+          for (const item of payload.periodResults) {
+            if (!item.baselineJob && item.musicProfile) {
+              void startEligibleBaseline(
+                item.trial,
+                item.musicProfile,
+                item.compatibilityAnalysis || {}
+              );
+            }
+          }
         } else if (payload.session.status === "completed") {
           setStudyPhase("completed");
         }
@@ -757,7 +818,7 @@ export default function ResultPage() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [studySessionId]);
+  }, [startEligibleBaseline, studySessionId]);
 
   useEffect(() => {
     if (!studyTrialId) return;
@@ -815,6 +876,37 @@ export default function ResultPage() {
             });
           }
         }
+        if (
+          evaluationResponse.ok &&
+          evaluationData.artwork &&
+          !studySessionId &&
+          !baselineData.job &&
+          baselineData.trial &&
+          musicProfile
+        ) {
+          void startEligibleBaseline(
+            baselineData.trial as StudyTrial,
+            musicProfile,
+            (debugInfo?.musicAnalysis || {}) as Record<string, unknown>
+          );
+        }
+        if (
+          evaluationResponse.ok &&
+          evaluationData.artwork &&
+          studySessionId &&
+          baselineData.trial?.period === 2
+        ) {
+          const payload = await fetchStudySession(studySessionId);
+          for (const item of payload.periodResults) {
+            if (!item.baselineJob && item.musicProfile) {
+              void startEligibleBaseline(
+                item.trial,
+                item.musicProfile,
+                item.compatibilityAnalysis || {}
+              );
+            }
+          }
+        }
         if (active && baselineData.job?.status !== "completed" && baselineData.job?.status !== "failed") {
           timer = setTimeout(refresh, 2500);
         }
@@ -828,7 +920,7 @@ export default function ResultPage() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [studySessionId, studyTrialId]);
+  }, [debugInfo?.musicAnalysis, musicProfile, startEligibleBaseline, studySessionId, studyTrialId]);
 
   useEffect(() => {
     const baselineImageUrl = baselineResult?.imageUrl;
@@ -1062,6 +1154,27 @@ export default function ResultPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || copy.evaluationError);
+      if (!studyTrial.studySessionId && musicProfile) {
+        void startEligibleBaseline(
+          studyTrial,
+          musicProfile,
+          (debugInfo?.musicAnalysis || {}) as Record<string, unknown>
+        );
+      } else if (studyTrial.studySessionId && studyTrial.period === 2) {
+        const payload = await fetchStudySession(studyTrial.studySessionId);
+        setStudySessionPayload(payload);
+        setStudySession(payload.session);
+        sessionStorage.setItem("studySession", JSON.stringify(payload.session));
+        for (const item of payload.periodResults) {
+          if (!item.baselineJob && item.musicProfile) {
+            void startEligibleBaseline(
+              item.trial,
+              item.musicProfile,
+              item.compatibilityAnalysis || {}
+            );
+          }
+        }
+      }
       setStudyPhase(studyTrial.studySessionId ? "manipulation" : "comparison");
       recordExperimentEvent("artwork-evaluation-submitted", "/result", {
         trialId: studyTrial.id,
@@ -1233,6 +1346,15 @@ export default function ResultPage() {
         reason: "",
       });
       setStudyPhase("baseline_review");
+      for (const item of payload.periodResults) {
+        if (!item.baselineJob && item.musicProfile) {
+          void startEligibleBaseline(
+            item.trial,
+            item.musicProfile,
+            item.compatibilityAnalysis || {}
+          );
+        }
+      }
       recordExperimentEvent("study-session-comparison-submitted", "/result", {
         studySessionId,
       });

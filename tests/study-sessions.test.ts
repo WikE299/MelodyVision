@@ -10,6 +10,7 @@ test("within-subject sessions balance four sequences and preserve paired progres
   try {
     const sessions = await import("../lib/db/study-sessions.ts");
     const trials = await import("../lib/db/study-trials.ts");
+    const evaluations = await import("../lib/db/trial-evaluations.ts");
 
     const assigned = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
@@ -89,6 +90,44 @@ test("within-subject sessions balance four sequences and preserve paired progres
     assert.equal(beforeComparison?.firstTrialId, firstTrial.id);
     assert.equal(beforeComparison?.secondTrialId, secondTrial.id);
     assert.deepEqual(beforeComparison?.selectedMusicianIds, ["beethoven", "armstrong"]);
+
+    await trials.updateStudyTrial({
+      id: firstTrial.id,
+      coCreatedRunId: "co-created-period-1",
+      status: "evaluating",
+    });
+    await evaluations.saveArtworkEvaluation({
+      trialId: firstTrial.id,
+      runId: "co-created-period-1",
+      musicMatchScore: 4,
+      imaginationMatchScore: 4,
+      agencyScore: 4,
+      ownershipScore: 4,
+      immersionScore: 4,
+      satisfactionScore: 4,
+    });
+    await assert.rejects(
+      trials.claimBaselineJob(firstTrial.id),
+      trials.BaselineNotEligibleError
+    );
+
+    await trials.updateStudyTrial({
+      id: secondTrial.id,
+      coCreatedRunId: "co-created-period-2",
+      status: "evaluating",
+    });
+    await evaluations.saveArtworkEvaluation({
+      trialId: secondTrial.id,
+      runId: "co-created-period-2",
+      musicMatchScore: 4,
+      imaginationMatchScore: 4,
+      agencyScore: 4,
+      ownershipScore: 4,
+      immersionScore: 4,
+      satisfactionScore: 4,
+    });
+    const baselineClaim = await trials.claimBaselineJob(firstTrial.id);
+    assert.equal(baselineClaim.acquired, true);
 
     await sessions.saveStudySessionComparison({
       studySessionId: studySession.id,

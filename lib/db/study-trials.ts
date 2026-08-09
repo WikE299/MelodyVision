@@ -263,6 +263,13 @@ export async function getBaselineJob(trialId: string): Promise<BaselineJob | nul
   return getBaselineJobFromDatabase(database, trialId);
 }
 
+export class BaselineNotEligibleError extends Error {
+  constructor() {
+    super("Baseline requires the completed experiment checkpoint");
+    this.name = "BaselineNotEligibleError";
+  }
+}
+
 export async function claimBaselineJob(trialId: string): Promise<{ acquired: boolean; job: BaselineJob }> {
   const database = await getDatabase();
   return database.transaction(async (transaction) => {
@@ -277,6 +284,45 @@ export async function claimBaselineJob(trialId: string): Promise<{ acquired: boo
       (current?.status === "running" && Date.parse(current.updatedAt) > staleBefore)
     ) {
       return { acquired: false, job: current };
+    }
+    const trialRow = (await transaction.prepare(
+      "SELECT co_created_run_id, study_session_id FROM study_trials WHERE id = ?"
+    ).all(trialId))[0];
+    const evaluationRow = (await transaction.prepare(
+      "SELECT run_id FROM artwork_evaluations WHERE trial_id = ?"
+    ).all(trialId))[0];
+    const coCreatedRunId = typeof trialRow?.co_created_run_id === "string"
+      ? trialRow.co_created_run_id
+      : "";
+    const evaluatedRunId = typeof evaluationRow?.run_id === "string"
+      ? evaluationRow.run_id
+      : "";
+    if (!coCreatedRunId || evaluatedRunId !== coCreatedRunId) {
+      throw new BaselineNotEligibleError();
+    }
+    const studySessionId = typeof trialRow?.study_session_id === "string"
+      ? trialRow.study_session_id
+      : "";
+    if (studySessionId) {
+      const pairedTrials = await transaction.prepare(
+        "SELECT id, co_created_run_id FROM study_trials WHERE study_session_id = ?"
+      ).all(studySessionId);
+      if (pairedTrials.length !== 2) throw new BaselineNotEligibleError();
+      for (const pairedTrial of pairedTrials) {
+        const pairedRunId = typeof pairedTrial.co_created_run_id === "string"
+          ? pairedTrial.co_created_run_id
+          : "";
+        const pairedEvaluation = (await transaction.prepare(
+          "SELECT run_id FROM artwork_evaluations WHERE trial_id = ?"
+        ).all(String(pairedTrial.id)))[0];
+        if (
+          !pairedRunId ||
+          typeof pairedEvaluation?.run_id !== "string" ||
+          pairedEvaluation.run_id !== pairedRunId
+        ) {
+          throw new BaselineNotEligibleError();
+        }
+      }
     }
     if (current) {
       await transaction.prepare(`

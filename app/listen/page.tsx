@@ -28,7 +28,7 @@ import {
   isGenerationActionBlocked,
 } from "@/lib/conversation/generation-guard";
 import { isMeaningfulUserInput } from "@/lib/conversation/user-input";
-import { ensureStudyTrial, startDirectBaseline } from "@/lib/experiment-trial-client";
+import { ensureStudyTrial } from "@/lib/experiment-trial-client";
 import CrystalAudioVisualizer from "@/components/CrystalAudioVisualizer";
 
 const FIGURE_STYLE: Record<string, string> = {
@@ -876,7 +876,6 @@ export default function ListenPage() {
   const conversationStateRef = useRef(initialState.conversationState);
   const userSubmissionInFlightRef = useRef(false);
   const visualBriefRefRef = useRef(initialState.conversationState?.visualBriefRef || null);
-  const baselineRecoveryAttemptedRef = useRef(false);
   const trialRecoveryRef = useRef<Promise<StudyTrial | null> | null>(null);
   const reflectiveTimerRef = useRef<number | null>(null);
   const isReflective = conversationState?.condition === "single_agent";
@@ -891,23 +890,6 @@ export default function ListenPage() {
       router.push("/select");
     }
   }, [conversationState, router, selectedChars.length]);
-
-  useEffect(() => {
-    if (baselineRecoveryAttemptedRef.current) return;
-    baselineRecoveryAttemptedRef.current = true;
-    try {
-      const trial = JSON.parse(sessionStorage.getItem("studyTrial") || "null") as StudyTrial | null;
-      const musicProfile = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
-      const musicAnalysis = JSON.parse(sessionStorage.getItem("musicAnalysis") || "null") as Record<string, unknown> | null;
-      if (trial && musicProfile && musicAnalysis) {
-        void startDirectBaseline({ trial, musicProfile, musicAnalysis }).catch((error) => {
-          console.warn("Baseline recovery did not complete:", error);
-        });
-      }
-    } catch {
-      // The trial can still continue; the result page exposes a controlled retry.
-    }
-  }, []);
 
   useEffect(() => {
     const container = chatScrollRef.current;
@@ -1429,15 +1411,6 @@ export default function ListenPage() {
 
     try {
       const activeTrial = await ensureActiveTrial(generationState);
-      const musicProfileForBaseline = JSON.parse(sessionStorage.getItem("musicProfile") || "null") as MusicProfile | null;
-      const musicAnalysisForBaseline = JSON.parse(sessionStorage.getItem("musicAnalysis") || "null") as Record<string, unknown> | null;
-      if (activeTrial && musicProfileForBaseline && musicAnalysisForBaseline) {
-        void startDirectBaseline({
-          trial: activeTrial,
-          musicProfile: musicProfileForBaseline,
-          musicAnalysis: musicAnalysisForBaseline,
-        }).catch((error) => console.warn("Recovered baseline did not complete:", error));
-      }
       const stateResponse = await fetch("/api/conversation/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

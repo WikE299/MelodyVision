@@ -5,6 +5,7 @@ import {
   buildResearchDashboardDataset,
   exportResearchStudySessionsCsv,
   exportResearchTrialsCsv,
+  mergeResearchDashboardDatasets,
   summarizeResearchTrials,
 } from "../lib/research-dashboard.ts";
 
@@ -209,6 +210,16 @@ test("dashboard reports failed baseline and legacy protocol issues", () => {
   assert.ok(legacy.issues.some((item) => item.code === "missing_co_created_run"));
 });
 
+test("dashboard flags a baseline generated before artwork evaluation", () => {
+  const data = fixture();
+  data.artworkEvaluations = [];
+  const dataset = buildResearchDashboardDataset(data);
+  const current = dataset.trials.find((trial) => trial.id === "trial-current");
+  assert.ok(current);
+  assert.equal(current.questionnaireComplete, false);
+  assert.ok(current.issues.some((item) => item.code === "premature_baseline"));
+});
+
 test("dashboard CSV is one row per trial and neutralizes formulas", () => {
   const dataset = buildResearchDashboardDataset(fixture());
   const csv = exportResearchTrialsCsv(dataset.trials);
@@ -259,4 +270,59 @@ test("unlinked session records are bounded by adjacent trials", () => {
   const dataset = buildResearchDashboardDataset(data);
   const current = dataset.trials.find((trial) => trial.id === "trial-current");
   assert.deepEqual(current?.interactionEvents.map((event) => event.id), ["during-current"]);
+});
+
+test("dashboard merges local and online datasets while preserving source labels", () => {
+  const localData = fixture();
+  const onlineData = fixture();
+  onlineData.exportedAt = "2026-07-19T00:00:00.000Z";
+  onlineData.trials = [
+    {
+      ...onlineData.trials[0],
+      id: "trial-online",
+      participant_id: "online-user",
+      session_id: "session-online",
+      study_session_id: "",
+      music_profile_id: "music-online",
+      co_created_run_id: "",
+      baseline_run_id: "",
+      created_at: "2026-07-19T00:00:00.000Z",
+      updated_at: "2026-07-19T00:02:00.000Z",
+    },
+  ];
+  onlineData.studySessions = [];
+  onlineData.audioAnalyses = [];
+  onlineData.runs = [];
+  onlineData.baselineJobs = [];
+  onlineData.artworkEvaluations = [];
+  onlineData.labeledComparisons = [];
+  onlineData.manipulationChecks = [];
+
+  const local = buildResearchDashboardDataset(localData, "database");
+  const online = buildResearchDashboardDataset(onlineData, "remote");
+  const merged = mergeResearchDashboardDatasets([local, online]);
+
+  assert.equal(merged.source.kind, "combined");
+  assert.equal(merged.trials.length, 3);
+  assert.deepEqual(
+    merged.trials.find((trial) => trial.id === "trial-current")?.dataOrigins,
+    ["local"]
+  );
+  assert.deepEqual(
+    merged.trials.find((trial) => trial.id === "trial-online")?.dataOrigins,
+    ["online"]
+  );
+});
+
+test("dashboard deduplicates matching trial ids and keeps every source label", () => {
+  const local = buildResearchDashboardDataset(fixture(), "database");
+  const online = buildResearchDashboardDataset(fixture(), "remote");
+  const merged = mergeResearchDashboardDatasets([local, online]);
+
+  assert.equal(merged.trials.length, 2);
+  assert.deepEqual(
+    merged.trials.find((trial) => trial.id === "trial-current")?.dataOrigins,
+    ["local", "online"]
+  );
+  assert.deepEqual(merged.studySessions[0].dataOrigins, ["local", "online"]);
 });

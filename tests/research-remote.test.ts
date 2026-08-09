@@ -62,3 +62,31 @@ test("direct Supabase research sync reads tables with a server-only key", async 
   assert.deepEqual(snapshot.studySessions, []);
   assert.deepEqual(snapshot.runs, [{ id: "run-1", timings: { totalMs: 1234 } }]);
 });
+
+test("direct Supabase sync tolerates optional tables missing from an older schema", async () => {
+  const config = getRemoteSupabaseResearchConfig({
+    RESEARCH_SUPABASE_URL: "https://project.supabase.co",
+    RESEARCH_SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+  });
+  assert.ok(config);
+
+  const snapshot = await fetchSupabaseResearchExport(config, async (input) => {
+    const url = String(input);
+    if (
+      url.includes("/study_sessions?")
+      || url.includes("/study_assignment_blocks?")
+      || url.includes("/session_comparisons?")
+    ) {
+      return new Response("missing", { status: 404 });
+    }
+    if (url.includes("/study_trials?")) {
+      return Response.json([{ id: "online-trial" }]);
+    }
+    return Response.json([]);
+  }) as Record<string, unknown>;
+
+  assert.deepEqual(snapshot.studySessions, []);
+  assert.deepEqual(snapshot.studyAssignmentBlocks, []);
+  assert.deepEqual(snapshot.sessionComparisons, []);
+  assert.deepEqual(snapshot.trials, [{ id: "online-trial" }]);
+});
