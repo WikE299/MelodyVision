@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     const cached = await readRemoteResearchCache();
     if (cached) {
       return Response.json({
-        dataset: buildResearchDashboardDataset(cached, "remote"),
+        dataset: buildResearchDashboardDataset(cached, "remote-cache"),
         transport: "cache",
         warning: error instanceof Error ? error.message : "Online sync failed",
       }, {

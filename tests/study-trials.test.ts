@@ -52,19 +52,6 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
     assert.ok(Math.abs(multiCount - singleCount) <= 1);
     assert.ok(balanced.every((item) => item.assignmentMethod === "balanced_random"));
 
-    const firstClaim = await trials.claimBaselineJob(trial.id);
-    const duplicateClaim = await trials.claimBaselineJob(trial.id);
-    assert.equal(firstClaim.acquired, true);
-    assert.equal(duplicateClaim.acquired, false);
-    assert.equal(
-      await trials.consumeBaselineJobLease(trial.id, firstClaim.job.startedAt || ""),
-      true
-    );
-    assert.equal(
-      await trials.consumeBaselineJobLease(trial.id, firstClaim.job.startedAt || ""),
-      false
-    );
-
     const baselineRecord = {
       id: "run-baseline",
       sessionId: trial.sessionId,
@@ -93,9 +80,6 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
       modelConfig: { imageModel: "test-model" },
       logPath: "logs/test.json",
     };
-    await runs.insertGenerationRun(baselineRecord);
-    await trials.completeBaselineJob(trial.id, "run-baseline");
-
     await runs.insertGenerationRun({
       ...baselineRecord,
       id: "run-co-created",
@@ -113,6 +97,10 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
       coCreatedRunId: "run-co-created",
       status: "evaluating",
     });
+    await assert.rejects(
+      trials.claimBaselineJob(trial.id),
+      trials.BaselineNotEligibleError
+    );
     await evaluations.saveArtworkEvaluation({
       trialId: trial.id,
       runId: "run-co-created",
@@ -123,6 +111,26 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
       immersionScore: 4,
       satisfactionScore: 5,
     });
+
+    await assert.rejects(
+      trials.claimBaselineJob(recovered.trial.id),
+      trials.BaselineNotEligibleError
+    );
+    const firstClaim = await trials.claimBaselineJob(trial.id);
+    const duplicateClaim = await trials.claimBaselineJob(trial.id);
+    assert.equal(firstClaim.acquired, true);
+    assert.equal(duplicateClaim.acquired, false);
+    assert.equal(
+      await trials.consumeBaselineJobLease(trial.id, firstClaim.job.startedAt || ""),
+      true
+    );
+    assert.equal(
+      await trials.consumeBaselineJobLease(trial.id, firstClaim.job.startedAt || ""),
+      false
+    );
+    await runs.insertGenerationRun(baselineRecord);
+    await trials.completeBaselineJob(trial.id, "run-baseline");
+
     await evaluations.saveLabeledComparison({
       trialId: trial.id,
       musicMatchChoice: "co_created",

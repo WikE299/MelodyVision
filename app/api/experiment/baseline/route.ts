@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getGenerationRunResult } from "@/lib/db/generation-runs";
 import {
+  BaselineNotEligibleError,
   claimBaselineJob,
   failBaselineJob,
   getBaselineJob,
@@ -36,6 +37,9 @@ export async function POST(request: NextRequest) {
     const claimed = await claimBaselineJob(trialId);
     return Response.json({ trial, ...claimed }, { status: claimed.acquired ? 201 : 200 });
   } catch (error) {
+    if (error instanceof BaselineNotEligibleError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
     console.error("Baseline claim failed:", error);
     return Response.json({ error: "Baseline claim failed" }, { status: 500 });
   }

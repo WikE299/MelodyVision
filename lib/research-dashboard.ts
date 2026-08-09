@@ -25,6 +25,7 @@ export interface RawExperimentExport {
 
 export type ResearchCondition = "multi_agent" | "single_agent" | "unknown";
 export type ResearchChoice = "co_created" | "direct_baseline" | "tie";
+export type ResearchDataOrigin = "local" | "online" | "online_cache" | "snapshot";
 
 export interface ResearchScoreMetric {
   key: string;
@@ -96,6 +97,7 @@ export interface ResearchRun {
 
 export interface ResearchTrialRecord {
   id: string;
+  dataOrigins: ResearchDataOrigin[];
   participantId: string;
   sessionId: string;
   studySessionId: string;
@@ -139,6 +141,7 @@ export interface ResearchTrialRecord {
 
 export interface ResearchStudySessionRecord {
   id: string;
+  dataOrigins: ResearchDataOrigin[];
   participantId: string;
   protocolVersion: string;
   sequence: string;
@@ -156,7 +159,7 @@ export interface ResearchStudySessionRecord {
 
 export interface ResearchDashboardDataset {
   source: {
-    kind: "database" | "snapshot" | "remote";
+    kind: "database" | "snapshot" | "remote" | "remote-cache" | "combined";
     capturedAt: string;
     schemaVersion: number;
   };
@@ -386,7 +389,8 @@ function issue(
 
 function buildTrial(
   trial: RawRecord,
-  data: RawExperimentExport
+  data: RawExperimentExport,
+  dataOrigin: ResearchDataOrigin
 ): ResearchTrialRecord {
   const trialId = text(trial.id);
   const sessionId = text(trial.session_id);
@@ -478,6 +482,14 @@ function buildTrial(
       "error"
     ));
   }
+  if (baselineComplete && !artworkEvaluation) {
+    issues.push(issue(
+      trialId,
+      "premature_baseline",
+      "Baseline 已生成，但画作评价未完成；该 Trial 应排除分析",
+      "error"
+    ));
+  }
   if (text(trial.status) === "completed" && !questionnaireComplete) {
     issues.push(issue(trialId, "incomplete_questionnaire", "Trial 已完成但问卷不完整"));
   }
@@ -497,6 +509,7 @@ function buildTrial(
 
   return {
     id: trialId,
+    dataOrigins: [dataOrigin],
     participantId: text(trial.participant_id),
     sessionId,
     studySessionId: text(trial.study_session_id),
@@ -567,11 +580,18 @@ export function parseExperimentExport(value: unknown): RawExperimentExport {
 
 export function buildResearchDashboardDataset(
   value: unknown,
-  sourceKind: "database" | "snapshot" | "remote" = "snapshot"
+  sourceKind: "database" | "snapshot" | "remote" | "remote-cache" = "snapshot"
 ): ResearchDashboardDataset {
   const data = parseExperimentExport(value);
+  const dataOrigin: ResearchDataOrigin = sourceKind === "database"
+    ? "local"
+    : sourceKind === "remote"
+      ? "online"
+      : sourceKind === "remote-cache"
+        ? "online_cache"
+        : "snapshot";
   const trials = data.trials
-    .map((trial) => buildTrial(trial, data))
+    .map((trial) => buildTrial(trial, data, dataOrigin))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const dataQualityIssues = trials.flatMap((trial) => trial.issues);
   const studySessions = data.studySessions
@@ -595,6 +615,7 @@ export function buildResearchDashboardDataset(
       }
       return {
         id,
+        dataOrigins: [dataOrigin],
         participantId: text(session.participant_id),
         protocolVersion: text(session.protocol_version),
         sequence: text(session.sequence),
@@ -636,6 +657,95 @@ export function buildResearchDashboardDataset(
   };
 }
 
+function recordTimestamp(record: ResearchTrialRecord | ResearchStudySessionRecord): number {
+  const value = "updatedAt" in record
+    ? record.updatedAt || record.createdAt
+    : record.completedAt || record.createdAt;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function mergeOrigins(
+  left: ResearchDataOrigin[],
+  right: ResearchDataOrigin[]
+): ResearchDataOrigin[] {
+  return [...new Set([...left, ...right])];
+}
+
+export function mergeResearchDashboardDatasets(
+  datasets: ResearchDashboardDataset[]
+): ResearchDashboardDataset {
+  const available = datasets.filter(Boolean);
+  if (available.length === 0) {
+    throw new Error("至少需要一个研究数据集");
+  }
+  if (available.length === 1) return available[0];
+
+  const trialMap = new Map<string, ResearchTrialRecord>();
+  for (const dataset of available) {
+    for (const trial of dataset.trials) {
+      const existing = trialMap.get(trial.id);
+      if (!existing) {
+        trialMap.set(trial.id, trial);
+        continue;
+      }
+      const preferred = recordTimestamp(trial) >= recordTimestamp(existing) ? trial : existing;
+      trialMap.set(trial.id, {
+        ...preferred,
+        dataOrigins: mergeOrigins(existing.dataOrigins, trial.dataOrigins),
+      });
+    }
+  }
+  const trials = [...trialMap.values()]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+  const sessionMap = new Map<string, ResearchStudySessionRecord>();
+  for (const dataset of available) {
+    for (const session of dataset.studySessions) {
+      const existing = sessionMap.get(session.id);
+      if (!existing) {
+        sessionMap.set(session.id, session);
+        continue;
+      }
+      const preferred = recordTimestamp(session) >= recordTimestamp(existing) ? session : existing;
+      sessionMap.set(session.id, {
+        ...preferred,
+        dataOrigins: mergeOrigins(existing.dataOrigins, session.dataOrigins),
+      });
+    }
+  }
+  const studySessions = [...sessionMap.values()]
+    .map((session) => ({
+      ...session,
+      firstTrial: session.firstTrial ? trialMap.get(session.firstTrial.id) || session.firstTrial : null,
+      secondTrial: session.secondTrial ? trialMap.get(session.secondTrial.id) || session.secondTrial : null,
+    }))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const currentProtocolVersion = available[0].currentProtocolVersion;
+  const currentTrials = trials.filter(
+    (trial) => trial.protocolVersion === currentProtocolVersion
+  );
+
+  return {
+    source: {
+      kind: "combined",
+      capturedAt: available
+        .map((dataset) => dataset.source.capturedAt)
+        .sort((a, b) => Date.parse(b) - Date.parse(a))[0],
+      schemaVersion: Math.max(...available.map((dataset) => dataset.source.schemaVersion)),
+    },
+    currentProtocolVersion,
+    protocols: [...new Set(available.flatMap((dataset) => dataset.protocols))].sort(),
+    summary: summarizeResearchTrials(currentTrials),
+    trials,
+    studySessions,
+    dataQualityIssues: [
+      ...trials.flatMap((trial) => trial.issues),
+      ...studySessions.flatMap((session) => session.issues),
+    ],
+  };
+}
+
 function csvValue(value: unknown): string {
   let stringValue = value === null || value === undefined ? "" : String(value);
   if (/^[=+\-@\t\r]/.test(stringValue)) stringValue = `'${stringValue}`;
@@ -645,6 +755,7 @@ function csvValue(value: unknown): string {
 export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
   const headers = [
     "trial_id",
+    "data_sources",
     "participant_id",
     "session_id",
     "study_session_id",
@@ -676,6 +787,7 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
   const lines = trials.map((trial) => {
     const values: Record<string, unknown> = {
       trial_id: trial.id,
+      data_sources: trial.dataOrigins.join("|"),
       participant_id: trial.participantId,
       session_id: trial.sessionId,
       study_session_id: trial.studySessionId,
@@ -718,6 +830,7 @@ export function exportResearchStudySessionsCsv(
 ): string {
   const headers = [
     "study_session_id",
+    "data_sources",
     "participant_id",
     "protocol_version",
     "sequence",
@@ -774,6 +887,7 @@ export function exportResearchStudySessionsCsv(
   const lines = sessions.map((session) => {
     const values: Record<string, unknown> = {
       study_session_id: session.id,
+      data_sources: session.dataOrigins.join("|"),
       participant_id: session.participantId,
       protocol_version: session.protocolVersion,
       sequence: session.sequence,

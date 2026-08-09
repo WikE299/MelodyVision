@@ -56,6 +56,12 @@ const SUPABASE_TABLES = {
   manipulationChecks: "manipulation_checks",
 } as const;
 
+const OPTIONAL_SUPABASE_TABLES = new Set([
+  "study_sessions",
+  "study_assignment_blocks",
+  "session_comparisons",
+]);
+
 function normalizeSupabaseRow(row: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(row).map(([key, value]) => {
     if (!JSON_COLUMNS.has(key)) return [key, value];
@@ -127,7 +133,8 @@ export async function fetchRemoteResearchExport(
 async function fetchSupabaseTable(
   config: RemoteSupabaseResearchConfig,
   table: string,
-  fetcher: typeof fetch
+  fetcher: typeof fetch,
+  optional = false
 ): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
   const pageSize = 1000;
@@ -154,7 +161,10 @@ async function fetchSupabaseTable(
       }
     }
     if (!response) throw lastError instanceof Error ? lastError : new Error(`Supabase table ${table} failed`);
-    if (!response.ok) throw new Error(`Supabase table ${table} failed (${response.status})`);
+    if (!response.ok) {
+      if (optional && response.status === 404) return [];
+      throw new Error(`Supabase table ${table} failed (${response.status})`);
+    }
     const page = await response.json() as Record<string, unknown>[];
     rows.push(...page.map(normalizeSupabaseRow));
     if (page.length < pageSize) return rows;
@@ -166,7 +176,10 @@ export async function fetchSupabaseResearchExport(
   fetcher: typeof fetch = fetch
 ): Promise<unknown> {
   const entries = await Promise.all(Object.entries(SUPABASE_TABLES).map(
-    async ([key, table]) => [key, await fetchSupabaseTable(config, table, fetcher)] as const
+    async ([key, table]) => [
+      key,
+      await fetchSupabaseTable(config, table, fetcher, OPTIONAL_SUPABASE_TABLES.has(table)),
+    ] as const
   ));
   return {
     schemaVersion: 5,

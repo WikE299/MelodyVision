@@ -16,9 +16,11 @@ import {
   buildResearchDashboardDataset,
   exportResearchStudySessionsCsv,
   exportResearchTrialsCsv,
+  mergeResearchDashboardDatasets,
   summarizeResearchTrials,
   type ResearchChoiceMetric,
   type ResearchCondition,
+  type ResearchDataOrigin,
   type ResearchDashboardDataset,
   type ResearchDataIssue,
   type ResearchScoreMetric,
@@ -30,6 +32,7 @@ import { buildResearchThumbnailUrl } from "@/lib/research-thumbnail";
 type View = "overview" | "trials" | "quality";
 
 interface Filters {
+  origin: "all" | "local" | "online" | "snapshot";
   condition: "all" | ResearchCondition;
   protocol: string;
   status: string;
@@ -91,9 +94,40 @@ const STUDY_SESSION_STATUS_LABELS: Record<string, string> = {
   completed: "已完成",
 };
 
+const DATA_ORIGIN_LABELS: Record<ResearchDataOrigin, string> = {
+  local: "本地",
+  online: "线上",
+  online_cache: "线上缓存",
+  snapshot: "导入快照",
+};
+
+function DataOriginBadges({ origins }: { origins: ResearchDataOrigin[] }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {origins.map((origin) => (
+        <span
+          key={origin}
+          className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ring-1 ring-inset ${
+            origin === "local"
+              ? "bg-blue-50 text-blue-700 ring-blue-200"
+              : origin === "online"
+                ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                : origin === "online_cache"
+                  ? "bg-amber-50 text-amber-700 ring-amber-200"
+                  : "bg-violet-50 text-violet-700 ring-violet-200"
+          }`}
+        >
+          {DATA_ORIGIN_LABELS[origin]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const INITIAL_FILTERS: Filters = {
+  origin: "all",
   condition: "all",
-  protocol: "",
+  protocol: "all",
   status: "all",
   questionnaire: "all",
   issue: "all",
@@ -511,6 +545,9 @@ function TrialDrawer({
             <p className="mt-1 text-xs text-zinc-500">
               {shortId(trial.participantId)} · {formatDate(trial.createdAt, true)}
             </p>
+            <div className="mt-2">
+              <DataOriginBadges origins={trial.dataOrigins} />
+            </div>
           </div>
           <button
             type="button"
@@ -543,6 +580,10 @@ function TrialDrawer({
               <div>
                 <dt className="text-xs text-zinc-500">Session ID</dt>
                 <dd className="mt-1 break-all font-mono text-xs text-zinc-800">{trial.sessionId}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-zinc-500">数据来源</dt>
+                <dd className="mt-1"><DataOriginBadges origins={trial.dataOrigins} /></dd>
               </div>
               <div className="sm:col-span-2">
                 <dt className="text-xs text-zinc-500">Participant ID</dt>
@@ -760,12 +801,12 @@ function OverviewView({
           <SummaryCard label="最新版本" value={String(currentVersionTrials.length)} detail="可用于当前实验设计" tone="teal" />
           <SummaryCard label="可分析样本" value={String(analyzableTrials.length)} detail="已完成全部问卷" tone="blue" />
           <SummaryCard label="尚未完成" value={String(incompleteTrials.length)} detail="流程或问卷未结束" tone="amber" />
-          <SummaryCard label="历史版本" value={String(historicalTrials.length)} detail="默认不与当前版本合并" tone="zinc" />
+          <SummaryCard label="历史版本" value={String(historicalTrials.length)} detail="可按实验版本单独筛选" tone="zinc" />
           <SummaryCard label="需要检查" value={String(errorTrials.length)} detail="存在生成或记录异常" tone="rose" />
         </div>
         <div className="mt-4 border-l-4 border-blue-500 bg-blue-50 px-4 py-3 text-sm leading-relaxed text-blue-900">
-          下方趋势默认基于当前筛选得到的 <strong>{summary.totalTrials}</strong> 次体验。
-          当前样本量较小，结果只用于观察趋势，不代表统计显著性。
+          下方趋势基于当前筛选得到的 <strong>{summary.totalTrials}</strong> 次体验。
+          若当前包含多个实验版本，这些统计只用于数据盘点；正式分析时请筛选单一实验版本。
         </div>
       </section>
 
@@ -784,6 +825,7 @@ function OverviewView({
             <table className="w-full min-w-[1060px] text-left text-xs">
               <thead className="bg-zinc-50 text-zinc-500">
                 <tr>
+                  <th className="px-3 py-3 font-medium">来源</th>
                   <th className="px-3 py-3 font-medium">参与者</th>
                   <th className="px-3 py-3 font-medium">分配序列</th>
                   <th className="px-3 py-3 font-medium">体验 1</th>
@@ -795,6 +837,9 @@ function OverviewView({
               <tbody>
                 {studySessions.map((session) => (
                   <tr key={session.id} className="border-t border-zinc-100 text-zinc-700">
+                    <td className="px-3 py-3">
+                      <DataOriginBadges origins={session.dataOrigins} />
+                    </td>
                     <td className="px-3 py-3 font-mono text-[11px]" title={session.participantId}>
                       {shortId(session.participantId)}
                     </td>
@@ -898,9 +943,10 @@ function TrialsView({
         description={`当前显示 ${trials.length} 次体验，点击“查看”追溯完整实验链路。`}
       />
       <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
-        <table className="w-full min-w-[1120px] text-left text-xs">
+        <table className="w-full min-w-[1200px] text-left text-xs">
           <thead className="bg-zinc-50 text-zinc-500">
             <tr>
+              <th className="px-3 py-3 font-medium">来源</th>
               <th className="px-3 py-3 font-medium">时间</th>
               <th className="px-3 py-3 font-medium">参与者</th>
               <th className="px-3 py-3 font-medium">条件</th>
@@ -916,6 +962,7 @@ function TrialsView({
           <tbody>
             {trials.map((trial) => (
               <tr key={trial.id} className="border-t border-zinc-100 text-zinc-700 hover:bg-zinc-50">
+                <td className="px-3 py-3"><DataOriginBadges origins={trial.dataOrigins} /></td>
                 <td className="whitespace-nowrap px-3 py-3">{formatDate(trial.createdAt)}</td>
                 <td className="px-3 py-3 font-mono text-[11px]" title={trial.participantId}>{shortId(trial.participantId)}</td>
                 <td className="px-3 py-3 font-semibold">{CONDITION_LABELS[trial.condition]}</td>
@@ -993,7 +1040,7 @@ function QualityView({
         {historicalTrialCount > 0 && (
           <div className="mb-4 border-l-4 border-blue-400 bg-blue-50 px-4 py-3 text-sm text-blue-900">
             当前范围内有 <strong>{historicalTrialCount}</strong> 次体验来自历史实验版本。
-            这些记录仍可查看，但默认不与当前版本合并统计。
+            这些记录仍可查看；正式分析时请通过“实验版本”筛选，避免混合不同协议的数据。
           </div>
         )}
         {grouped.length ? (
@@ -1023,6 +1070,7 @@ function QualityView({
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="bg-zinc-50 text-xs text-zinc-500">
                 <tr>
+                  <th className="px-4 py-3 font-medium">来源</th>
                   <th className="px-4 py-3 font-medium">参与者</th>
                   <th className="px-4 py-3 font-medium">实验状态</th>
                   <th className="px-4 py-3 font-medium">问题</th>
@@ -1033,6 +1081,9 @@ function QualityView({
                   .filter((session) => session.issues.length > 0)
                   .map((session) => (
                     <tr key={session.id} className="border-t border-zinc-100">
+                      <td className="px-4 py-3">
+                        <DataOriginBadges origins={session.dataOrigins} />
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-zinc-600">
                         {shortId(session.participantId)}
                       </td>
@@ -1054,6 +1105,7 @@ function QualityView({
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="bg-zinc-50 text-xs text-zinc-500">
               <tr>
+                <th className="px-4 py-3 font-medium">来源</th>
                 <th className="px-4 py-3 font-medium">级别</th>
                 <th className="px-4 py-3 font-medium">问题</th>
                 <th className="px-4 py-3 font-medium">体验 ID</th>
@@ -1066,6 +1118,9 @@ function QualityView({
                 const trial = trialMap.get(item.trialId);
                 return (
                   <tr key={item.id} className="border-t border-zinc-100">
+                    <td className="px-4 py-3">
+                      {trial && <DataOriginBadges origins={trial.dataOrigins} />}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={item.severity === "error" ? "text-rose-700" : "text-amber-700"}>
                         {item.severity === "error" ? "错误" : "提醒"}
@@ -1103,14 +1158,19 @@ export default function ResearchDashboardClient({
   initialData: ResearchDashboardDataset;
   remoteSyncEnabled: boolean;
 }) {
-  const [dataset, setDataset] = useState(initialData);
+  const [localDataset, setLocalDataset] = useState(initialData);
+  const [remoteDataset, setRemoteDataset] = useState<ResearchDashboardDataset | null>(null);
+  const [snapshotDataset, setSnapshotDataset] = useState<ResearchDashboardDataset | null>(null);
+  const dataset = useMemo(
+    () => mergeResearchDashboardDatasets(
+      [localDataset, remoteDataset, snapshotDataset].filter(
+        (item): item is ResearchDashboardDataset => item !== null
+      )
+    ),
+    [localDataset, remoteDataset, snapshotDataset]
+  );
   const [view, setView] = useState<View>("overview");
-  const [filters, setFilters] = useState<Filters>({
-    ...INITIAL_FILTERS,
-    protocol: initialData.protocols.includes(initialData.currentProtocolVersion)
-      ? initialData.currentProtocolVersion
-      : "all",
-  });
+  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [selectedTrial, setSelectedTrial] = useState<ResearchTrialRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -1122,6 +1182,18 @@ export default function ResearchDashboardClient({
   const filteredTrials = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
     return dataset.trials.filter((trial) => {
+      if (
+        filters.origin === "local" &&
+        !trial.dataOrigins.includes("local")
+      ) return false;
+      if (
+        filters.origin === "online" &&
+        !trial.dataOrigins.some((origin) => origin === "online" || origin === "online_cache")
+      ) return false;
+      if (
+        filters.origin === "snapshot" &&
+        !trial.dataOrigins.includes("snapshot")
+      ) return false;
       if (filters.condition !== "all" && trial.condition !== filters.condition) return false;
       if (filters.protocol !== "all" && trial.protocolVersion !== filters.protocol) return false;
       if (filters.status !== "all" && trial.status !== filters.status) return false;
@@ -1154,18 +1226,13 @@ export default function ResearchDashboardClient({
     ),
     [dataset.studySessions, filteredTrialIds]
   );
-
-  const replaceDataset = useCallback((next: ResearchDashboardDataset, sourceMessage: string) => {
-    setDataset(next);
-    setFilters({
-      ...INITIAL_FILTERS,
-      protocol: next.protocols.includes(next.currentProtocolVersion)
-        ? next.currentProtocolVersion
-        : "all",
-    });
-    setSelectedTrial(null);
-    setMessage(sourceMessage);
-  }, []);
+  const originCounts = useMemo(() => ({
+    local: dataset.trials.filter((trial) => trial.dataOrigins.includes("local")).length,
+    online: dataset.trials.filter((trial) =>
+      trial.dataOrigins.some((origin) => origin === "online" || origin === "online_cache")
+    ).length,
+    snapshot: dataset.trials.filter((trial) => trial.dataOrigins.includes("snapshot")).length,
+  }), [dataset.trials]);
 
   const refreshDatabase = async () => {
     setLoading(true);
@@ -1173,7 +1240,9 @@ export default function ResearchDashboardClient({
     try {
       const response = await fetch("/api/research/data", { cache: "no-store" });
       if (!response.ok) throw new Error("无法读取本地研究数据库");
-      replaceDataset(await response.json() as ResearchDashboardDataset, "已刷新本地数据库");
+      setLocalDataset(await response.json() as ResearchDashboardDataset);
+      setSelectedTrial(null);
+      setMessage("已刷新本地数据库，其他来源保持不变");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "刷新失败");
     } finally {
@@ -1181,9 +1250,9 @@ export default function ResearchDashboardClient({
     }
   };
 
-  const syncRemoteData = useCallback(async (automatic = false) => {
+  const syncRemoteData = useCallback(async () => {
     setLoading(true);
-    if (!automatic) setMessage("");
+    setMessage("");
     try {
       const response = await fetch("/api/research/remote", { cache: "no-store" });
       const result = await response.json() as {
@@ -1195,39 +1264,23 @@ export default function ResearchDashboardClient({
       if (!response.ok || !result.dataset) {
         throw new Error(result.error || "无法同步线上研究数据");
       }
-      if (result.transport === "cache" && automatic) {
-        setMessage("线上同步暂时不可用，已保留当前本地数据。");
-        return;
-      }
-      const localCurrentCount = dataset.trials.filter(
-        (trial) => trial.protocolVersion === dataset.currentProtocolVersion
-      ).length;
-      const remoteCurrentCount = result.dataset.trials.filter(
-        (trial) => trial.protocolVersion === result.dataset?.currentProtocolVersion
-      ).length;
-      if (
-        result.transport === "cache" &&
-        localCurrentCount > 0 &&
-        remoteCurrentCount === 0
-      ) {
-        setMessage("线上同步暂时不可用，旧缓存未覆盖当前本地实验数据。");
-        return;
-      }
+      setRemoteDataset(result.dataset);
+      setSelectedTrial(null);
       const sourceMessage = result.transport === "cache"
-        ? `线上暂时不可用，已载入最近缓存${result.warning ? `：${result.warning}` : ""}`
-        : "线上数据已同步";
-      replaceDataset(result.dataset, sourceMessage);
+        ? `线上实时同步暂时不可用，已合并线上缓存（截止 ${formatDate(result.dataset.source.capturedAt, true)}）`
+        : `线上数据已同步并与本地合并（${result.dataset.trials.length} 次体验）`;
+      setMessage(sourceMessage);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "线上同步失败");
     } finally {
       setLoading(false);
     }
-  }, [dataset.currentProtocolVersion, dataset.trials, replaceDataset]);
+  }, []);
 
   useEffect(() => {
     if (!remoteSyncEnabled || autoSyncAttemptedRef.current) return;
     autoSyncAttemptedRef.current = true;
-    void syncRemoteData(true);
+    void syncRemoteData();
   }, [remoteSyncEnabled, syncRemoteData]);
 
   const importSnapshot = async (file: File) => {
@@ -1236,7 +1289,9 @@ export default function ResearchDashboardClient({
     try {
       const parsed = JSON.parse(await file.text()) as unknown;
       const next = buildResearchDashboardDataset(parsed, "snapshot");
-      replaceDataset(next, `已载入快照：${file.name}`);
+      setSnapshotDataset(next);
+      setSelectedTrial(null);
+      setMessage(`已合并快照：${file.name}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "无法读取快照");
     } finally {
@@ -1342,13 +1397,20 @@ export default function ResearchDashboardClient({
                 ? "本地数据库"
                 : dataset.source.kind === "remote"
                   ? "线上实验数据库"
-                  : "服务器导出快照"
+                  : dataset.source.kind === "remote-cache"
+                    ? "线上实验缓存"
+                    : dataset.source.kind === "combined"
+                      ? "合并视图"
+                      : "服务器导出快照"
             }</strong>
             <span className="mx-2 text-zinc-300">|</span>
             截止 {formatDate(dataset.source.capturedAt, true)}
             <span className="mx-2 text-zinc-300">|</span>
             共 {dataset.trials.length} 次体验
             {dataset.studySessions.length > 0 && <> · {dataset.studySessions.length} 位参与者</>}
+            <span className="mx-2 text-zinc-300">|</span>
+            本地 {originCounts.local} · 线上 {originCounts.online}
+            {originCounts.snapshot > 0 && <> · 快照 {originCounts.snapshot}</>}
           </p>
           <p>{isDragging ? "松开即可载入 JSON 快照" : message || "可将实验导出 JSON 拖到此处"}</p>
         </div>
@@ -1377,7 +1439,7 @@ export default function ResearchDashboardClient({
         </nav>
 
         <section className="mt-5 border-b border-zinc-200 pb-5">
-          <div className="grid gap-3 md:grid-cols-[minmax(240px,1.4fr)_minmax(190px,0.9fr)_minmax(190px,0.9fr)_auto]">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.4fr)_minmax(150px,0.7fr)_minmax(190px,0.9fr)_minmax(190px,0.9fr)_auto]">
             <FilterField label="搜索">
               <input
                 value={filters.query}
@@ -1385,6 +1447,18 @@ export default function ResearchDashboardClient({
                 placeholder="参与者、体验 ID、音乐"
                 className="h-9 w-full rounded border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
               />
+            </FilterField>
+            <FilterField label="数据来源">
+              <select
+                value={filters.origin}
+                onChange={(event) => updateFilter("origin", event.target.value as Filters["origin"])}
+                className="h-9 w-full rounded border border-zinc-300 bg-white px-2 text-sm"
+              >
+                <option value="all">全部来源</option>
+                <option value="local">本地服务</option>
+                <option value="online">线上链接</option>
+                <option value="snapshot">导入快照</option>
+              </select>
             </FilterField>
             <FilterField label="实验版本">
               <select
