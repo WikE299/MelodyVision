@@ -21,11 +21,12 @@ function serviceUrl(path: string): string {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const response = await fetch(serviceUrl("/health"), {
+    const warmRequested = new URL(request.url).searchParams.get("warm") === "1";
+    const response = await fetch(serviceUrl(warmRequested ? "/warmup" : "/health"), {
       cache: "no-store",
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(warmRequested ? 120_000 : 5_000),
     });
     const service = await response.json();
     return Response.json({ status: response.ok ? "ok" : "unavailable", service }, { status: response.status });

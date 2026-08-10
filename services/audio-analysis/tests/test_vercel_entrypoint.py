@@ -74,6 +74,10 @@ class VercelAudioEntrypointTests(unittest.TestCase):
         self.assertEqual(args[0], "DELETE")
         self.assertEqual(kwargs["json"], {"prefixes": [storage_path]})
 
+    def test_warm_query_is_detected_without_affecting_other_requests(self) -> None:
+        self.assertTrue(MODULE._warm_requested("/api/audio-profile?warm=1"))
+        self.assertFalse(MODULE._warm_requested("/api/audio-profile"))
+
 
 if __name__ == "__main__":
     unittest.main()

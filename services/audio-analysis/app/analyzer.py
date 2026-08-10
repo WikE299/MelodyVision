@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -78,6 +79,28 @@ def _safe_correlation(left: np.ndarray, right: np.ndarray) -> float:
 class MusicAnalyzer:
     def __init__(self, semantic_analyzer: ClapSemanticAnalyzer | None = None) -> None:
         self.semantic_analyzer = semantic_analyzer or ClapSemanticAnalyzer()
+        self._signal_warmed = False
+        self._warmup_lock = threading.Lock()
+
+    @property
+    def signal_warmed(self) -> bool:
+        return self._signal_warmed
+
+    def warmup(self) -> None:
+        if self._signal_warmed:
+            return
+        with self._warmup_lock:
+            if self._signal_warmed:
+                return
+            seconds = 8
+            time = np.arange(ANALYSIS_SAMPLE_RATE * seconds) / ANALYSIS_SAMPLE_RATE
+            pulse = 0.55 + 0.35 * (np.sin(2 * np.pi * 2 * time) > 0)
+            audio = (
+                0.18 * np.sin(2 * np.pi * 220 * time)
+                + 0.08 * np.sin(2 * np.pi * 440 * time)
+            ) * pulse
+            self._signal_features(audio.astype(np.float32), ANALYSIS_SAMPLE_RATE, float(seconds))
+            self._signal_warmed = True
 
     def analyze_file(
         self,
@@ -89,6 +112,7 @@ class MusicAnalyzer:
         mime_type: str | None = None,
         catalog_item_id: str | None = None,
     ) -> dict[str, object]:
+        self.warmup()
         audio_path = Path(path)
         content_hash = hashlib.sha256(audio_path.read_bytes()).hexdigest()
         audio, sample_rate = librosa.load(audio_path, sr=ANALYSIS_SAMPLE_RATE, mono=True)
@@ -211,12 +235,8 @@ class MusicAnalyzer:
 
     def _signal_features(self, audio: np.ndarray, sample_rate: int, duration: float) -> dict[str, object]:
         onset_envelope = librosa.onset.onset_strength(y=audio, sr=sample_rate, hop_length=HOP_LENGTH)
-        tempo, beat_frames = librosa.beat.beat_track(
-            onset_envelope=onset_envelope,
-            sr=sample_rate,
-            hop_length=HOP_LENGTH,
-        )
-        bpm = float(np.asarray(tempo).reshape(-1)[0]) if np.asarray(tempo).size else 0.0
+        bpm, beat_lag = self._estimate_tempo(onset_envelope, sample_rate)
+        beat_frames = self._beat_frames(onset_envelope, beat_lag)
         beat_times = librosa.frames_to_time(beat_frames, sr=sample_rate, hop_length=HOP_LENGTH)
         onset_frames = librosa.onset.onset_detect(
             onset_envelope=onset_envelope,
@@ -301,16 +321,7 @@ class MusicAnalyzer:
                 "beatStrength": _analyzed(beat_strength, min(1.0, beat_confidence + 0.1), "signal-rhythm"),
                 "onsetDensity": _analyzed(onset_density, onset_confidence, "signal-rhythm"),
                 "beatsSeconds": [round(float(value), 3) for value in beat_times],
-                "tempoCurve": _curve(
-                    librosa.feature.tempo(
-                        onset_envelope=onset_envelope,
-                        sr=sample_rate,
-                        hop_length=HOP_LENGTH,
-                        aggregate=None,
-                    ),
-                    duration,
-                    normalize=False,
-                ),
+                "tempoCurve": self._tempo_curve(onset_envelope, sample_rate, duration, bpm),
                 "onsetDensityCurve": _curve(onset_envelope, duration),
             },
             "tonality": {
@@ -440,6 +451,50 @@ class MusicAnalyzer:
         best, second = candidates[0], candidates[1]
         confidence = _clip01(max(0.0, best[0] - second[0]) * 2.5)
         return best[1], best[2], confidence
+
+    @staticmethod
+    def _estimate_tempo(onset_envelope: np.ndarray, sample_rate: int) -> tuple[float, int]:
+        values = np.nan_to_num(np.asarray(onset_envelope, dtype=float), nan=0.0)
+        if values.size < 4 or np.allclose(values, values[0]):
+            return 0.0, 0
+        tempo = librosa.feature.tempo(
+            onset_envelope=values,
+            sr=sample_rate,
+            hop_length=HOP_LENGTH,
+        )
+        bpm = float(np.asarray(tempo).reshape(-1)[0]) if np.asarray(tempo).size else 0.0
+        if bpm <= 0:
+            return 0.0, 0
+        beat_lag = max(1, round(60 * sample_rate / (HOP_LENGTH * bpm)))
+        return bpm, beat_lag
+
+    @staticmethod
+    def _beat_frames(onset_envelope: np.ndarray, beat_lag: int) -> np.ndarray:
+        if beat_lag <= 0 or len(onset_envelope) == 0:
+            return np.array([], dtype=int)
+        anchor = int(np.argmax(onset_envelope)) % beat_lag
+        snap_radius = max(1, round(beat_lag * 0.2))
+        beats: list[int] = []
+        for expected in range(anchor, len(onset_envelope), beat_lag):
+            start = max(0, expected - snap_radius)
+            end = min(len(onset_envelope), expected + snap_radius + 1)
+            beats.append(start + int(np.argmax(onset_envelope[start:end])))
+        return np.unique(np.asarray(beats, dtype=int))
+
+    @classmethod
+    def _tempo_curve(
+        cls,
+        onset_envelope: np.ndarray,
+        sample_rate: int,
+        duration: float,
+        fallback_bpm: float,
+    ) -> list[dict[str, float]]:
+        window_count = min(8, max(1, round(duration / 6)))
+        values = []
+        for window in np.array_split(onset_envelope, window_count):
+            bpm, _ = cls._estimate_tempo(window, sample_rate)
+            values.append(bpm or fallback_bpm)
+        return _curve(np.asarray(values), duration, normalize=False)
 
     @staticmethod
     def _beat_confidence(beat_times: np.ndarray) -> float:

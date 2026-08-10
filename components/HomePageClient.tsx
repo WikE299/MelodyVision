@@ -82,6 +82,9 @@ const COPY = {
     choosePathFirst: "请先选择一条聆听路径。",
     analyzing: "正在分析音乐...",
     wakingAnalyzer: "正在唤醒音乐理解服务...",
+    readingAudio: "正在读取音频...",
+    extractingFeatures: "正在提取节奏、音色与结构...",
+    finishingAnalysis: "正在完成音乐理解，首次分析可能需要约一分钟...",
     analyzeFailed: "音频分析失败，请换一段音频再试。",
     richAnalysisUnavailable: "音乐理解服务暂不可用。请稍后重试，或确认音频分析服务已经启动。",
     exampleFailed: "示例音频加载失败，请稍后再试或上传自己的音频。",
@@ -129,6 +132,7 @@ const COPY = {
     studyCompleted: "本次实验已经完成",
     participantRequired: "请输入参与者编号。",
     studySessionFailed: "实验会话创建失败，请稍后重试。",
+    studyStartFailed: "实验已创建，但首段音乐未能启动，请稍后重试。",
   },
   en: {
     productHint: "Choose a sound and turn what you hear into an artwork through guided listening.",
@@ -152,6 +156,9 @@ const COPY = {
     choosePathFirst: "Choose a listening path first.",
     analyzing: "Analyzing your music...",
     wakingAnalyzer: "Waking the music understanding service...",
+    readingAudio: "Reading the audio...",
+    extractingFeatures: "Extracting rhythm, timbre, and structure...",
+    finishingAnalysis: "Finishing the music analysis. The first run may take about a minute...",
     analyzeFailed: "Audio analysis failed. Please try another file.",
     richAnalysisUnavailable: "The music understanding service is unavailable. Please try again after it has started.",
     exampleFailed: "The example audio could not be loaded. Try again later or upload your own audio.",
@@ -199,6 +206,7 @@ const COPY = {
     studyCompleted: "This study session is complete",
     participantRequired: "Enter a participant ID.",
     studySessionFailed: "The study session could not be created. Please try again.",
+    studyStartFailed: "The study was created, but the first audio could not start. Please try again.",
   },
 };
 
@@ -224,6 +232,7 @@ export default function HomePageClient() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
   const [analysisServiceReady, setAnalysisServiceReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participantId, setParticipantId] = useState("");
@@ -277,10 +286,20 @@ export default function HomePageClient() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!analyzing) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setAnalysisElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [analyzing]);
+
   const handleFileSelect = async (
     file: File | null,
     context: AudioSelectionContext = { sourceKind: "upload" }
   ) => {
+    setAnalysisElapsedSeconds(0);
     setAnalyzing(true);
     setError(null);
     let objectUrl: string | null = null;
@@ -497,6 +516,7 @@ export default function HomePageClient() {
     >
   ) => {
     if (analyzing) return;
+    setAnalysisElapsedSeconds(0);
     setAnalyzing(true);
     setError(null);
 
@@ -563,6 +583,7 @@ export default function HomePageClient() {
 
   const handleExternalSelect = async (item: ExternalMusicResult) => {
     if (analyzing) return;
+    setAnalysisElapsedSeconds(0);
     setAnalyzing(true);
     setError(null);
 
@@ -609,6 +630,7 @@ export default function HomePageClient() {
 
     setStudySessionLoading(true);
     setError(null);
+    let sessionCreated = Boolean(studyPayload);
     try {
       let payload = studyPayload;
       if (!payload) {
@@ -617,6 +639,7 @@ export default function HomePageClient() {
           participantId: normalizedParticipantId,
           deviceSessionId,
         });
+        sessionCreated = true;
         setStudyPayload(payload);
         localStorage.setItem("melodyvisionStudySessionId", payload.session.id);
         sessionStorage.setItem("studySession", JSON.stringify(payload.session));
@@ -738,7 +761,7 @@ export default function HomePageClient() {
     } catch (studyError) {
       console.error("Study start failed:", studyError);
       setAnalyzing(false);
-      setError(copy.studySessionFailed);
+      setError(sessionCreated ? copy.studyStartFailed : copy.studySessionFailed);
     } finally {
       setStudySessionLoading(false);
     }
@@ -1079,7 +1102,15 @@ export default function HomePageClient() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            <span>{analysisServiceReady ? copy.analyzing : copy.wakingAnalyzer}</span>
+            <span>
+              {!analysisServiceReady && analysisElapsedSeconds < 5
+                ? copy.wakingAnalyzer
+                : analysisElapsedSeconds < 4
+                  ? copy.readingAudio
+                  : analysisElapsedSeconds < 20
+                    ? copy.extractingFeatures
+                    : copy.finishingAnalysis}
+            </span>
           </div>
         )}
       </div>

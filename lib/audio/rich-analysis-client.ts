@@ -166,7 +166,7 @@ export async function requestRemoteMusicProfile(
 
 export async function warmRichAnalysisService(): Promise<boolean> {
   const response = await fetch(
-    usesVercelPythonAnalyzer() ? "/api/audio-profile" : analysisUrl("/health"),
+    usesVercelPythonAnalyzer() ? "/api/audio-profile?warm=1" : `${analysisUrl("/health")}?warm=1`,
     {
       cache: "no-store",
       signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
