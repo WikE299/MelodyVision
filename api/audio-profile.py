@@ -8,7 +8,7 @@ import tempfile
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import httpx
 
@@ -62,6 +62,10 @@ def _safe_suffix(file_name: str) -> str:
     if suffix not in ALLOWED_SUFFIXES:
         raise RequestError(400, "Unsupported audio file extension")
     return suffix
+
+
+def _warm_requested(path: str) -> bool:
+    return parse_qs(urlparse(path).query).get("warm") == ["1"]
 
 
 def _allowed_remote_url(value: str) -> bool:
@@ -220,18 +224,25 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        self._json_response(
-            200,
-            {
-                "status": "ok",
-                "provider": "vercel-python",
-                "schemaVersion": SCHEMA_VERSION,
-                "maxAudioSeconds": MAX_AUDIO_SECONDS,
-                "maxAudioBytes": MAX_AUDIO_BYTES,
-                "semanticAnalysis": "disabled",
-                "rawAudioRetention": "temporary-object-deleted-after-request",
-            },
-        )
+        warm_requested = _warm_requested(self.path)
+        try:
+            if warm_requested:
+                analyzer.warmup()
+            self._json_response(
+                200,
+                {
+                    "status": "ok",
+                    "provider": "vercel-python",
+                    "schemaVersion": SCHEMA_VERSION,
+                    "maxAudioSeconds": MAX_AUDIO_SECONDS,
+                    "maxAudioBytes": MAX_AUDIO_BYTES,
+                    "semanticAnalysis": "disabled",
+                    "signalAnalyzerWarmed": analyzer.signal_warmed,
+                    "rawAudioRetention": "temporary-object-deleted-after-request",
+                },
+            )
+        except Exception as error:
+            self._json_response(503, {"error": f"Audio analyzer warmup failed: {error}"})
 
     def do_POST(self) -> None:
         try:

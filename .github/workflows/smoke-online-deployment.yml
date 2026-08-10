@@ -51,6 +51,26 @@ jobs:
             and .schemaVersion == "2.0.0"
           ' <<<"$health"
 
+      - name: Check browser uses the Vercel analyzer
+        shell: bash
+        run: |
+          set -euo pipefail
+          page="$(curl --fail --silent --show-error --max-time 60 "$BASE_URL/")"
+          mapfile -t scripts < <(grep -oE 'src="[^"]+\.js[^"]*"' <<<"$page" | cut -d'"' -f2)
+          test "${#scripts[@]}" -gt 0
+          bundle="$(
+            for script in "${scripts[@]}"; do
+              curl --fail --silent --show-error --max-time 60 "$BASE_URL$script"
+            done
+          )"
+          grep -q '/api/audio-profile' <<<"$bundle"
+          warmup="$(
+            curl --fail --silent --show-error \
+              --retry 2 --retry-delay 5 --max-time 180 \
+              "$BASE_URL/api/audio-profile?warm=1"
+          )"
+          jq -e '.status == "ok" and .signalAnalyzerWarmed == true' <<<"$warmup"
+
       - name: Upload and analyze a real audio clip
         shell: bash
         run: |

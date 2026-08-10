@@ -24,6 +24,7 @@ MAX_REMOTE_REDIRECTS = 4
 
 analyzer = MusicAnalyzer()
 semantic_preload_error: str | None = None
+signal_warmup_error: str | None = None
 
 
 def _preload_enabled() -> bool:
@@ -32,8 +33,13 @@ def _preload_enabled() -> bool:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global semantic_preload_error
+    global semantic_preload_error, signal_warmup_error
     semantic_preload_error = None
+    signal_warmup_error = None
+    try:
+        await run_in_threadpool(analyzer.warmup)
+    except Exception as error:
+        signal_warmup_error = str(error)
     if _preload_enabled() and analyzer.semantic_analyzer.enabled:
         try:
             await run_in_threadpool(analyzer.semantic_analyzer.warmup)
@@ -139,7 +145,21 @@ def health() -> dict[str, object]:
         "semanticDevice": analyzer.semantic_analyzer.device,
         "semanticPreloadEnabled": _preload_enabled(),
         "semanticPreloadError": semantic_preload_error,
+        "signalAnalyzerWarmed": analyzer.signal_warmed,
+        "signalWarmupError": signal_warmup_error,
         "rawAudioRetention": "temporary-file-deleted-after-request",
+    }
+
+
+@app.get("/warmup")
+async def warmup() -> dict[str, object]:
+    global signal_warmup_error
+    await run_in_threadpool(analyzer.warmup)
+    signal_warmup_error = None
+    return {
+        "status": "ok",
+        "schemaVersion": SCHEMA_VERSION,
+        "signalAnalyzerWarmed": True,
     }
 
 

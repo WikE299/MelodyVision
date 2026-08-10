@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import soundfile as sf
@@ -12,6 +13,14 @@ from app.semantic import ClapSemanticAnalyzer
 
 
 class MusicAnalyzerTest(unittest.TestCase):
+    def test_signal_warmup_only_runs_once(self) -> None:
+        analyzer = MusicAnalyzer(ClapSemanticAnalyzer(enabled=False))
+        with patch.object(analyzer, "_signal_features", return_value={}) as signal_features:
+            analyzer.warmup()
+            analyzer.warmup()
+
+        signal_features.assert_called_once()
+
     def test_signal_profile_matches_version_two_contract(self) -> None:
         sample_rate = 22_050
         seconds = 12
@@ -79,6 +88,15 @@ class MusicAnalyzerTest(unittest.TestCase):
 
         self.assertEqual(warnings[0]["code"], "tempo_octave_ambiguity")
         self.assertIn("72.00 BPM", warnings[0]["message"])
+
+    def test_tempo_estimation_uses_onset_periodicity(self) -> None:
+        onset_envelope = np.zeros(240)
+        onset_envelope[::20] = 1
+
+        bpm, beat_lag = MusicAnalyzer._estimate_tempo(onset_envelope, 22_050)
+
+        self.assertEqual(beat_lag, 20)
+        self.assertAlmostEqual(bpm, 129.2, places=1)
 
 
 if __name__ == "__main__":
