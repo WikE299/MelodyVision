@@ -18,6 +18,8 @@ const JSON_COLUMNS = new Set([
   "metadata_json",
   "sequences_json",
   "selected_musician_ids_json",
+  "stimulus_x_json",
+  "stimulus_y_json",
   "selected_characters_json",
   "presets_json",
   "music_analysis_json",
@@ -35,6 +37,8 @@ const JSON_COLUMNS = new Set([
   "model_config_json",
   "run_log_json",
   "selected_reasons_json",
+  "answers_json",
+  "metrics_json",
 ]);
 
 const SUPABASE_TABLES = {
@@ -54,12 +58,14 @@ const SUPABASE_TABLES = {
   pairwiseComparisons: "pairwise_comparisons",
   labeledComparisons: "labeled_comparisons",
   manipulationChecks: "manipulation_checks",
+  questionnaireResponses: "questionnaire_responses",
 } as const;
 
 const OPTIONAL_SUPABASE_TABLES = new Set([
   "study_sessions",
   "study_assignment_blocks",
   "session_comparisons",
+  "questionnaire_responses",
 ]);
 
 function normalizeSupabaseRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -182,7 +188,7 @@ export async function fetchSupabaseResearchExport(
     ] as const
   ));
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     exportedAt: new Date().toISOString(),
     ...Object.fromEntries(entries),
   };

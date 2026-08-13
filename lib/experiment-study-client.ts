@@ -4,6 +4,7 @@ import type {
   SessionComparisonChoice,
   StudyPeriodAssignment,
   StudySession,
+  StudyAudioChoice,
   StudySessionComparison,
   StudyTrial,
   VisualBrief,
@@ -76,6 +77,19 @@ export async function fetchStudySession(studySessionId: string): Promise<StudySe
     `/api/experiment/study-session?studySessionId=${encodeURIComponent(studySessionId)}`,
     { cache: "no-store" }
   );
+  return parseStudyResponse(response);
+}
+
+export async function saveStudyAudioChoices(
+  studySessionId: string,
+  first: StudyAudioChoice,
+  second: StudyAudioChoice
+): Promise<StudySessionPayload> {
+  const response = await fetch("/api/experiment/study-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "select_audio", studySessionId, first, second }),
+  });
   return parseStudyResponse(response);
 }
 

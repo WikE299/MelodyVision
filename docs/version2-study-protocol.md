@@ -1,65 +1,72 @@
 # MelodyVision V2 Study Protocol
 
-Status: frozen for implementation on 2026-07-16. Any change to the conditions, primary outcome, round count, or measurement order must be recorded as a protocol revision before collecting formal-study data.
+Status: revised for implementation on 2026-08-13. The active protocol is `v2-18-streamlined-questionnaires`. Earlier V2 records remain readable but must not be pooled with V2-18 without an explicit protocol filter.
 
-## Research claim
+## Research design
 
-The study compares two complete interaction designs:
+The formal study uses a counterbalanced within-subject crossover design. Each participant experiences both interaction conditions with different music stimuli:
 
-- `multi_agent`: role-based, multi-perspective reflective co-creation with musician selection and distinct musician viewpoints.
-- `single_agent`: single-guide conversational co-creation using the same four visual-articulation rounds.
+- `multi_agent`: role-based, multi-perspective reflective co-creation with selected musicians.
+- `single_agent`: one visible co-creation guide using the same visual-articulation objective.
 
-The supported claim concerns these interaction-design conditions. The study does not isolate or claim a causal effect from agent count alone.
+The study compares the two complete interaction designs. It does not isolate or claim a causal effect from agent count alone.
 
-## Research questions
+After entering a participant ID, each participant chooses two different music tracks. The system counterbalances condition order and which selected track is paired with each condition. Participants do not choose a condition or bind a track to a condition themselves. Analysis must retain music identity as a covariate or random effect because the two conditions use different tracks within a participant.
 
-Primary question: compared with single-guide conversational co-creation, how does role-based multi-perspective reflective co-creation affect the perceived alignment between the generated artwork and the participant's own music-evoked imagery?
+Each period also has one paired `direct_baseline` artwork generated from the same `MusicProfile`. The Baseline cannot read conversation messages, musician comments, user visual input, resonance weights, or the co-created `VisualBrief`.
 
-Primary outcome: `imagination_match_score` for the co-created artwork.
+## Participant flow
 
-Secondary outcomes:
+The current formal experiment contains 17 questionnaire modules:
 
-- music-image alignment;
-- perceived influence over the artwork;
-- creative ownership;
-- immersion in music-to-image articulation;
-- satisfaction with the resulting artwork.
+1. Enter participant ID and choose two different music tracks.
+2. Complete the 8-item participant background questionnaire.
+3. Complete period 1 and generate the co-created artwork.
+4. Rate the co-created artwork with the 3-item image-alignment scale.
+5. Generate the paired Baseline, then rate it with the same 3-item scale.
+6. Complete period 1 CSI, agency and ownership, SUS, Raw NASA-TLX, and manipulation check.
+7. Repeat steps 3-6 for period 2.
+8. Complete one session preference item with an optional reason and the CSI factor-weighting task.
+9. Return to the final result page, where both periods and both generation roles remain available for review.
 
-## Shared interaction protocol
+The former six-item result-page feedback and three forced co-created/Baseline comparison questions are not part of new V2-18 sessions. They remain stored and readable only for historical protocols.
 
-Both conditions use the same four user-contribution goals:
+## Baseline timing
 
-1. subject and space;
-2. motion and composition;
-3. light, color, and material;
-4. meaning and constraints.
+Baseline generation starts only after the participant has submitted the 3-item image-alignment scale for the current co-created artwork. The participant then waits for the paired Baseline and completes the same three ratings for it.
 
-Both conditions share the same `MusicProfile`, `VisualBrief`, generation configuration, image model, aspect ratio, retry policy, and result-evaluation order.
+The server enforces this checkpoint using the completed `image_alignment` response linked to the co-created Run. A direct client request cannot bypass it. Baseline generation is idempotent per Trial and may be retried explicitly after a failure.
 
-## Baseline role
+## Measures and scoring
 
-Each trial also produces one `direct_baseline` artwork from the same `MusicProfile`. It cannot read conversation messages, musician comments, resonance weights, user visual input, or the co-created `VisualBrief`.
+- Image alignment: three matched 1-7 items, reported as their mean. It is collected separately for every co-created and Baseline artwork. These matched scores support within-condition paired comparison of the two generation roles.
+- Creativity Support Index: 10 statements across enjoyment, exploration, expressiveness, immersion, and results worth effort. Collaboration items remain excluded. Factor scores are collected after each period. The factor-weighting task is completed once after both periods, then applied to both CSI responses.
+- Agency and ownership: two independent 1-5 items. They are exported as separate outcomes and are not merged into a single score.
+- System Usability Scale: 10 standard 1-5 items with alternating scoring transformed to 0-100.
+- Raw NASA-TLX: six 0-100 dimensions and their unweighted mean.
+- Manipulation check: two 1-5 process-perception items used to verify the intended condition difference, not as primary outcomes.
+- Session preference: one direct overall comparison of the two experienced interaction paths plus one optional reason.
 
-The participant-facing baseline comparison is labeled, not blinded. It is a secondary reflective comparison and must not be described as an unbiased blind image-quality test.
+Missing values are stored as missing and never converted to zero. Current definitions and responses carry `mv-questionnaires-1.2` so future revisions can be separated during analysis.
 
-## Result and measurement order
+## Persistence and export
 
-1. Show only the co-created artwork and collect six neutral 1-5 ratings.
-2. Reveal labeled controls for `co_created` and `direct_baseline`; preserve a large single-artwork canvas and let the participant switch between them.
-3. Collect music-match, personal-imagery-match, overall preference, and an optional reason for the labeled comparison.
-4. Collect the three manipulation checks only after the primary ratings and baseline comparison.
-5. Mark the Trial complete and unlock generation rationale, download, restart, and other result controls.
+Questionnaire responses are stored in `questionnaire_responses` and linked to participant, study session, Trial, period, condition, generation role, and image Run. The local research dashboard can:
 
-## Manipulation checks
+- trace responses from participant to session, Trial, Run, and generated artwork;
+- display raw answers and derived metrics in Trial details;
+- export one participant per row for path-level analysis;
+- export one questionnaire module per sheet in the Excel workbook;
+- export one questionnaire item per row for raw-data audit and re-scoring;
+- merge local and online snapshots while retaining source labels.
 
-The final process check measures:
+The workbook contains a dedicated `主体感与所有权` sheet. Trial and participant CSV exports contain separate `agency_score` and `ownership_score` columns.
 
-- perceived multiplicity of listening perspectives;
-- support for articulating the participant's imagined scene;
-- whether the interaction felt more like a shared discussion than parameter entry.
+The Supabase deployment must apply `supabase/migrations/20260812000000_integrated_questionnaires.sql` before formal data collection.
 
-These checks validate whether the intended interaction difference was perceived. They are not primary outcome measures.
+## Compatibility rule
 
-## Persistence compatibility
-
-New trials write `labeled_comparisons` and `manipulation_checks`. `pairwise_comparisons` and `study_trials.comparison_order` remain readable for historical exports but are deprecated and are not used by the current participant flow.
+- V2-15 and earlier records continue to use former result-page evaluations and comparisons.
+- V2-16 and V2-17 retain their original 15-module integrated questionnaire sequence.
+- V2-18 uses the streamlined 17-module sequence and does not require legacy result-page ratings or comparisons.
+- Research exports identify every record by protocol and questionnaire version; missing historical fields remain missing rather than being inferred or set to zero.

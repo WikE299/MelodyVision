@@ -10,6 +10,7 @@ test("within-subject sessions balance four sequences and preserve paired progres
   try {
     const sessions = await import("../lib/db/study-sessions.ts");
     const trials = await import("../lib/db/study-trials.ts");
+    const questionnaires = await import("../lib/db/questionnaire-responses.ts");
     const evaluations = await import("../lib/db/trial-evaluations.ts");
 
     const assigned = await Promise.all(
@@ -32,6 +33,36 @@ test("within-subject sessions balance four sequences and preserve paired progres
     assert.deepEqual([...sequenceCounts.values()].sort(), [2, 2, 2, 2]);
     assert.ok(assigned.every((item) => item.recovered === false));
 
+    const firstAudio = {
+      id: "preset:track-x",
+      sourceKind: "preset" as const,
+      name: "Track X",
+      artist: "Artist X",
+      tags: ["calm"],
+      source: "test",
+      sourceUrl: "",
+      playbackUrl: "/x.mp3",
+      catalogItemId: "track-x",
+      remoteSourceUrl: null,
+      fileName: "x.mp3",
+      fileSize: 0,
+      mimeType: "audio/mpeg",
+    };
+    const secondAudio = { ...firstAudio, id: "preset:track-y", name: "Track Y", playbackUrl: "/y.mp3", catalogItemId: "track-y", fileName: "y.mp3" };
+    await sessions.saveStudyAudioChoices({
+      studySessionId: assigned[0].session.id,
+      first: firstAudio,
+      second: secondAudio,
+    });
+    await assert.rejects(
+      sessions.saveStudyAudioChoices({
+        studySessionId: assigned[1].session.id,
+        first: firstAudio,
+        second: firstAudio,
+      }),
+      /different/
+    );
+
     const recovered = await sessions.createOrRecoverStudySession({
       participantId: "participant-0",
       deviceSessionId: "another-device",
@@ -41,7 +72,7 @@ test("within-subject sessions balance four sequences and preserve paired progres
     assert.equal(recovered.recovered, true);
     assert.equal(recovered.session.id, assigned[0].session.id);
 
-    const studySession = assigned[0].session;
+    const studySession = (await sessions.getStudySession(assigned[0].session.id))!;
     const firstAssignment = sessions.getStudyPeriodAssignment(studySession, 1);
     const secondAssignment = sessions.getStudyPeriodAssignment(studySession, 2);
     assert.notEqual(firstAssignment.condition, secondAssignment.condition);
@@ -96,25 +127,47 @@ test("within-subject sessions balance four sequences and preserve paired progres
       coCreatedRunId: "co-created-period-1",
       status: "evaluating",
     });
-    await evaluations.saveArtworkEvaluation({
+    await questionnaires.upsertQuestionnaireResponse({
+      responseKey: "period:1:artwork:co_created",
+      participantId: studySession.participantId,
+      studySessionId: studySession.id,
       trialId: firstTrial.id,
       runId: "co-created-period-1",
-      musicMatchScore: 4,
-      imaginationMatchScore: 4,
-      agencyScore: 4,
-      ownershipScore: 4,
-      immersionScore: 4,
-      satisfactionScore: 4,
+      period: 1,
+      condition: firstTrial.condition,
+      generationRole: "co_created",
+      instrument: "image_alignment",
+      questionnaireVersion: "mv-questionnaires-1.1",
+      scope: "artwork",
+      status: "completed",
+      answers: { IA1: 4, IA2: 4, IA3: 4 },
+      totalScore: 4,
+      metrics: {},
     });
-    await assert.rejects(
-      trials.claimBaselineJob(firstTrial.id),
-      trials.BaselineNotEligibleError
-    );
+    const firstBaselineClaim = await trials.claimBaselineJob(firstTrial.id);
+    assert.equal(firstBaselineClaim.acquired, true);
 
     await trials.updateStudyTrial({
       id: secondTrial.id,
       coCreatedRunId: "co-created-period-2",
       status: "evaluating",
+    });
+    await questionnaires.upsertQuestionnaireResponse({
+      responseKey: "period:2:artwork:co_created",
+      participantId: studySession.participantId,
+      studySessionId: studySession.id,
+      trialId: secondTrial.id,
+      runId: "co-created-period-2",
+      period: 2,
+      condition: secondTrial.condition,
+      generationRole: "co_created",
+      instrument: "image_alignment",
+      questionnaireVersion: "mv-questionnaires-1.1",
+      scope: "artwork",
+      status: "completed",
+      answers: { IA1: 4, IA2: 4, IA3: 4 },
+      totalScore: 4,
+      metrics: {},
     });
     await evaluations.saveArtworkEvaluation({
       trialId: secondTrial.id,
@@ -126,7 +179,7 @@ test("within-subject sessions balance four sequences and preserve paired progres
       immersionScore: 4,
       satisfactionScore: 4,
     });
-    const baselineClaim = await trials.claimBaselineJob(firstTrial.id);
+    const baselineClaim = await trials.claimBaselineJob(secondTrial.id);
     assert.equal(baselineClaim.acquired, true);
 
     await sessions.saveStudySessionComparison({

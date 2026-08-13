@@ -253,6 +253,8 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       current_period INTEGER NOT NULL DEFAULT 1,
       stimulus_x_id TEXT NOT NULL,
       stimulus_y_id TEXT NOT NULL,
+      stimulus_x_json TEXT NOT NULL DEFAULT 'null',
+      stimulus_y_json TEXT NOT NULL DEFAULT 'null',
       selected_musician_ids_json TEXT NOT NULL DEFAULT '[]',
       first_trial_id TEXT,
       second_trial_id TEXT,
@@ -334,6 +336,31 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       FOREIGN KEY (trial_id) REFERENCES study_trials(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS questionnaire_responses (
+      id TEXT PRIMARY KEY,
+      response_key TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      study_session_id TEXT NOT NULL,
+      trial_id TEXT,
+      run_id TEXT,
+      period INTEGER,
+      condition TEXT,
+      generation_role TEXT,
+      instrument TEXT NOT NULL,
+      questionnaire_version TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      status TEXT NOT NULL,
+      answers_json TEXT NOT NULL,
+      score_total REAL,
+      metrics_json TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (study_session_id) REFERENCES study_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (trial_id) REFERENCES study_trials(id) ON DELETE CASCADE,
+      UNIQUE(study_session_id, response_key)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_generation_runs_session
       ON generation_runs(session_id, created_at);
 
@@ -378,6 +405,15 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
 
     CREATE INDEX IF NOT EXISTS idx_manipulation_checks_trial
       ON manipulation_checks(trial_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_questionnaire_responses_session
+      ON questionnaire_responses(study_session_id, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_questionnaire_responses_trial
+      ON questionnaire_responses(trial_id, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_questionnaire_responses_participant
+      ON questionnaire_responses(participant_id, updated_at);
   `);
 
   ensureColumn(database, "generation_runs", "music_profile_json", "TEXT NOT NULL DEFAULT 'null'");
@@ -397,6 +433,8 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
   ensureColumn(database, "study_trials", "study_session_id", "TEXT");
   ensureColumn(database, "study_trials", "period", "INTEGER");
   ensureColumn(database, "study_trials", "stimulus_id", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, "study_sessions", "stimulus_x_json", "TEXT NOT NULL DEFAULT 'null'");
+  ensureColumn(database, "study_sessions", "stimulus_y_json", "TEXT NOT NULL DEFAULT 'null'");
   ensureColumn(database, "artwork_evaluations", "immersion_score", "INTEGER");
   ensureColumn(database, "artwork_evaluations", "satisfaction_score", "INTEGER");
   database.exec(`

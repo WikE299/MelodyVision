@@ -5,6 +5,7 @@ export type GenerationRole = "co_created" | "direct_baseline";
 export type AssignmentMethod = "demo_choice" | "balanced_random" | "crossover_block";
 export type ComparisonOrder = "co_created_left" | "baseline_left";
 export type StudyPeriod = 1 | 2;
+export type StudyAudioSourceKind = "preset" | "search" | "upload";
 export type StudySequence =
   | "single_x_then_multi_y"
   | "multi_x_then_single_y"
@@ -26,7 +27,36 @@ export type StudyTrialStatus =
   | "evaluating"
   | "completed";
 export type BaselineJobStatus = "pending" | "running" | "completed" | "failed";
-export const CURRENT_STUDY_PROTOCOL_VERSION = "v2-15-within-subject-crossover";
+export const CURRENT_STUDY_PROTOCOL_VERSION = "v2-18-streamlined-questionnaires";
+export const INTEGRATED_QUESTIONNAIRE_PROTOCOLS = [
+  "v2-16-integrated-questionnaires",
+  "v2-17-participant-selected-music",
+  CURRENT_STUDY_PROTOCOL_VERSION,
+] as const;
+
+export function usesIntegratedQuestionnaires(protocolVersion: string): boolean {
+  return (INTEGRATED_QUESTIONNAIRE_PROTOCOLS as readonly string[]).includes(protocolVersion);
+}
+
+export function usesStreamlinedQuestionnaires(protocolVersion: string): boolean {
+  return protocolVersion === CURRENT_STUDY_PROTOCOL_VERSION;
+}
+
+export interface StudyAudioChoice {
+  id: string;
+  sourceKind: StudyAudioSourceKind;
+  name: string;
+  artist: string;
+  tags: string[];
+  source: string;
+  sourceUrl: string;
+  playbackUrl: string;
+  catalogItemId: string | null;
+  remoteSourceUrl: string | null;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+}
 
 export interface StudyPeriodAssignment {
   period: StudyPeriod;
@@ -45,6 +75,8 @@ export interface StudySession {
   currentPeriod: StudyPeriod;
   stimulusXId: string;
   stimulusYId: string;
+  stimulusX: StudyAudioChoice | null;
+  stimulusY: StudyAudioChoice | null;
   selectedMusicianIds: string[];
   firstTrialId: string | null;
   secondTrialId: string | null;

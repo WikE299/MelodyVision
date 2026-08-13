@@ -18,7 +18,6 @@ import {
   exportResearchTrialsCsv,
   mergeResearchDashboardDatasets,
   summarizeResearchTrials,
-  type ResearchChoiceMetric,
   type ResearchCondition,
   type ResearchDataOrigin,
   type ResearchDashboardDataset,
@@ -28,8 +27,30 @@ import {
   type ResearchTrialRecord,
 } from "@/lib/research-dashboard";
 import { buildResearchThumbnailUrl } from "@/lib/research-thumbnail";
+import {
+  usesIntegratedQuestionnaires,
+  usesStreamlinedQuestionnaires,
+} from "@/lib/contracts";
 
-type View = "overview" | "trials" | "quality";
+type View = "overview" | "trials" | "questionnaires" | "quality";
+
+type QuestionnaireRow = {
+  id: string;
+  participantId: string;
+  studySessionId: string;
+  trialId: string;
+  period: number | null;
+  condition: ResearchCondition;
+  instrument: string;
+  generationRole: string;
+  status: string;
+  totalScore: number | null;
+  questionnaireVersion: string;
+  completedAt: string;
+  answers: unknown;
+  metrics: unknown;
+  trial: ResearchTrialRecord | null;
+};
 
 interface Filters {
   origin: "all" | "local" | "online" | "snapshot";
@@ -92,6 +113,23 @@ const STUDY_SESSION_STATUS_LABELS: Record<string, string> = {
   comparing: "体验对比中",
   baseline_review: "参照对比中",
   completed: "已完成",
+};
+
+const QUESTIONNAIRE_LABELS: Record<string, string> = {
+  background: "背景问卷",
+  image_alignment: "图像契合度",
+  csi: "创造支持指数（CSI）",
+  agency_ownership: "主体感与所有权",
+  sus: "系统可用性（SUS）",
+  raw_tlx: "任务负荷（Raw NASA-TLX）",
+  manipulation_check: "交互检验",
+  session_preference: "总体偏好",
+  csi_weighting: "CSI 因子权重",
+};
+
+const GENERATION_ROLE_LABELS: Record<string, string> = {
+  co_created: "共创作品",
+  direct_baseline: "音乐直出作品",
 };
 
 const DATA_ORIGIN_LABELS: Record<ResearchDataOrigin, string> = {
@@ -162,10 +200,6 @@ function shortId(value: string): string {
   return value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
 }
 
-function percent(value: number, total: number): number {
-  return total ? Math.round((value / total) * 1000) / 10 : 0;
-}
-
 function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -193,6 +227,17 @@ function sessionChoiceLabel(value: unknown): string {
   return "未采集";
 }
 
+function sessionPreferenceChoice(session: ResearchStudySessionRecord): unknown {
+  const response = session.questionnaireResponses.find((item) => (
+    textValue(item.instrument) === "session_preference"
+    && textValue(item.status) === "completed"
+  ));
+  if (response?.answers && typeof response.answers === "object") {
+    return (response.answers as Record<string, unknown>).SESSION_PREFERENCE;
+  }
+  return session.comparison?.overall_choice;
+}
+
 function protocolLabel(value: string, currentProtocolVersion: string): string {
   if (value === currentProtocolVersion) return "当前实验版本";
   if (value === "v2-13-blind-comparison") return "历史版本 · 盲测流程";
@@ -209,15 +254,45 @@ function sequenceLabel(value: string): string {
   return labels[value] || value || "未记录";
 }
 
-function meanScore(
+function questionnaireScore(
+  trial: ResearchTrialRecord,
+  instrument: string,
+  generationRole?: string
+): number | null {
+  const response = trial.questionnaireResponses.find((item) => (
+    textValue(item.instrument) === instrument
+    && textValue(item.status) === "completed"
+    && (!generationRole || textValue(item.generation_role) === generationRole)
+  ));
+  const score = Number(response?.score_total);
+  return Number.isFinite(score) ? score : null;
+}
+
+function questionnaireMetric(
+  trial: ResearchTrialRecord,
+  instrument: string,
+  metric: string
+): number | null {
+  const response = trial.questionnaireResponses.find((item) => (
+    textValue(item.instrument) === instrument && textValue(item.status) === "completed"
+  ));
+  const metrics = response?.metrics && typeof response.metrics === "object"
+    ? response.metrics as Record<string, unknown>
+    : {};
+  const value = Number(metrics[metric]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function meanQuestionnaireScore(
   trials: ResearchTrialRecord[],
   condition: ResearchCondition,
-  field: string
+  instrument: string,
+  generationRole?: string
 ): { mean: number | null; count: number } {
   const values = trials
     .filter((trial) => trial.condition === condition)
-    .map((trial) => Number(trial.artworkEvaluation?.[field]))
-    .filter((value) => Number.isFinite(value) && value >= 1 && value <= 5);
+    .map((trial) => questionnaireScore(trial, instrument, generationRole))
+    .filter((value): value is number => value !== null);
   return {
     mean: values.length
       ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
@@ -317,42 +392,20 @@ function ScoreDistribution({ metric }: { metric: ResearchScoreMetric }) {
   );
 }
 
-function ChoiceBar({ metric }: { metric: ResearchChoiceMetric }) {
-  const coCreatedWidth = percent(metric.coCreated, metric.count);
-  const baselineWidth = percent(metric.baseline, metric.count);
-  const tieWidth = percent(metric.tie, metric.count);
-  return (
-    <article className="border-b border-zinc-200 py-4 last:border-b-0">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-zinc-900">{metric.label}</h3>
-        <span className="text-xs text-zinc-500">n={metric.count}</span>
-      </div>
-      <div className="mt-3 flex h-3 overflow-hidden rounded-sm bg-zinc-100">
-        <div className="bg-teal-500" style={{ width: `${coCreatedWidth}%` }} />
-        <div className="bg-blue-500" style={{ width: `${baselineWidth}%` }} />
-        <div className="bg-zinc-400" style={{ width: `${tieWidth}%` }} />
-      </div>
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-600">
-        <span><i className="mr-1 inline-block h-2 w-2 bg-teal-500" />共创 {metric.coCreated}</span>
-        <span><i className="mr-1 inline-block h-2 w-2 bg-blue-500" />音乐直出 {metric.baseline}</span>
-        <span><i className="mr-1 inline-block h-2 w-2 bg-zinc-400" />相近 {metric.tie}</span>
-      </div>
-    </article>
-  );
-}
-
 function ConditionComparison({ trials }: { trials: ResearchTrialRecord[] }) {
   const dimensions = [
-    ["immersion_score", "沉浸感"],
-    ["agency_score", "主体感"],
-    ["ownership_score", "作品所有权"],
-    ["satisfaction_score", "整体满意度"],
+    { instrument: "image_alignment", label: "共创图像契合度", role: "co_created", max: 7 },
+    { instrument: "agency_ownership", label: "主体感", metric: "agency", max: 5 },
+    { instrument: "agency_ownership", label: "作品所有权", metric: "ownership", max: 5 },
+    { instrument: "csi", label: "创造支持指数", max: 100 },
+    { instrument: "sus", label: "系统可用性", max: 100 },
+    { instrument: "raw_tlx", label: "任务负荷", max: 100 },
   ] as const;
   const multiCount = trials.filter(
-    (trial) => trial.condition === "multi_agent" && trial.artworkEvaluation
+    (trial) => trial.condition === "multi_agent" && questionnaireScore(trial, "image_alignment", "co_created") !== null
   ).length;
   const singleCount = trials.filter(
-    (trial) => trial.condition === "single_agent" && trial.artworkEvaluation
+    (trial) => trial.condition === "single_agent" && questionnaireScore(trial, "image_alignment", "co_created") !== null
   ).length;
 
   return (
@@ -366,19 +419,39 @@ function ConditionComparison({ trials }: { trials: ResearchTrialRecord[] }) {
           </tr>
         </thead>
         <tbody>
-          {dimensions.map(([field, label]) => {
-            const multi = meanScore(trials, "multi_agent", field);
-            const single = meanScore(trials, "single_agent", field);
+          {dimensions.map((dimension) => {
+            const summarize = (condition: ResearchCondition) => {
+              if (!("metric" in dimension)) {
+                return meanQuestionnaireScore(
+                  trials,
+                  condition,
+                  dimension.instrument,
+                  "role" in dimension ? dimension.role : undefined
+                );
+              }
+              const values = trials
+                .filter((trial) => trial.condition === condition)
+                .map((trial) => questionnaireMetric(trial, dimension.instrument, dimension.metric))
+                .filter((value): value is number => value !== null);
+              return {
+                mean: values.length
+                  ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
+                  : null,
+                count: values.length,
+              };
+            };
+            const multi = summarize("multi_agent");
+            const single = summarize("single_agent");
             return (
-              <tr key={field} className="border-t border-zinc-100">
-                <th className="px-4 py-4 font-semibold text-zinc-800">{label}</th>
+              <tr key={dimension.label} className="border-t border-zinc-100">
+                <th className="px-4 py-4 font-semibold text-zinc-800">{dimension.label}</th>
                 {[multi, single].map((result, index) => (
                   <td key={index} className="px-4 py-4">
                     <div className="flex items-center gap-3">
                       <div className="h-2 flex-1 overflow-hidden rounded-sm bg-zinc-100">
                         <div
                           className={index === 0 ? "h-full bg-teal-500" : "h-full bg-blue-500"}
-                          style={{ width: `${result.mean === null ? 0 : (result.mean / 5) * 100}%` }}
+                          style={{ width: `${result.mean === null ? 0 : (result.mean / dimension.max) * 100}%` }}
                         />
                       </div>
                       <span className="w-10 text-right font-semibold tabular-nums text-zinc-900">
@@ -390,6 +463,57 @@ function ConditionComparison({ trials }: { trials: ResearchTrialRecord[] }) {
               </tr>
             );
           })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ArtworkLiftComparison({ trials }: { trials: ResearchTrialRecord[] }) {
+  const rows = (["multi_agent", "single_agent"] as const).map((condition) => {
+    const matching = trials.filter((trial) => trial.condition === condition);
+    const paired = matching.flatMap((trial) => {
+      const coCreated = questionnaireScore(trial, "image_alignment", "co_created");
+      const baseline = questionnaireScore(trial, "image_alignment", "direct_baseline");
+      return coCreated === null || baseline === null ? [] : [{ coCreated, baseline }];
+    });
+    const mean = (key: "coCreated" | "baseline") => paired.length
+      ? paired.reduce((sum, value) => sum + value[key], 0) / paired.length
+      : null;
+    const coCreated = mean("coCreated");
+    const baseline = mean("baseline");
+    return {
+      condition,
+      count: paired.length,
+      coCreated,
+      baseline,
+      lift: coCreated === null || baseline === null ? null : coCreated - baseline,
+    };
+  });
+  return (
+    <div className="overflow-x-auto border-y border-zinc-200 bg-white">
+      <table className="w-full min-w-[620px] text-left text-sm">
+        <thead className="bg-zinc-50 text-xs text-zinc-500">
+          <tr>
+            <th className="px-4 py-3 font-medium">体验条件</th>
+            <th className="px-4 py-3 font-medium">有效配对</th>
+            <th className="px-4 py-3 font-medium">共创作品均值</th>
+            <th className="px-4 py-3 font-medium">音乐直出均值</th>
+            <th className="px-4 py-3 font-medium">共创提升值</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.condition} className="border-t border-zinc-100">
+              <th className="px-4 py-4 font-semibold text-zinc-800">{CONDITION_LABELS[row.condition]}</th>
+              <td className="px-4 py-4 tabular-nums">{row.count}</td>
+              <td className="px-4 py-4 tabular-nums">{row.coCreated?.toFixed(2) || "—"}</td>
+              <td className="px-4 py-4 tabular-nums">{row.baseline?.toFixed(2) || "—"}</td>
+              <td className="px-4 py-4 font-semibold tabular-nums text-teal-700">
+                {row.lift === null ? "—" : `${row.lift >= 0 ? "+" : ""}${row.lift.toFixed(2)}`}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -412,13 +536,29 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function CompletenessDots({ trial }: { trial: ResearchTrialRecord }) {
-  const checks = [
-    Boolean(trial.artworkEvaluation),
-    Boolean(trial.comparison),
-    Boolean(trial.manipulationCheck),
-  ];
+  const integrated = usesIntegratedQuestionnaires(trial.protocolVersion);
+  const requiredInstruments = usesStreamlinedQuestionnaires(trial.protocolVersion)
+    ? ["csi", "agency_ownership", "sus", "raw_tlx", "manipulation_check"]
+    : ["csi", "sus", "raw_tlx", "manipulation_check"];
+  const checks = integrated
+    ? [
+        questionnaireScore(trial, "image_alignment", "co_created") !== null,
+        requiredInstruments.every((instrument) => (
+          trial.questionnaireResponses.some((response) => (
+            textValue(response.instrument) === instrument && textValue(response.status) === "completed"
+          ))
+        )),
+        questionnaireScore(trial, "image_alignment", "direct_baseline") !== null,
+      ]
+    : [
+        Boolean(trial.artworkEvaluation),
+        Boolean(trial.comparison),
+        Boolean(trial.manipulationCheck),
+      ];
   return (
-    <div className="flex items-center gap-1" title="画作评价 / 作品对比 / 交互体验">
+    <div className="flex items-center gap-1" title={integrated
+      ? "共创作品评价 / 体验量表 / 音乐直出作品评价"
+      : "画作评价 / 作品对比 / 交互体验"}>
       {checks.map((complete, index) => (
         <span
           key={index}
@@ -616,6 +756,31 @@ function TrialDrawer({
 
           <section className="mb-7">
             <SectionTitle title="问卷结果" />
+            {trial.questionnaireResponses.length > 0 && (
+              <div className="mb-5 grid gap-3 sm:grid-cols-2">
+                {trial.questionnaireResponses.map((response, index) => (
+                  <article key={String(response.id || index)} className="rounded border border-zinc-200 bg-zinc-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-zinc-800">{String(response.instrument || "问卷")}</p>
+                        <p className="mt-1 font-mono text-[10px] text-zinc-500">{String(response.questionnaire_version || "未记录版本")}</p>
+                      </div>
+                      <span className="text-xs font-semibold text-teal-700">
+                        {response.score_total === null || response.score_total === undefined
+                          ? "无总分"
+                          : `总分 ${String(response.score_total)}`}
+                      </span>
+                    </div>
+                    <details className="mt-3 border-t border-zinc-200 pt-2">
+                      <summary className="cursor-pointer text-xs font-medium text-zinc-600">查看原始回答与子维度</summary>
+                      <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-[10px] text-zinc-100">
+                        {safeStringify({ answers: response.answers, metrics: response.metrics })}
+                      </pre>
+                    </details>
+                  </article>
+                ))}
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-left text-xs">
                 <thead className="border-b border-zinc-200 text-zinc-500">
@@ -862,9 +1027,7 @@ function OverviewView({
                       </td>
                     ))}
                     <td className="px-3 py-3">
-                      {session.comparison
-                        ? sessionChoiceLabel(session.comparison.overall_choice)
-                        : "未采集"}
+                      {sessionChoiceLabel(sessionPreferenceChoice(session))}
                     </td>
                     <td className="px-3 py-3">
                       <span className={session.complete ? "text-emerald-700" : "text-amber-700"}>
@@ -882,7 +1045,7 @@ function OverviewView({
       <section>
         <SectionTitle
           title="两种体验路径带来了什么差异？"
-          description="以下为两组用户在关键体验维度上的平均分，满分为 5 分。"
+          description="以下为两组用户的量表均值：图像契合度为 1–7 分，CSI、SUS 与任务负荷为 0–100 分。"
         />
         <ConditionComparison trials={trials} />
       </section>
@@ -891,11 +1054,9 @@ function OverviewView({
         <div>
           <SectionTitle
             title="共创是否带来了更匹配的作品？"
-            description="用户在共创作品与音乐直出作品之间的选择。"
+            description="基于同一路径两张作品的图像契合度均值；提升值 = 共创作品 − 音乐直出作品。"
           />
-          <div className="border-y border-zinc-200 bg-white px-4">
-            {summary.choices.map((metric) => <ChoiceBar key={metric.key} metric={metric} />)}
-          </div>
+          <ArtworkLiftComparison trials={trials} />
         </div>
         <div>
           <SectionTitle title="当前筛选样本是否完整？" description="用于判断这些结果能否进入后续分析。" />
@@ -913,7 +1074,7 @@ function OverviewView({
           查看完整量表分布
         </summary>
         <div className="border-t border-zinc-200 p-5">
-          <SectionTitle title="画作评价" description="每个柱状条对应 1–5 分的作答人数。" />
+          <SectionTitle title="历史结果页评价" description="仅用于追溯旧协议的 1–5 分题目；V2-18 不采集这些字段。" />
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {summary.artworkScores.map((metric) => <ScoreDistribution key={metric.key} metric={metric} />)}
           </div>
@@ -1009,6 +1170,172 @@ function TrialsView({
         )}
       </div>
     </section>
+  );
+}
+
+function collectQuestionnaireRows(
+  trials: ResearchTrialRecord[],
+  studySessions: ResearchStudySessionRecord[]
+): QuestionnaireRow[] {
+  const trialMap = new Map(trials.map((trial) => [trial.id, trial]));
+  const rows = new Map<string, QuestionnaireRow>();
+  const addResponse = (
+    response: Record<string, unknown>,
+    fallbackTrial: ResearchTrialRecord | null,
+    fallbackSession: ResearchStudySessionRecord | null
+  ) => {
+    const trialId = textValue(response.trial_id) || fallbackTrial?.id || "";
+    const trial = trialMap.get(trialId) || fallbackTrial;
+    const id = textValue(response.id)
+      || `${textValue(response.study_session_id)}:${textValue(response.response_key)}`;
+    if (rows.has(id)) return;
+    const score = Number(response.score_total);
+    rows.set(id, {
+      id,
+      participantId: textValue(response.participant_id)
+        || trial?.participantId
+        || fallbackSession?.participantId
+        || "",
+      studySessionId: textValue(response.study_session_id)
+        || trial?.studySessionId
+        || fallbackSession?.id
+        || "",
+      trialId,
+      period: Number(response.period) === 1 || Number(response.period) === 2
+        ? Number(response.period)
+        : trial?.period || null,
+      condition: textValue(response.condition) === "multi_agent"
+        ? "multi_agent"
+        : textValue(response.condition) === "single_agent"
+          ? "single_agent"
+          : trial?.condition || "unknown",
+      instrument: textValue(response.instrument),
+      generationRole: textValue(response.generation_role),
+      status: textValue(response.status),
+      totalScore: Number.isFinite(score) ? score : null,
+      questionnaireVersion: textValue(response.questionnaire_version),
+      completedAt: textValue(response.completed_at) || textValue(response.updated_at),
+      answers: response.answers || {},
+      metrics: response.metrics || {},
+      trial,
+    });
+  };
+
+  for (const trial of trials) {
+    for (const response of trial.questionnaireResponses) addResponse(response, trial, null);
+  }
+  for (const session of studySessions) {
+    for (const response of session.questionnaireResponses) addResponse(response, null, session);
+  }
+  return [...rows.values()].sort((left, right) => (
+    Date.parse(right.completedAt) - Date.parse(left.completedAt)
+  ));
+}
+
+function QuestionnairesView({
+  trials,
+  studySessions,
+  onSelect,
+}: {
+  trials: ResearchTrialRecord[];
+  studySessions: ResearchStudySessionRecord[];
+  onSelect: (trial: ResearchTrialRecord) => void;
+}) {
+  const rows = useMemo(
+    () => collectQuestionnaireRows(trials, studySessions),
+    [studySessions, trials]
+  );
+  const completed = rows.filter((row) => row.status === "completed").length;
+  const participantCount = new Set(rows.map((row) => row.participantId).filter(Boolean)).size;
+  const instrumentCount = new Set(rows.map((row) => row.instrument).filter(Boolean)).size;
+
+  return (
+    <div className="space-y-8">
+      <section>
+        <SectionTitle
+          title="问卷回收情况"
+          description="当前正式实验每位参与者应完成 17 个问卷模块；这里显示原始回收记录及其与体验、作品的关联。"
+        />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryCard label="问卷记录" value={String(rows.length)} detail="包含草稿与已完成模块" tone="zinc" />
+          <SummaryCard label="已完成模块" value={String(completed)} detail="已通过完整性校验" tone="teal" />
+          <SummaryCard label="涉及参与者" value={String(participantCount)} detail="按实验者编号去重" tone="blue" />
+          <SummaryCard label="量表类型" value={String(instrumentCount)} detail="当前数据中已出现的类型" tone="amber" />
+        </div>
+        {rows.length === 0 && (
+          <div className="mt-4 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            当前数据库还没有正式问卷回答。新版表头和导出能力已经启用；从正式实验入口创建的新会话完成问卷后，记录会自动出现在这里。历史协议数据不会被伪装成当前问卷。
+          </div>
+        )}
+      </section>
+
+      <section>
+        <SectionTitle
+          title="问卷记录明细"
+          description="一行代表一个问卷模块；展开可查看该模块的原始答案与子维度。"
+        />
+        <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
+          <table className="w-full min-w-[1420px] text-left text-xs">
+            <thead className="bg-zinc-50 text-zinc-500">
+              <tr>
+                <th className="px-3 py-3 font-medium">参与者编号</th>
+                <th className="px-3 py-3 font-medium">体验轮次</th>
+                <th className="px-3 py-3 font-medium">体验条件</th>
+                <th className="px-3 py-3 font-medium">问卷／量表</th>
+                <th className="px-3 py-3 font-medium">评价对象</th>
+                <th className="px-3 py-3 font-medium">总分／均值</th>
+                <th className="px-3 py-3 font-medium">状态</th>
+                <th className="px-3 py-3 font-medium">版本</th>
+                <th className="px-3 py-3 font-medium">提交时间</th>
+                <th className="px-3 py-3 font-medium">原始回答</th>
+                <th className="px-3 py-3 text-right font-medium">关联记录</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id} className="border-t border-zinc-100 align-top text-zinc-700">
+                  <td className="px-3 py-3 font-mono" title={row.participantId}>{shortId(row.participantId)}</td>
+                  <td className="px-3 py-3">{row.period ? `体验 ${row.period}` : "全程"}</td>
+                  <td className="px-3 py-3">{row.condition === "unknown" ? "跨体验" : CONDITION_LABELS[row.condition]}</td>
+                  <td className="px-3 py-3 font-medium text-zinc-900">{QUESTIONNAIRE_LABELS[row.instrument] || row.instrument || "未记录"}</td>
+                  <td className="px-3 py-3">{GENERATION_ROLE_LABELS[row.generationRole] || "交互体验"}</td>
+                  <td className="px-3 py-3 font-semibold tabular-nums text-teal-700">{row.totalScore === null ? "不计算" : row.totalScore}</td>
+                  <td className="px-3 py-3">{row.status === "completed" ? "已完成" : "草稿"}</td>
+                  <td className="px-3 py-3 font-mono text-[10px]">{row.questionnaireVersion || "未记录"}</td>
+                  <td className="px-3 py-3">{formatDate(row.completedAt, true)}</td>
+                  <td className="px-3 py-3">
+                    <details>
+                      <summary className="cursor-pointer font-medium text-teal-700">查看回答</summary>
+                      <pre className="mt-2 max-h-48 w-80 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 text-[10px] text-zinc-100">{safeStringify({ answers: row.answers, metrics: row.metrics })}</pre>
+                    </details>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {row.trial ? (
+                      <button
+                        type="button"
+                        onClick={() => onSelect(row.trial!)}
+                        className="rounded border border-zinc-300 px-3 py-1.5 font-medium hover:border-teal-500 hover:text-teal-700"
+                      >
+                        查看体验
+                      </button>
+                    ) : (
+                      <span className="text-zinc-400">会话级</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr className="border-t border-zinc-100">
+                  <td colSpan={11} className="px-4 py-16 text-center text-sm text-zinc-400">
+                    当前筛选条件下暂无问卷记录
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1327,6 +1654,79 @@ export default function ResearchDashboardClient({
     );
   };
 
+  const exportQuestionnaireWorkbook = async () => {
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/research/questionnaires", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataset: {
+            source: { capturedAt: dataset.source.capturedAt },
+            trials: filteredTrials.map((trial) => ({
+              id: trial.id,
+              dataOrigins: trial.dataOrigins,
+              participantId: trial.participantId,
+              studySessionId: trial.studySessionId,
+              period: trial.period,
+              condition: trial.condition,
+              protocolVersion: trial.protocolVersion,
+              status: trial.status,
+              stimulusId: trial.stimulusId,
+              musicTitle: trial.musicTitle,
+              questionnaireResponses: trial.questionnaireResponses,
+              artworkEvaluation: trial.artworkEvaluation,
+              comparison: trial.comparison,
+            })),
+            studySessions: filteredStudySessions.map((session) => ({
+              id: session.id,
+              dataOrigins: session.dataOrigins,
+              participantId: session.participantId,
+              protocolVersion: session.protocolVersion,
+              sequence: session.sequence,
+              status: session.status,
+              complete: session.complete,
+              firstSelectedAudio: session.firstSelectedAudio,
+              secondSelectedAudio: session.secondSelectedAudio,
+              firstTrial: session.firstTrial ? {
+                id: session.firstTrial.id,
+                condition: session.firstTrial.condition,
+                musicTitle: session.firstTrial.musicTitle,
+                stimulusId: session.firstTrial.stimulusId,
+              } : null,
+              secondTrial: session.secondTrial ? {
+                id: session.secondTrial.id,
+                condition: session.secondTrial.condition,
+                musicTitle: session.secondTrial.musicTitle,
+                stimulusId: session.secondTrial.stimulusId,
+              } : null,
+              questionnaireResponses: session.questionnaireResponses,
+            })),
+          },
+          trialIds: filteredTrials.map((trial) => trial.id),
+          studySessionIds: filteredStudySessions.map((session) => session.id),
+        }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(result.error || "无法生成问卷 Excel");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `melodyvision-questionnaires-${dataset.source.capturedAt.slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setMessage(`已导出 ${filteredStudySessions.length} 条实验会话的问卷工作簿`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "问卷导出失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-[#f4f5f6] text-zinc-900">
       <header className="border-b border-zinc-200 bg-white">
@@ -1367,7 +1767,15 @@ export default function ResearchDashboardClient({
               onClick={exportCsv}
               className="rounded bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
             >
-              {filteredStudySessions.length > 0 ? "导出参与者宽表" : "导出筛选 CSV"}
+              {filteredStudySessions.length > 0 ? "导出实验过程 CSV" : "导出筛选 CSV"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void exportQuestionnaireWorkbook()}
+              disabled={loading}
+              className="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:border-teal-500 hover:text-teal-700"
+            >
+              导出问卷 Excel
             </button>
             <input
               ref={fileInputRef}
@@ -1421,6 +1829,7 @@ export default function ResearchDashboardClient({
           {([
             ["overview", "研究结论"],
             ["trials", "实验记录"],
+            ["questionnaires", "问卷数据"],
             ["quality", "数据检查"],
           ] as const).map(([key, label]) => (
             <button
@@ -1573,6 +1982,13 @@ export default function ResearchDashboardClient({
             />
           )}
           {view === "trials" && <TrialsView trials={filteredTrials} onSelect={setSelectedTrial} />}
+          {view === "questionnaires" && (
+            <QuestionnairesView
+              trials={filteredTrials}
+              studySessions={filteredStudySessions}
+              onSelect={setSelectedTrial}
+            />
+          )}
           {view === "quality" && (
             <QualityView
               trials={filteredTrials}

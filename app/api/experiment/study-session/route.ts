@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { audioCatalog, getAudioPlaybackUrl } from "@/lib/audio/catalog";
-import { isSessionComparisonChoice } from "@/lib/contracts";
+import { isSessionComparisonChoice, type StudyAudioChoice } from "@/lib/contracts";
 import { createRecoveryFacilitatorPlan } from "@/lib/conversation/recovery-plan";
 import {
   createOrRecoverStudySession,
@@ -8,6 +8,7 @@ import {
   getStudySession,
   getStudySessionComparison,
   saveStudySessionComparison,
+  saveStudyAudioChoices,
   updateStudySession,
 } from "@/lib/db/study-sessions";
 import { getGenerationRunResult } from "@/lib/db/generation-runs";
@@ -22,6 +23,38 @@ export const runtime = "nodejs";
 const DEFAULT_STIMULUS_X = "bach-cello-prelude";
 const DEFAULT_STIMULUS_Y = "mozart-eine-kleine-nachtmusik";
 
+function validAudioChoice(value: unknown): StudyAudioChoice | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Partial<StudyAudioChoice>;
+  if (
+    typeof candidate.id !== "string" || !candidate.id.trim() ||
+    !["preset", "search", "upload"].includes(candidate.sourceKind || "") ||
+    typeof candidate.name !== "string" || !candidate.name.trim() ||
+    typeof candidate.playbackUrl !== "string" || !candidate.playbackUrl.trim()
+  ) return null;
+  return {
+    id: candidate.id.trim().slice(0, 200),
+    sourceKind: candidate.sourceKind!,
+    name: candidate.name.trim().slice(0, 240),
+    artist: typeof candidate.artist === "string" ? candidate.artist.trim().slice(0, 240) : "",
+    tags: Array.isArray(candidate.tags)
+      ? candidate.tags.filter((tag): tag is string => typeof tag === "string").slice(0, 12)
+      : [],
+    source: typeof candidate.source === "string" ? candidate.source.trim().slice(0, 240) : "",
+    sourceUrl: typeof candidate.sourceUrl === "string" ? candidate.sourceUrl.trim().slice(0, 1000) : "",
+    playbackUrl: candidate.playbackUrl.trim().slice(0, 2000),
+    catalogItemId: typeof candidate.catalogItemId === "string"
+      ? candidate.catalogItemId.trim().slice(0, 200) || null
+      : null,
+    remoteSourceUrl: typeof candidate.remoteSourceUrl === "string"
+      ? candidate.remoteSourceUrl.trim().slice(0, 2000) || null
+      : null,
+    fileName: typeof candidate.fileName === "string" ? candidate.fileName.trim().slice(0, 240) : "audio.mp3",
+    fileSize: Number.isFinite(candidate.fileSize) ? Math.max(0, Number(candidate.fileSize)) : 0,
+    mimeType: typeof candidate.mimeType === "string" ? candidate.mimeType.trim().slice(0, 120) : "audio/mpeg",
+  };
+}
+
 function validStimulus(value: unknown, fallback: string): string {
   const requested = typeof value === "string" ? value.trim() : "";
   const item = audioCatalog.find((candidate) => candidate.id === requested);
@@ -34,6 +67,10 @@ async function payloadForSession(id: string) {
   const trials = await listStudyTrialsBySession(session.id);
   const periodResults = await Promise.all(trials.map(async (trial) => {
     const stimulus = audioCatalog.find((item) => item.id === trial.stimulusId);
+    const assigned = getStudyPeriodAssignment(session, trial.period || 1);
+    const selectedAudio = assigned.stimulusId === session.stimulusXId
+      ? session.stimulusX
+      : session.stimulusY;
     const [baselineJob, audioAnalysis, conversation] = await Promise.all([
       getBaselineJob(trial.id),
       getAudioAnalysisForTrial(trial.id),
@@ -41,8 +78,10 @@ async function payloadForSession(id: string) {
     ]);
     return {
       trial,
-      audioUrl: stimulus ? getAudioPlaybackUrl(stimulus) : "",
-      musicName: stimulus?.name || trial.stimulusId,
+      audioUrl: selectedAudio?.sourceKind === "upload"
+        ? ""
+        : selectedAudio?.playbackUrl || (stimulus ? getAudioPlaybackUrl(stimulus) : ""),
+      musicName: selectedAudio?.name || stimulus?.name || trial.stimulusId,
       baselineJob,
       musicProfile: audioAnalysis?.musicProfile ?? null,
       compatibilityAnalysis: audioAnalysis?.compatibilityAnalysis ?? null,
@@ -122,6 +161,17 @@ export async function POST(request: NextRequest) {
     const session = studySessionId ? await getStudySession(studySessionId) : null;
     if (!session) {
       return Response.json({ error: "Study session not found" }, { status: 404 });
+    }
+
+    if (action === "select_audio") {
+      const first = validAudioChoice(body.first);
+      const second = validAudioChoice(body.second);
+      if (!first || !second || first.id === second.id) {
+        return Response.json({ error: "Two different valid audio choices are required" }, { status: 400 });
+      }
+      const updated = await saveStudyAudioChoices({ studySessionId, first, second });
+      if (!updated) return Response.json({ error: "Study session not found" }, { status: 404 });
+      return Response.json(await payloadForSession(updated.id));
     }
 
     if (action === "select_musicians") {

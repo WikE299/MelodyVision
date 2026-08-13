@@ -20,6 +20,10 @@ import {
   type StudySessionPayload,
 } from "@/lib/experiment-study-client";
 import { characterUi, type Language, useHydrated, useLanguage } from "@/lib/i18n";
+import {
+  usesIntegratedQuestionnaires as isIntegratedProtocol,
+  usesStreamlinedQuestionnaires as isStreamlinedProtocol,
+} from "@/lib/contracts";
 import type {
   ConversationState,
   GenerationRole,
@@ -217,8 +221,8 @@ const COPY = {
     viewBaseline: "音乐直生作品",
     imageLoading: "作品加载中",
     imageLoadFailed: "作品加载失败，请重新切换后再试",
-    periodEvaluationIntro: "先独立评价这一轮生成结果，提交后再回顾刚才的互动过程。",
-    continueProcessReview: "提交并评价互动过程",
+    periodEvaluationIntro: "先独立评价共创作品，提交后将生成同一段音乐的直出参照供你对比。",
+    continueProcessReview: "提交并查看参照作品",
     periodCompleteTitle: "第一次体验已完成",
     periodCompleteIntro: "稍作停顿后，进入另一段音乐与另一种聆听体验。",
     nextExperience: "进入第二次体验",
@@ -336,8 +340,8 @@ const COPY = {
     viewBaseline: "Music-only",
     imageLoading: "Loading artwork",
     imageLoadFailed: "Artwork failed to load. Switch away and try again.",
-    periodEvaluationIntro: "Rate this outcome independently, then reflect on the interaction you just completed.",
-    continueProcessReview: "Submit and review the interaction",
+    periodEvaluationIntro: "Rate the co-created artwork first. A music-only reference will then be generated for comparison.",
+    continueProcessReview: "Submit and view the reference",
     periodCompleteTitle: "The first experience is complete",
     periodCompleteIntro: "Take a short pause, then continue with another piece of music and listening experience.",
     nextExperience: "Begin the second experience",
@@ -694,6 +698,33 @@ export default function ResultPage() {
 
   const studyTrialId = studyTrial?.id;
   const studySessionId = studyTrial?.studySessionId || studySession?.id || null;
+  const usesIntegratedQuestionnaires = Boolean(
+    studyTrial?.studySessionId && isIntegratedProtocol(studyTrial.protocolVersion)
+  );
+  const usesStreamlinedQuestionnaires = Boolean(
+    studyTrial?.studySessionId && isStreamlinedProtocol(studyTrial.protocolVersion)
+  );
+  const integratedQuestionnairesFinished = Boolean(
+    usesIntegratedQuestionnaires && studySessionId &&
+    typeof window !== "undefined" &&
+    window.sessionStorage.getItem("integratedQuestionnairesComplete") === studySessionId
+  );
+
+  useEffect(() => {
+    if (
+      !usesStreamlinedQuestionnaires ||
+      !studySessionId ||
+      integratedQuestionnairesFinished
+    ) return;
+    router.replace(
+      `/study/questionnaire?studySessionId=${encodeURIComponent(studySessionId)}`
+    );
+  }, [
+    integratedQuestionnairesFinished,
+    router,
+    studySessionId,
+    usesStreamlinedQuestionnaires,
+  ]);
 
   const startEligibleBaseline = useCallback(async (
     targetTrial: StudyTrial,
@@ -706,8 +737,8 @@ export default function ResultPage() {
     recordExperimentEvent("baseline-generation-deferred-started", "/result", {
       trialId: targetTrial.id,
       condition: targetTrial.condition,
-      checkpoint: targetTrial.studySessionId
-        ? "second_artwork_evaluation_completed"
+      checkpoint: targetTrial.period
+        ? `period_${targetTrial.period}_artwork_evaluation_completed`
         : "artwork_evaluation_completed",
     });
     try {
@@ -727,7 +758,8 @@ export default function ResultPage() {
         condition: targetTrial.condition,
       });
     } catch (error) {
-      baselineAutoStartAttemptedRef.current.delete(targetTrial.id);
+      setBaselineStatus("failed");
+      setStudyError(error instanceof Error ? error.message : copy.baselineFailed);
       console.warn("Deferred baseline did not start:", error);
       recordExperimentEvent("baseline-generation-deferred-failed", "/result", {
         trialId: targetTrial.id,
@@ -735,7 +767,7 @@ export default function ResultPage() {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-  }, []);
+  }, [copy.baselineFailed]);
 
   useEffect(() => {
     if (!studySessionId) return;
@@ -855,17 +887,22 @@ export default function ResultPage() {
               dialogueExperienceScore: restoredScore(evaluationData.manipulation.dialogue_experience_score),
             });
           } else if (evaluationData.labeledComparison) {
-            if (!studySessionId) setStudyPhase("manipulation");
             setComparison({
               musicMatchChoice: evaluationData.labeledComparison.music_match_choice as ComparisonChoice,
               imaginationMatchChoice: evaluationData.labeledComparison.imagination_match_choice as ComparisonChoice,
               overallChoice: evaluationData.labeledComparison.overall_choice as ComparisonChoice,
               reason: String(evaluationData.labeledComparison.reason || ""),
             });
+            if (usesIntegratedQuestionnaires && !integratedQuestionnairesFinished) {
+              router.replace(
+                `/study/questionnaire?studySessionId=${encodeURIComponent(studySessionId!)}`
+              );
+            } else if (!studySessionId) {
+              setStudyPhase("manipulation");
+            }
           } else if (evaluationData.comparison) {
             setStudyPhase("completed");
           } else if (evaluationData.artwork) {
-            setStudyPhase(studySessionId ? "manipulation" : "comparison");
             setStudyRatings({
               musicMatchScore: restoredScore(evaluationData.artwork.music_match_score),
               imaginationMatchScore: restoredScore(evaluationData.artwork.imagination_match_score),
@@ -874,12 +911,12 @@ export default function ResultPage() {
               immersionScore: restoredScore(evaluationData.artwork.immersion_score),
               satisfactionScore: restoredScore(evaluationData.artwork.satisfaction_score),
             });
+            setStudyPhase("comparison");
           }
         }
         if (
           evaluationResponse.ok &&
           evaluationData.artwork &&
-          !studySessionId &&
           !baselineData.job &&
           baselineData.trial &&
           musicProfile
@@ -893,6 +930,7 @@ export default function ResultPage() {
         if (
           evaluationResponse.ok &&
           evaluationData.artwork &&
+          !usesIntegratedQuestionnaires &&
           studySessionId &&
           baselineData.trial?.period === 2
         ) {
@@ -920,7 +958,16 @@ export default function ResultPage() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [debugInfo?.musicAnalysis, musicProfile, startEligibleBaseline, studySessionId, studyTrialId]);
+  }, [
+    debugInfo?.musicAnalysis,
+    integratedQuestionnairesFinished,
+    musicProfile,
+    router,
+    startEligibleBaseline,
+    studySessionId,
+    studyTrialId,
+    usesIntegratedQuestionnaires,
+  ]);
 
   useEffect(() => {
     const baselineImageUrl = baselineResult?.imageUrl;
@@ -1154,32 +1201,18 @@ export default function ResultPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || copy.evaluationError);
-      if (!studyTrial.studySessionId && musicProfile) {
+      if (musicProfile) {
         void startEligibleBaseline(
           studyTrial,
           musicProfile,
           (debugInfo?.musicAnalysis || {}) as Record<string, unknown>
         );
-      } else if (studyTrial.studySessionId && studyTrial.period === 2) {
-        const payload = await fetchStudySession(studyTrial.studySessionId);
-        setStudySessionPayload(payload);
-        setStudySession(payload.session);
-        sessionStorage.setItem("studySession", JSON.stringify(payload.session));
-        for (const item of payload.periodResults) {
-          if (!item.baselineJob && item.musicProfile) {
-            void startEligibleBaseline(
-              item.trial,
-              item.musicProfile,
-              item.compatibilityAnalysis || {}
-            );
-          }
-        }
       }
-      setStudyPhase(studyTrial.studySessionId ? "manipulation" : "comparison");
       recordExperimentEvent("artwork-evaluation-submitted", "/result", {
         trialId: studyTrial.id,
         condition: studyTrial.condition,
       });
+      setStudyPhase("comparison");
     } catch (error) {
       setStudyError(error instanceof Error ? error.message : copy.evaluationError);
     } finally {
@@ -1188,7 +1221,7 @@ export default function ResultPage() {
   };
 
   const submitComparison = async () => {
-    const comparisonTrial = studyTrial?.studySessionId
+    const comparisonTrial = studyPhase === "baseline_review" && studyTrial?.studySessionId
       ? studySessionPayload?.periodResults.find(
           (item) => item.trial.period === baselineReviewPeriod
         )?.trial || null
@@ -1217,6 +1250,14 @@ export default function ResultPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || copy.evaluationError);
+      if (usesIntegratedQuestionnaires && studySessionId) {
+        recordExperimentEvent("labeled-baseline-comparison-submitted", "/result", {
+          trialId: comparisonTrial.id,
+          condition: comparisonTrial.condition,
+        });
+        router.push(`/study/questionnaire?studySessionId=${encodeURIComponent(studySessionId)}`);
+        return;
+      }
       if (studyTrial?.studySessionId) {
         if (baselineReviewPeriod === 1) {
           setBaselineReviewPeriod(2);
@@ -1511,7 +1552,9 @@ export default function ResultPage() {
     studyTrial?.studySessionId &&
     ["session_comparison", "baseline_review", "completed"].includes(studyPhase)
   );
-  const studyLocked = Boolean(studyTrial && studyPhase !== "completed");
+  const studyLocked = Boolean(
+    studyTrial && studyPhase !== "completed" && !integratedQuestionnairesFinished
+  );
   const pairedArtworkReady = crossoverFinalPhase
     ? Boolean(crossoverPeriodResult?.coCreated?.imageUrl && crossoverPeriodResult?.baseline?.imageUrl)
     : baselineStatus === "completed" && Boolean(baselineResult?.imageUrl);

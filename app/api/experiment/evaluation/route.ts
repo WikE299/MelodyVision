@@ -10,6 +10,7 @@ import {
   getStudySessionComparison,
   updateStudySession,
 } from "@/lib/db/study-sessions";
+import { usesIntegratedQuestionnaires } from "@/lib/contracts";
 import {
   getTrialEvaluationState,
   saveArtworkEvaluation,
@@ -83,7 +84,10 @@ export async function POST(request: NextRequest) {
           getStudySession(trial.studySessionId),
           getStudySessionComparison(trial.studySessionId),
         ]);
-        if (session?.status !== "baseline_review" || !sessionComparison) {
+        if (
+          !usesIntegratedQuestionnaires(trial.protocolVersion) &&
+          (session?.status !== "baseline_review" || !sessionComparison)
+        ) {
           return Response.json(
             { error: "The cross-experience comparison must be completed first" },
             { status: 409 }
@@ -98,6 +102,9 @@ export async function POST(request: NextRequest) {
         reason: typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : "",
       });
       if (trial.studySessionId) {
+        if (usesIntegratedQuestionnaires(trial.protocolVersion)) {
+          return Response.json({ saved: true, stage: "comparison" });
+        }
         await updateStudyTrial({ id: trial.id, status: "completed" });
         const pairedTrials = await listStudyTrialsBySession(trial.studySessionId);
         const pairedStates = await Promise.all(
