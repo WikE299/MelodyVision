@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { CURRENT_STUDY_PROTOCOL_VERSION } from "../contracts/study-trial.ts";
+import {
+  CURRENT_STUDY_PROTOCOL_VERSION,
+  usesIntegratedQuestionnaires,
+  usesStreamlinedQuestionnaires,
+} from "../contracts/study-trial.ts";
 import type {
   AssignmentMethod,
   BaselineJobStatus,
@@ -286,24 +290,41 @@ export async function claimBaselineJob(trialId: string): Promise<{ acquired: boo
       return { acquired: false, job: current };
     }
     const trialRow = (await transaction.prepare(
-      "SELECT co_created_run_id, study_session_id FROM study_trials WHERE id = ?"
-    ).all(trialId))[0];
-    const evaluationRow = (await transaction.prepare(
-      "SELECT run_id FROM artwork_evaluations WHERE trial_id = ?"
+      "SELECT co_created_run_id, study_session_id, protocol_version FROM study_trials WHERE id = ?"
     ).all(trialId))[0];
     const coCreatedRunId = typeof trialRow?.co_created_run_id === "string"
       ? trialRow.co_created_run_id
       : "";
-    const evaluatedRunId = typeof evaluationRow?.run_id === "string"
-      ? evaluationRow.run_id
-      : "";
-    if (!coCreatedRunId || evaluatedRunId !== coCreatedRunId) {
-      throw new BaselineNotEligibleError();
-    }
     const studySessionId = typeof trialRow?.study_session_id === "string"
       ? trialRow.study_session_id
       : "";
-    if (studySessionId) {
+    const streamlined = Boolean(
+      studySessionId && usesStreamlinedQuestionnaires(
+        String(trialRow?.protocol_version || "")
+      )
+    );
+    const checkpointRow = streamlined
+      ? (await transaction.prepare(`
+          SELECT run_id FROM questionnaire_responses
+          WHERE trial_id = ?
+            AND instrument = 'image_alignment'
+            AND generation_role = 'co_created'
+            AND status = 'completed'
+          ORDER BY completed_at DESC
+          LIMIT 1
+        `).all(trialId))[0]
+      : (await transaction.prepare(
+          "SELECT run_id FROM artwork_evaluations WHERE trial_id = ?"
+        ).all(trialId))[0];
+    const checkpointRunId = typeof checkpointRow?.run_id === "string" ? checkpointRow.run_id : "";
+    if (!coCreatedRunId) throw new BaselineNotEligibleError();
+    if (checkpointRunId !== coCreatedRunId) {
+      throw new BaselineNotEligibleError();
+    }
+    if (
+      studySessionId &&
+      !usesIntegratedQuestionnaires(String(trialRow?.protocol_version || ""))
+    ) {
       const pairedTrials = await transaction.prepare(
         "SELECT id, co_created_run_id FROM study_trials WHERE study_session_id = ?"
       ).all(studySessionId);
@@ -312,16 +333,11 @@ export async function claimBaselineJob(trialId: string): Promise<{ acquired: boo
         const pairedRunId = typeof pairedTrial.co_created_run_id === "string"
           ? pairedTrial.co_created_run_id
           : "";
+        if (!pairedRunId) throw new BaselineNotEligibleError();
         const pairedEvaluation = (await transaction.prepare(
           "SELECT run_id FROM artwork_evaluations WHERE trial_id = ?"
         ).all(String(pairedTrial.id)))[0];
-        if (
-          !pairedRunId ||
-          typeof pairedEvaluation?.run_id !== "string" ||
-          pairedEvaluation.run_id !== pairedRunId
-        ) {
-          throw new BaselineNotEligibleError();
-        }
+        if (pairedEvaluation?.run_id !== pairedRunId) throw new BaselineNotEligibleError();
       }
     }
     if (current) {

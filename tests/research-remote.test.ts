@@ -56,8 +56,8 @@ test("direct Supabase research sync reads tables with a server-only key", async 
     return Response.json(rows);
   }) as Record<string, unknown>;
 
-  assert.equal(requestCount, 16);
-  assert.equal(snapshot.schemaVersion, 5);
+  assert.equal(requestCount, 17);
+  assert.equal(snapshot.schemaVersion, 6);
   assert.deepEqual(snapshot.trials, []);
   assert.deepEqual(snapshot.studySessions, []);
   assert.deepEqual(snapshot.runs, [{ id: "run-1", timings: { totalMs: 1234 } }]);

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { CURRENT_STUDY_PROTOCOL_VERSION } from "../lib/contracts/study-trial.ts";
 
 test("study trial persistence keeps one idempotent baseline and paired run metadata", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "melodyvision-study-"));
@@ -160,7 +161,7 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
     const exported = await exports.exportExperimentJson();
     assert.equal(restored?.baselineRunId, "run-baseline");
     assert.equal(restored?.coCreatedRunId, "run-co-created");
-    assert.equal(restored?.protocolVersion, "v2-15-within-subject-crossover");
+    assert.equal(restored?.protocolVersion, CURRENT_STUDY_PROTOCOL_VERSION);
     assert.equal(restored?.status, "completed");
     assert.equal(job?.status, "completed");
     assert.equal(result?.generationRole, "direct_baseline");
@@ -169,7 +170,7 @@ test("study trial persistence keeps one idempotent baseline and paired run metad
     assert.equal(evaluation.comparison?.overall_choice, "co_created");
     assert.equal(evaluation.labeledComparison?.imagination_match_choice, "co_created");
     assert.equal(evaluation.manipulation?.articulation_support_score, 4);
-    assert.equal(exported.schemaVersion, 5);
+    assert.equal(exported.schemaVersion, 6);
     assert.equal(exported.labeledComparisons.length, 1);
     assert.equal(exported.manipulationChecks.length, 1);
     assert.equal(exported.trials.length, 14);

@@ -5,6 +5,7 @@ import {
   type SessionComparisonChoice,
   type StudyPeriod,
   type StudyPeriodAssignment,
+  type StudyAudioChoice,
   type StudySequence,
   type StudySession,
   type StudySessionComparison,
@@ -29,6 +30,8 @@ interface StudySessionRow {
   current_period: number;
   stimulus_x_id: string;
   stimulus_y_id: string;
+  stimulus_x_json: string | StudyAudioChoice | null;
+  stimulus_y_json: string | StudyAudioChoice | null;
   selected_musician_ids_json: string | string[];
   first_trial_id: string | null;
   second_trial_id: string | null;
@@ -67,6 +70,18 @@ function parseStringArray(value: string | string[]): string[] {
   }
 }
 
+function parseAudioChoice(value: string | StudyAudioChoice | null): StudyAudioChoice | null {
+  if (!value) return null;
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" && typeof parsed.id === "string"
+      ? parsed as StudyAudioChoice
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToStudySession(row: StudySessionRow): StudySession {
   return {
     id: row.id,
@@ -78,6 +93,8 @@ function rowToStudySession(row: StudySessionRow): StudySession {
     currentPeriod: row.current_period === 2 ? 2 : 1,
     stimulusXId: row.stimulus_x_id,
     stimulusYId: row.stimulus_y_id,
+    stimulusX: parseAudioChoice(row.stimulus_x_json),
+    stimulusY: parseAudioChoice(row.stimulus_y_json),
     selectedMusicianIds: parseStringArray(row.selected_musician_ids_json),
     firstTrialId: row.first_trial_id,
     secondTrialId: row.second_trial_id,
@@ -218,11 +235,7 @@ export async function createOrRecoverStudySession(input: {
     `).all(input.participantId, CURRENT_STUDY_PROTOCOL_VERSION))[0] as unknown as StudySessionRow | undefined;
     if (existing) return { session: rowToStudySession(existing), recovered: true };
 
-    const assignment = await claimSequence(
-      transaction,
-      input.stimulusXId,
-      input.stimulusYId
-    );
+    const assignment = await claimSequence(transaction, "participant-choice-x", "participant-choice-y");
     const id = randomUUID();
     const now = new Date().toISOString();
     await transaction.prepare(`
@@ -238,8 +251,8 @@ export async function createOrRecoverStudySession(input: {
       input.deviceSessionId,
       CURRENT_STUDY_PROTOCOL_VERSION,
       assignment.sequence,
-      input.stimulusXId,
-      input.stimulusYId,
+      "",
+      "",
       toJson([]),
       assignment.blockId,
       assignment.position,
@@ -294,6 +307,36 @@ export async function updateStudySession(input: {
       .all(input.id))[0] as unknown as StudySessionRow;
     return rowToStudySession(updated);
   });
+}
+
+export async function saveStudyAudioChoices(input: {
+  studySessionId: string;
+  first: StudyAudioChoice;
+  second: StudyAudioChoice;
+}): Promise<StudySession | null> {
+  if (input.first.id === input.second.id) {
+    throw new Error("Two different study audio choices are required");
+  }
+  const database = await getDatabase();
+  const session = await getStudySession(input.studySessionId);
+  if (!session) return null;
+  if (session.firstTrialId || session.secondTrialId) {
+    throw new Error("Study audio choices cannot change after the experience starts");
+  }
+  const now = new Date().toISOString();
+  await database.prepare(`
+    UPDATE study_sessions
+    SET stimulus_x_id = ?, stimulus_y_id = ?, stimulus_x_json = ?, stimulus_y_json = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.first.id,
+    input.second.id,
+    toJson(input.first),
+    toJson(input.second),
+    now,
+    input.studySessionId
+  );
+  return getStudySession(input.studySessionId);
 }
 
 export async function attachTrialToStudySession(input: {

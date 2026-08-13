@@ -1,4 +1,8 @@
-import { CURRENT_STUDY_PROTOCOL_VERSION } from "./contracts/study-trial.ts";
+import {
+  CURRENT_STUDY_PROTOCOL_VERSION,
+  usesIntegratedQuestionnaires,
+  usesStreamlinedQuestionnaires,
+} from "./contracts/study-trial.ts";
 
 type RawRecord = Record<string, unknown>;
 
@@ -21,6 +25,7 @@ export interface RawExperimentExport {
   pairwiseComparisons: RawRecord[];
   labeledComparisons: RawRecord[];
   manipulationChecks: RawRecord[];
+  questionnaireResponses: RawRecord[];
 }
 
 export type ResearchCondition = "multi_agent" | "single_agent" | "unknown";
@@ -133,6 +138,7 @@ export interface ResearchTrialRecord {
     reason: string;
   } | null;
   manipulationCheck: RawRecord | null;
+  questionnaireResponses: RawRecord[];
   questionnaireComplete: boolean;
   generationComplete: boolean;
   baselineComplete: boolean;
@@ -147,12 +153,15 @@ export interface ResearchStudySessionRecord {
   sequence: string;
   status: string;
   currentPeriod: number;
+  firstSelectedAudio: RawRecord | null;
+  secondSelectedAudio: RawRecord | null;
   selectedMusicianIds: string[];
   createdAt: string;
   completedAt: string;
   firstTrial: ResearchTrialRecord | null;
   secondTrial: ResearchTrialRecord | null;
   comparison: RawRecord | null;
+  questionnaireResponses: RawRecord[];
   complete: boolean;
   issues: ResearchDataIssue[];
 }
@@ -212,6 +221,17 @@ function list(record: RawRecord | null | undefined, key: string): RawRecord[] {
   return rows(record?.[key]);
 }
 
+function recordValue(value: unknown): RawRecord | null {
+  if (isRecord(value)) return value;
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function choice(value: unknown): ResearchChoice | null {
   return value === "co_created" || value === "direct_baseline" || value === "tie"
     ? value
@@ -269,6 +289,67 @@ function runRecord(record: RawRecord | null): ResearchRun | null {
     runLog: record.run_log ?? {},
     raw: record,
   };
+}
+
+export function exportResearchQuestionnaireItemsCsvFromDataset(
+  dataset: ResearchDashboardDataset,
+  trials: ResearchTrialRecord[] = dataset.trials
+): string {
+  const headers = [
+    "participant_id", "study_session_id", "trial_id", "period", "condition",
+    "stimulus_id", "music_title", "response_key", "instrument",
+    "questionnaire_version", "scope", "generation_role", "run_id", "status",
+    "item_id", "answer", "score_total", "metrics_json", "started_at", "completed_at",
+  ];
+  const selectedTrialIds = new Set(trials.map((trial) => trial.id));
+  const sessionMetadata = new Map(dataset.studySessions.map((session) => [session.id, session]));
+  const rowsById = new Map<string, { response: RawRecord; trial: ResearchTrialRecord | null }>();
+  for (const trial of trials) {
+    for (const response of trial.questionnaireResponses) {
+      rowsById.set(text(response.id) || `${trial.id}:${text(response.response_key)}`, { response, trial });
+    }
+  }
+  for (const session of dataset.studySessions) {
+    if (!trials.some((trial) => trial.studySessionId === session.id)) continue;
+    for (const response of session.questionnaireResponses) {
+      const id = text(response.id) || `${session.id}:${text(response.response_key)}`;
+      if (!rowsById.has(id)) rowsById.set(id, { response, trial: null });
+    }
+  }
+  const lines: string[] = [];
+  for (const { response, trial } of rowsById.values()) {
+    const linkedTrialId = text(response.trial_id);
+    if (linkedTrialId && !selectedTrialIds.has(linkedTrialId)) continue;
+    const studySessionId = text(response.study_session_id) || trial?.studySessionId || "";
+    const session = sessionMetadata.get(studySessionId);
+    const answers = isRecord(response.answers) ? response.answers : {};
+    for (const [itemId, answer] of Object.entries(answers)) {
+      const values: Record<string, unknown> = {
+        participant_id: text(response.participant_id) || trial?.participantId || session?.participantId,
+        study_session_id: studySessionId,
+        trial_id: linkedTrialId || trial?.id,
+        period: response.period ?? trial?.period,
+        condition: text(response.condition) || trial?.condition,
+        stimulus_id: trial?.stimulusId,
+        music_title: trial?.musicTitle,
+        response_key: response.response_key,
+        instrument: response.instrument,
+        questionnaire_version: response.questionnaire_version,
+        scope: response.scope,
+        generation_role: response.generation_role,
+        run_id: response.run_id,
+        status: response.status,
+        item_id: itemId,
+        answer,
+        score_total: response.score_total,
+        metrics_json: JSON.stringify(response.metrics || {}),
+        started_at: response.started_at,
+        completed_at: response.completed_at,
+      };
+      lines.push(headers.map((header) => csvValue(values[header])).join(","));
+    }
+  }
+  return `\uFEFF${headers.join(",")}\n${lines.join("\n")}\n`;
 }
 
 function resolveRun(
@@ -432,6 +513,9 @@ function buildTrial(
   const manipulationCheck = data.manipulationChecks.find(
     (item) => text(item.trial_id) === trialId
   ) || null;
+  const questionnaireResponses = data.questionnaireResponses.filter(
+    (item) => text(item.trial_id) === trialId
+  );
   const comparison = labeled
     ? {
         kind: "labeled" as const,
@@ -457,15 +541,35 @@ function buildTrial(
   const visualBrief = visualBriefVersions.at(-1)?.brief ?? coCreatedRun?.raw.visual_brief ?? null;
   const interactionEvents = scopedRecords(data.interactionEvents)
     .sort((a, b) => Date.parse(text(a.created_at)) - Date.parse(text(b.created_at)));
-  const isCurrentProtocol = protocolVersion === CURRENT_STUDY_PROTOCOL_VERSION;
-  const questionnaireComplete = isCurrentProtocol
-    ? Boolean(artworkEvaluation && labeled && manipulationCheck)
+  const integratedProtocol = usesIntegratedQuestionnaires(protocolVersion);
+  const requiredPeriodInstruments = usesStreamlinedQuestionnaires(protocolVersion)
+    ? ["csi", "agency_ownership", "sus", "raw_tlx", "manipulation_check"]
+    : ["csi", "sus", "raw_tlx", "manipulation_check"];
+  const questionnaireComplete = integratedProtocol
+    ? requiredPeriodInstruments.every(
+        (instrument) => questionnaireResponses.some((response) => (
+          text(response.instrument) === instrument && text(response.status) === "completed"
+        ))
+      ) && ["co_created", "direct_baseline"].every((role) => (
+        questionnaireResponses.some((response) => (
+          text(response.instrument) === "image_alignment"
+          && text(response.generation_role) === role
+          && text(response.status) === "completed"
+        ))
+      ))
     : Boolean(artworkEvaluation && (pairwise || labeled));
   const generationComplete = Boolean(
     coCreatedRun?.imageUrl && baselineRun?.imageUrl
   );
   const baselineComplete = text(baselineJob?.status) === "completed"
     && Boolean(baselineRun?.imageUrl);
+  const coCreatedArtworkReviewed = integratedProtocol
+    ? questionnaireResponses.some((response) => (
+        text(response.instrument) === "image_alignment"
+        && text(response.generation_role) === "co_created"
+        && text(response.status) === "completed"
+      ))
+    : Boolean(artworkEvaluation);
   const issues: ResearchDataIssue[] = [];
   if (!audio) issues.push(issue(trialId, "missing_audio_analysis", "缺少音频分析", "error"));
   if (!coCreatedRun && ["generating", "evaluating", "completed"].includes(text(trial.status))) {
@@ -482,7 +586,7 @@ function buildTrial(
       "error"
     ));
   }
-  if (baselineComplete && !artworkEvaluation) {
+  if (baselineComplete && !coCreatedArtworkReviewed) {
     issues.push(issue(
       trialId,
       "premature_baseline",
@@ -493,7 +597,7 @@ function buildTrial(
   if (text(trial.status) === "completed" && !questionnaireComplete) {
     issues.push(issue(trialId, "incomplete_questionnaire", "Trial 已完成但问卷不完整"));
   }
-  if (!isCurrentProtocol) {
+  if (protocolVersion !== CURRENT_STUDY_PROTOCOL_VERSION) {
     issues.push(issue(trialId, "legacy_protocol", `历史协议：${protocolVersion}`));
   }
   if (trialRuns.length > 0 && !text(trial.co_created_run_id) && coCreatedRun) {
@@ -542,6 +646,7 @@ function buildTrial(
     artworkEvaluation,
     comparison,
     manipulationCheck,
+    questionnaireResponses,
     questionnaireComplete,
     generationComplete,
     baselineComplete,
@@ -575,6 +680,7 @@ export function parseExperimentExport(value: unknown): RawExperimentExport {
     pairwiseComparisons: rows(value.pairwiseComparisons),
     labeledComparisons: rows(value.labeledComparisons),
     manipulationChecks: rows(value.manipulationChecks),
+    questionnaireResponses: rows(value.questionnaireResponses),
   };
 }
 
@@ -603,6 +709,9 @@ export function buildResearchDashboardDataset(
       const comparison = data.sessionComparisons.find(
         (item) => text(item.study_session_id) === id
       ) || null;
+      const questionnaireResponses = data.questionnaireResponses.filter(
+        (item) => text(item.study_session_id) === id
+      );
       const issues: ResearchDataIssue[] = [];
       if (!firstTrial) {
         issues.push(issue(id, "missing_period_1", "缺少第一次体验 Trial", "error"));
@@ -610,7 +719,13 @@ export function buildResearchDashboardDataset(
       if (!secondTrial && ["period_2", "comparing", "baseline_review", "completed"].includes(text(session.status))) {
         issues.push(issue(id, "missing_period_2", "缺少第二次体验 Trial", "error"));
       }
-      if (text(session.status) === "completed" && !comparison) {
+      const integratedProtocol = usesIntegratedQuestionnaires(text(session.protocol_version));
+      const sessionQuestionnairesComplete = ["background", "session_preference", "csi_weighting"].every(
+        (instrument) => questionnaireResponses.some((response) => (
+          text(response.instrument) === instrument && text(response.status) === "completed"
+        ))
+      );
+      if (text(session.status) === "completed" && !comparison && !integratedProtocol) {
         issues.push(issue(id, "missing_session_comparison", "实验已完成但缺少体验对比", "error"));
       }
       return {
@@ -621,6 +736,8 @@ export function buildResearchDashboardDataset(
         sequence: text(session.sequence),
         status: text(session.status),
         currentPeriod: numberOrNull(session.current_period) || 1,
+        firstSelectedAudio: recordValue(session.stimulus_x),
+        secondSelectedAudio: recordValue(session.stimulus_y),
         selectedMusicianIds: Array.isArray(session.selected_musician_ids)
           ? session.selected_musician_ids.filter((value): value is string => typeof value === "string")
           : [],
@@ -629,10 +746,11 @@ export function buildResearchDashboardDataset(
         firstTrial,
         secondTrial,
         comparison,
+        questionnaireResponses,
         complete: text(session.status) === "completed"
           && Boolean(firstTrial?.questionnaireComplete)
           && Boolean(secondTrial?.questionnaireComplete)
-          && Boolean(comparison),
+          && (integratedProtocol ? sessionQuestionnairesComplete : Boolean(comparison)),
         issues,
       };
     })
@@ -752,6 +870,27 @@ function csvValue(value: unknown): string {
   return `"${stringValue.replace(/"/g, '""')}"`;
 }
 
+function questionnaireForTrial(
+  trial: ResearchTrialRecord,
+  instrument: string,
+  generationRole?: string
+): RawRecord | undefined {
+  return trial.questionnaireResponses.find((response) => (
+    text(response.instrument) === instrument
+    && (!generationRole || text(response.generation_role) === generationRole)
+    && text(response.status) === "completed"
+  ));
+}
+
+function questionnaireForSession(
+  session: ResearchStudySessionRecord,
+  instrument: string
+): RawRecord | undefined {
+  return session.questionnaireResponses.find((response) => (
+    text(response.instrument) === instrument && text(response.status) === "completed"
+  ));
+}
+
 export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
   const headers = [
     "trial_id",
@@ -774,6 +913,15 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
     "co_created_total_ms",
     "baseline_total_ms",
     "questionnaire_complete",
+    "questionnaire_version",
+    "csi_total",
+    "sus_total",
+    "raw_tlx_total",
+    "agency_score",
+    "ownership_score",
+    "manipulation_check_total",
+    "co_created_alignment_mean",
+    "baseline_alignment_mean",
     "generation_complete",
     "baseline_complete",
     ...ARTWORK_SCORE_FIELDS.map(([field]) => field),
@@ -806,6 +954,19 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
       co_created_total_ms: trial.coCreatedRun?.totalMs,
       baseline_total_ms: trial.baselineRun?.totalMs,
       questionnaire_complete: trial.questionnaireComplete,
+      questionnaire_version: text(trial.questionnaireResponses[0]?.questionnaire_version),
+      csi_total: questionnaireForTrial(trial, "csi")?.score_total,
+      sus_total: questionnaireForTrial(trial, "sus")?.score_total,
+      raw_tlx_total: questionnaireForTrial(trial, "raw_tlx")?.score_total,
+      agency_score: recordValue(
+        questionnaireForTrial(trial, "agency_ownership")?.metrics
+      )?.agency,
+      ownership_score: recordValue(
+        questionnaireForTrial(trial, "agency_ownership")?.metrics
+      )?.ownership,
+      manipulation_check_total: questionnaireForTrial(trial, "manipulation_check")?.score_total,
+      co_created_alignment_mean: questionnaireForTrial(trial, "image_alignment", "co_created")?.score_total,
+      baseline_alignment_mean: questionnaireForTrial(trial, "image_alignment", "direct_baseline")?.score_total,
       generation_complete: trial.generationComplete,
       baseline_complete: trial.baselineComplete,
       music_match_choice: trial.comparison?.musicMatchChoice,
@@ -837,6 +998,13 @@ export function exportResearchStudySessionsCsv(
     "status",
     "created_at",
     "completed_at",
+    "selected_audio_1_id",
+    "selected_audio_1_name",
+    "selected_audio_1_source_kind",
+    "selected_audio_2_id",
+    "selected_audio_2_name",
+    "selected_audio_2_source_kind",
+    "background_answers_json",
     "period_1_trial_id",
     "period_1_condition",
     "period_1_stimulus_id",
@@ -844,6 +1012,13 @@ export function exportResearchStudySessionsCsv(
     "period_1_questionnaire_complete",
     "period_1_co_created_total_ms",
     "period_1_baseline_total_ms",
+    "period_1_csi_total",
+    "period_1_sus_total",
+    "period_1_raw_tlx_total",
+    "period_1_agency_score",
+    "period_1_ownership_score",
+    "period_1_co_created_alignment_mean",
+    "period_1_baseline_alignment_mean",
     ...ARTWORK_SCORE_FIELDS.map(([field]) => `period_1_${field}`),
     ...MANIPULATION_SCORE_FIELDS.map(([field]) => `period_1_${field}`),
     "period_2_trial_id",
@@ -853,6 +1028,13 @@ export function exportResearchStudySessionsCsv(
     "period_2_questionnaire_complete",
     "period_2_co_created_total_ms",
     "period_2_baseline_total_ms",
+    "period_2_csi_total",
+    "period_2_sus_total",
+    "period_2_raw_tlx_total",
+    "period_2_agency_score",
+    "period_2_ownership_score",
+    "period_2_co_created_alignment_mean",
+    "period_2_baseline_alignment_mean",
     ...ARTWORK_SCORE_FIELDS.map(([field]) => `period_2_${field}`),
     ...MANIPULATION_SCORE_FIELDS.map(([field]) => `period_2_${field}`),
     "expression_support_choice",
@@ -860,6 +1042,9 @@ export function exportResearchStudySessionsCsv(
     "creative_freedom_choice",
     "overall_choice",
     "comparison_reason",
+    "session_preference",
+    "session_preference_reason",
+    "csi_weighting_json",
     "session_complete",
     "issue_codes",
   ];
@@ -876,6 +1061,21 @@ export function exportResearchStudySessionsCsv(
     values[`${prefix}_questionnaire_complete`] = trial?.questionnaireComplete;
     values[`${prefix}_co_created_total_ms`] = trial?.coCreatedRun?.totalMs;
     values[`${prefix}_baseline_total_ms`] = trial?.baselineRun?.totalMs;
+    values[`${prefix}_csi_total`] = trial ? questionnaireForTrial(trial, "csi")?.score_total : null;
+    values[`${prefix}_sus_total`] = trial ? questionnaireForTrial(trial, "sus")?.score_total : null;
+    values[`${prefix}_raw_tlx_total`] = trial ? questionnaireForTrial(trial, "raw_tlx")?.score_total : null;
+    const agencyOwnership = trial
+      ? questionnaireForTrial(trial, "agency_ownership")
+      : null;
+    const agencyOwnershipMetrics = recordValue(agencyOwnership?.metrics);
+    values[`${prefix}_agency_score`] = agencyOwnershipMetrics?.agency;
+    values[`${prefix}_ownership_score`] = agencyOwnershipMetrics?.ownership;
+    values[`${prefix}_co_created_alignment_mean`] = trial
+      ? questionnaireForTrial(trial, "image_alignment", "co_created")?.score_total
+      : null;
+    values[`${prefix}_baseline_alignment_mean`] = trial
+      ? questionnaireForTrial(trial, "image_alignment", "direct_baseline")?.score_total
+      : null;
     for (const [field] of ARTWORK_SCORE_FIELDS) {
       values[`${prefix}_${field}`] = trial?.artworkEvaluation?.[field];
     }
@@ -885,6 +1085,10 @@ export function exportResearchStudySessionsCsv(
   };
 
   const lines = sessions.map((session) => {
+    const background = questionnaireForSession(session, "background");
+    const preference = questionnaireForSession(session, "session_preference");
+    const weighting = questionnaireForSession(session, "csi_weighting");
+    const preferenceAnswers = isRecord(preference?.answers) ? preference.answers : {};
     const values: Record<string, unknown> = {
       study_session_id: session.id,
       data_sources: session.dataOrigins.join("|"),
@@ -894,11 +1098,21 @@ export function exportResearchStudySessionsCsv(
       status: session.status,
       created_at: session.createdAt,
       completed_at: session.completedAt,
+      selected_audio_1_id: session.firstSelectedAudio?.id,
+      selected_audio_1_name: session.firstSelectedAudio?.name,
+      selected_audio_1_source_kind: session.firstSelectedAudio?.sourceKind,
+      selected_audio_2_id: session.secondSelectedAudio?.id,
+      selected_audio_2_name: session.secondSelectedAudio?.name,
+      selected_audio_2_source_kind: session.secondSelectedAudio?.sourceKind,
+      background_answers_json: JSON.stringify(background?.answers || {}),
       expression_support_choice: session.comparison?.expression_support_choice,
       immersion_choice: session.comparison?.immersion_choice,
       creative_freedom_choice: session.comparison?.creative_freedom_choice,
       overall_choice: session.comparison?.overall_choice,
       comparison_reason: session.comparison?.reason,
+      session_preference: preferenceAnswers.SESSION_PREFERENCE,
+      session_preference_reason: preferenceAnswers.SESSION_PREFERENCE_REASON,
+      csi_weighting_json: JSON.stringify(weighting?.metrics || weighting?.answers || {}),
       session_complete: session.complete,
       issue_codes: [
         ...session.issues,

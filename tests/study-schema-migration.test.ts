@@ -61,6 +61,7 @@ test("legacy study databases migrate to the within-subject crossover schema", as
       WHERE type = 'table' AND name IN (
         'labeled_comparisons',
         'manipulation_checks',
+        'questionnaire_responses',
         'session_comparisons',
         'study_assignment_blocks',
         'study_sessions'
@@ -78,6 +79,7 @@ test("legacy study databases migrate to the within-subject crossover schema", as
     assert.deepEqual(newTables.map((table) => table.name), [
       "labeled_comparisons",
       "manipulation_checks",
+      "questionnaire_responses",
       "session_comparisons",
       "study_assignment_blocks",
       "study_sessions",

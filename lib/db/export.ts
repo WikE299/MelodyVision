@@ -4,6 +4,8 @@ const JSON_COLUMNS = new Set([
   "metadata_json",
   "sequences_json",
   "selected_musician_ids_json",
+  "stimulus_x_json",
+  "stimulus_y_json",
   "selected_characters_json",
   "presets_json",
   "music_analysis_json",
@@ -20,6 +22,8 @@ const JSON_COLUMNS = new Set([
   "timings_json",
   "model_config_json",
   "selected_reasons_json",
+  "answers_json",
+  "metrics_json",
 ]);
 
 function parseJsonColumns(row: Record<string, unknown>) {
@@ -58,7 +62,7 @@ async function readRows(
 export async function exportExperimentJson() {
   const database = await getDatabase();
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     exportedAt: new Date().toISOString(),
     sessions: await readRows(database, "experiment_sessions"),
     studySessions: await readRows(database, "study_sessions"),
@@ -76,6 +80,7 @@ export async function exportExperimentJson() {
     pairwiseComparisons: await readRows(database, "pairwise_comparisons"),
     labeledComparisons: await readRows(database, "labeled_comparisons"),
     manipulationChecks: await readRows(database, "manipulation_checks"),
+    questionnaireResponses: await readRows(database, "questionnaire_responses", "updated_at"),
   };
 }
 
@@ -112,6 +117,9 @@ export async function exportExperimentCsv() {
       pairwise_comparison: data.pairwiseComparisons.find((item) => item.trial_id === trialId) || null,
       labeled_comparison: data.labeledComparisons.find((item) => item.trial_id === trialId) || null,
       manipulation_check: data.manipulationChecks.find((item) => item.trial_id === trialId) || null,
+      questionnaire_responses: data.questionnaireResponses.filter((item) => (
+        item.trial_id === trialId
+      )),
     };
   });
   const headers = [
@@ -136,6 +144,7 @@ export async function exportExperimentCsv() {
     "pairwise_comparison",
     "labeled_comparison",
     "manipulation_check",
+    "questionnaire_responses",
   ];
   const lines = [
     headers.join(","),

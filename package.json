@@ -21,6 +21,7 @@
     "test:research-data": "node --experimental-strip-types --test tests/export-auth.test.ts"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "meyda": "^5.6.3",
     "next": "16.2.6",
     "openai": "^6.42.0",
