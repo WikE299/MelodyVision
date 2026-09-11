@@ -240,6 +240,22 @@ const COPY = {
 
 const INPUT_MODES: InputMode[] = ["examples", "search", "upload"];
 
+const FORMAL_STUDY_SESSION_KEYS = [
+  "integratedQuestionnairesComplete",
+  "studyPeriod",
+  "studySession",
+  "studySessionId",
+  "studyTrial",
+  "studyTrialId",
+] as const;
+
+function clearFormalStudyClientState() {
+  localStorage.removeItem("melodyvisionStudySessionId");
+  for (const key of FORMAL_STUDY_SESSION_KEYS) {
+    sessionStorage.removeItem(key);
+  }
+}
+
 function formatDuration(seconds: number) {
   const roundedSeconds = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(roundedSeconds / 60);
@@ -276,7 +292,9 @@ export default function HomePageClient() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams(window.location.search);
-      setStudyMode(params.get("study") === "1");
+      const formalStudyRequested = params.get("study") === "1";
+      if (!formalStudyRequested) clearFormalStudyClientState();
+      setStudyMode(formalStudyRequested);
       setStudyMusicSelectionOpen(params.get("stage") === "music");
       setStudyTestControlsEnabled(
         window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
