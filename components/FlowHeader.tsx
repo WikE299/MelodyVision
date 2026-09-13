@@ -18,6 +18,15 @@ const STEPS: FlowStep[] = [
   { index: "04", title: { zh: "画作呈现", en: "Artwork" }, icon: "image" },
 ];
 
+const STUDY_STEPS: FlowStep[] = [
+  { index: "01", title: { zh: "准备", en: "Prepare" }, icon: "note" },
+  { index: "02", title: { zh: "体验一", en: "Experience 1" }, icon: "ear" },
+  { index: "03", title: { zh: "体验二", en: "Experience 2" }, icon: "ear" },
+  { index: "04", title: { zh: "完成", en: "Complete" }, icon: "image" },
+];
+
+export type StudyStage = "preparation" | "experience_1" | "experience_2" | "complete";
+
 function StepIcon({ type }: { type: string }) {
   if (type === "guides") {
     return (
@@ -52,14 +61,20 @@ export default function FlowHeader({
   variant = "dark",
   brandLabel = "MelodyVision",
   compact = false,
+  studyStage,
 }: {
   activeStep: 1 | 2 | 3 | 4;
   variant?: "dark" | "light";
   brandLabel?: string;
   compact?: boolean;
+  studyStage?: StudyStage;
 }) {
   const isDark = variant === "dark";
   const { language, toggleLanguage } = useLanguage();
+  const steps = studyStage ? STUDY_STEPS : STEPS;
+  const activeIndex = studyStage
+    ? ({ preparation: 1, experience_1: 2, experience_2: 3, complete: 4 } as const)[studyStage]
+    : activeStep;
 
   return (
     <header className={`flex justify-between gap-4 lg:gap-6 2xl:gap-8 ${compact ? "h-14 items-center" : "items-start"}`}>
@@ -79,8 +94,8 @@ export default function FlowHeader({
       </div>
 
       <nav className={`hidden flex-1 justify-center xl:flex ${compact ? "items-center gap-2" : "items-start gap-2 2xl:gap-6"}`}>
-        {STEPS.map((step, index) => {
-          const active = activeStep === index + 1;
+        {steps.map((step, index) => {
+          const active = activeIndex === index + 1;
           return (
             <div key={step.index} className={`flex gap-2 ${compact ? "items-center" : "items-start 2xl:gap-6"}`}>
               <div className={`flex items-start gap-2 ${compact ? "min-w-[96px]" : "min-w-[104px] 2xl:min-w-[146px] 2xl:gap-3"}`}>
@@ -104,7 +119,7 @@ export default function FlowHeader({
                   </p>
                 </div>
               </div>
-              {index < STEPS.length - 1 && (
+              {index < steps.length - 1 && (
                 <div className={`${compact ? "text-lg" : "pt-4 text-xl 2xl:pt-5 2xl:text-3xl"} ${isDark ? "text-[#d5aa79]/85" : "text-[#b99a78]"}`}>→</div>
               )}
             </div>

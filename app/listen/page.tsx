@@ -30,6 +30,7 @@ import {
 import { isMeaningfulUserInput } from "@/lib/conversation/user-input";
 import { ensureStudyTrial } from "@/lib/experiment-trial-client";
 import CrystalAudioVisualizer from "@/components/CrystalAudioVisualizer";
+import { shouldSubmitOnEnter } from "@/lib/ui/keyboard-submit";
 
 const FIGURE_STYLE: Record<string, string> = {
   boya: "w-[clamp(178px,12vw,230px)]",
@@ -56,8 +57,8 @@ const COPY = {
     expandProgress: "展开播放进度",
     addFeeling: "点击可补充你的听感",
     myFeeling: "我的感受",
-    feelingPlaceholder: "写下此刻浮现的感受或画面",
-    freeInputHint: "不用组织语言，也不用描述完整。写下任何浮现的画面、感受或念头。",
+    feelingPlaceholder: "这段音乐让你看见了什么？",
+    freeInputHint: "先听一会儿，再写下脑海里最先出现的画面。",
     inspiration: "需要一点灵感",
     hideInspiration: "收起灵感提示",
     inspirationHint: "不用逐项回答，只选一个你愿意继续感受的方向。",
@@ -66,11 +67,11 @@ const COPY = {
     sendFeeling: "发送听感",
     sendingFeeling: "正在发送",
     closeComment: "关闭评论",
+    expandComment: "完整阅读",
     resonate: "更接近我的听感",
     resonated: "已作为重点听法",
     guideTip: "点击音乐家听点评，点亮共鸣或补充自己的听感。",
     roomTitle: "共同画面",
-    roomSubtitle: "你先说出第一感觉，音乐家从不同角度回应，最后由你决定画面。",
     singleRoomSubtitle: "先留下你的第一感觉，再沿着不同回应慢慢形成画面。",
     facilitator: "共创引导",
     openChat: "展开聊天室",
@@ -79,7 +80,7 @@ const COPY = {
     nextGuideWaiting: "共创引导正在等你开启这一轮",
     waitingTurn: "先听完这一轮，主持人随后会邀请你补充",
     hostLabel: "主持引导",
-    hostOpening: "先写下最先浮现的感觉，不需要完整。",
+    hostOpening: "先听一会儿，再写下脑海里最先出现的画面。",
     hostListening: "先听音乐家的回应。全部听完后，再轮到你补充画面。",
     hostWriting: "轮到你了，请回答下面的问题。",
     hostReady: "画面已经聚拢，可以开始生成。",
@@ -120,6 +121,7 @@ const COPY = {
     yourTurn: "轮到你了 · 补充脑海里的画面",
     stageOpening: "先从你的感受开始",
     stageExploring: "沿着你的画面继续",
+    stageListening: "听音乐家的回应",
     stageReady: "共同画面已经聚拢",
     generate: "生成画作 →",
     generating: "正在把共同听见的画面聚拢成画作",
@@ -137,8 +139,8 @@ const COPY = {
     expandProgress: "Show playback progress",
     addFeeling: "Add your listening note",
     myFeeling: "My note",
-    feelingPlaceholder: "Write whatever feeling or image appears",
-    freeInputHint: "No need to organize it or make it complete. Write any image, feeling, or thought that appears.",
+    feelingPlaceholder: "What does this music let you see?",
+    freeInputHint: "Listen for a moment, then write the first image that appears.",
     inspiration: "Need a little inspiration",
     hideInspiration: "Hide inspiration",
     inspirationHint: "You do not need to answer each one. Follow only the direction that feels useful.",
@@ -147,11 +149,11 @@ const COPY = {
     sendFeeling: "Send listening note",
     sendingFeeling: "Sending",
     closeComment: "Close comment",
+    expandComment: "Read full comment",
     resonate: "Closer to my listening",
     resonated: "Marked as key lens",
     guideTip: "Tap a musician to hear their take, mark resonance, or add your own note.",
     roomTitle: "Shared Image",
-    roomSubtitle: "Begin with your impression. The musicians respond from different angles, and you decide what remains.",
     singleRoomSubtitle: "Begin with your impression, then shape the image through different responses.",
     facilitator: "Co-creation guide",
     openChat: "Open conversation",
@@ -160,7 +162,7 @@ const COPY = {
     nextGuideWaiting: "The co-creation guide is ready for this round",
     waitingTurn: "Listen to this round first. The guide will invite you to add more.",
     hostLabel: "Listening guide",
-    hostOpening: "Write the first feeling that appears. It does not need to be complete.",
+    hostOpening: "Listen for a moment, then write the first image that appears.",
     hostListening: "Listen to the musicians first. You will add to the image after everyone responds.",
     hostWriting: "Your turn. Please answer the question below.",
     hostReady: "The image has converged and is ready to generate.",
@@ -201,6 +203,7 @@ const COPY = {
     yourTurn: "Your turn · add the image in your mind",
     stageOpening: "Begin with your own impression",
     stageExploring: "Continue along your image",
+    stageListening: "Hear the musicians respond",
     stageReady: "The shared image has converged",
     generate: "Generate Artwork →",
     generating: "Gathering what you heard together into an artwork",
@@ -623,6 +626,7 @@ function GuideFigure({
 function ReflectiveGuideFigure({
   character,
   active,
+  cue,
   open,
   loading,
   streaming,
@@ -634,6 +638,7 @@ function ReflectiveGuideFigure({
 }: {
   character: Character;
   active: boolean;
+  cue: boolean;
   open: boolean;
   loading: boolean;
   streaming: boolean;
@@ -648,7 +653,7 @@ function ReflectiveGuideFigure({
   };
   return (
     <div className={`pointer-events-none group absolute z-40 flex w-[clamp(154px,12vw,194px)] flex-col items-center text-center ${stageOffset}`}>
-      {!open && canOpen && (
+      {!open && cue && (
         <button
           type="button"
           onClick={onOpen}
@@ -688,6 +693,7 @@ function ReflectiveCommentCard({
   comment,
   resonant,
   onClose,
+  onExpand,
   onToggleResonance,
   language,
 }: {
@@ -697,6 +703,7 @@ function ReflectiveCommentCard({
   comment: string;
   resonant: boolean;
   onClose: () => void;
+  onExpand: () => void;
   onToggleResonance: () => void;
   language: Language;
 }) {
@@ -707,17 +714,28 @@ function ReflectiveCommentCard({
 
   return (
     <article className="pointer-events-auto relative h-[112px] min-w-0 border border-[#f2bd7d]/74 bg-[#ffe0bd]/96 px-3 py-2.5 text-left text-[#322534] shadow-[0_16px_34px_rgba(0,0,0,0.3)]">
-      <p className="truncate pr-14 text-xs font-semibold">{label.name}</p>
+      <p className="truncate pr-20 text-xs font-semibold">{label.name}</p>
       {!loading && (
         <>
           <button
             type="button"
             onClick={onToggleResonance}
-            className={`absolute right-9 top-2 flex h-6 w-6 items-center justify-center rounded-full border transition ${resonant ? "border-[#8b5e2f]/62 bg-[#5b3e31] text-[#ffe6c3]" : "border-[#9a7458]/40 bg-[#fff0d7] text-[#76513d] hover:bg-white"}`}
+            className={`absolute right-16 top-2 flex h-6 w-6 items-center justify-center rounded-full border transition ${resonant ? "border-[#8b5e2f]/62 bg-[#5b3e31] text-[#ffe6c3]" : "border-[#9a7458]/40 bg-[#fff0d7] text-[#76513d] hover:bg-white"}`}
             aria-label={resonant ? copy.resonated : copy.resonate}
             title={resonant ? copy.resonated : copy.resonate}
           >
             ✦
+          </button>
+          <button
+            type="button"
+            onClick={onExpand}
+            className="absolute right-9 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-[#9a7458]/40 bg-[#fff0d7] text-[#5b3e31] transition hover:bg-white"
+            aria-label={copy.expandComment}
+            title={copy.expandComment}
+          >
+            <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M6 3H3v3M10 3h3v3M6 13H3v-3M10 13h3v-3" />
+            </svg>
           </button>
           <button
             type="button"
@@ -843,6 +861,7 @@ export default function ListenPage() {
   const [allComments, setAllComments] = useState<Record<string, string>>(initialState.comments);
   const [visibleComments, setVisibleComments] = useState<Record<string, string>>(initialState.comments);
   const [revealed, setRevealed] = useState<Set<string>>(new Set(Object.keys(initialState.comments)));
+  const [expandedCommentId, setExpandedCommentId] = useState("");
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [streaming, setStreaming] = useState<Set<string>>(new Set());
   const [failedSpeakerId, setFailedSpeakerId] = useState("");
@@ -873,6 +892,15 @@ export default function ListenPage() {
   const streamGenerationRef = useRef(0);
   const activeStreamSpeakerRef = useRef("");
   const allCommentsRef = useRef(initialState.comments);
+
+  useEffect(() => {
+    if (!expandedCommentId) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpandedCommentId("");
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [expandedCommentId]);
   const conversationStateRef = useRef(initialState.conversationState);
   const userSubmissionInFlightRef = useRef(false);
   const visualBriefRefRef = useRef(initialState.conversationState?.visualBriefRef || null);
@@ -1600,8 +1628,10 @@ export default function ListenPage() {
     allComments
   );
   const reflectiveCanGenerate = generationReady && reflectiveCommentsReady;
-  const visualEvidenceReady = Boolean(visualBrief?.readiness.ready);
-  const needsMoreUserEvidence = !generationReady && !visualEvidenceReady;
+  const reflectiveAwaitingComments = Boolean(
+    isReflective && hasUserContribution && !reflectiveCommentsReady
+  );
+  const needsMoreUserEvidence = !generationReady;
   const generationActionBlocked = isGenerationActionBlocked({
     generating,
     submittingUserNote,
@@ -1621,21 +1651,34 @@ export default function ListenPage() {
     ? characterUi[language][nextScheduledCharacter.id as keyof typeof characterUi.zh]?.name ||
       nextScheduledCharacter.name
     : "";
-  const musicianTurnActive = waitingForNextAgent || loading.size > 0 || streaming.size > 0;
+  const nextReflectiveSpeakerId = isReflective && hasUserContribution
+    ? selectedChars.find((character) => !allComments[character.id])?.id || ""
+    : "";
+  const reflectiveSpeakerCueId = isReflective && (loading.size > 0 || streaming.size > 0)
+    ? activeCharacterId
+    : nextReflectiveSpeakerId;
+  const musicianTurnActive = isReflective
+    ? Boolean(hasUserContribution && (reflectiveSpeakerCueId || loading.size > 0 || streaming.size > 0))
+    : waitingForNextAgent || loading.size > 0 || streaming.size > 0;
   const userTurnActive = Boolean(
     conversationState?.turnOwner === "user" &&
     !musicianTurnActive &&
     !submittingUserNote
   );
-  const hostControlText = generationReady
-    ? copy.hostReady
+  const openingUserTurn = !hasUserContribution && userTurnActive;
+  const hostControlText = reflectiveAwaitingComments
+    ? copy.hostListening
+    : generationReady
+      ? copy.hostReady
     : musicianTurnActive
       ? copy.hostListening
       : hasUserContribution
-        ? copy.hostWriting
+        ? facilitatorPlan?.userInvitation || copy.hostWriting
         : copy.hostOpening;
-  const interactionStageLabel = generationReady
-    ? copy.stageReady
+  const interactionStageLabel = reflectiveAwaitingComments
+    ? copy.stageListening
+    : generationReady
+      ? copy.stageReady
     : hasUserContribution
       ? copy.stageExploring
       : copy.stageOpening;
@@ -1660,7 +1703,12 @@ export default function ListenPage() {
       <div className="absolute inset-0 opacity-32 [background-image:linear-gradient(115deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:180px_180px,220px_220px]" />
 
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
-        <FlowHeader activeStep={3} />
+        <FlowHeader
+          activeStep={3}
+          studyStage={isFormalStudy
+            ? initialState.studyTrial?.period === 2 ? "experience_2" : "experience_1"
+            : undefined}
+        />
 
         <section className="relative mt-3 flex min-h-0 flex-1 overflow-clip rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5">
           {!isFormalStudy && (
@@ -1805,6 +1853,7 @@ export default function ListenPage() {
                       comment={visibleComments[character.id] || ""}
                       resonant={resonantComments.has(character.id)}
                       onClose={() => handleReflectiveClose(character.id)}
+                      onExpand={() => setExpandedCommentId(character.id)}
                       onToggleResonance={() => toggleResonance(character.id)}
                       language={language}
                     />
@@ -1818,12 +1867,15 @@ export default function ListenPage() {
                 <ReflectiveGuideFigure
                   key={character.id}
                   character={character}
-                  active={character.id === activeCharacterId}
+                  active={character.id === reflectiveSpeakerCueId}
+                  cue={character.id === reflectiveSpeakerCueId}
                   open={revealed.has(character.id)}
                   loading={loading.has(character.id)}
                   streaming={streaming.has(character.id)}
                   comment={visibleComments[character.id] || ""}
-                  canOpen={hasUserContribution}
+                  canOpen={hasUserContribution && (
+                    Boolean(allComments[character.id]) || character.id === reflectiveSpeakerCueId
+                  )}
                   stageOffset={stageSlots[index] || stageSlots[stageSlots.length - 1]}
                   onOpen={() => void handleReflectiveReveal(character.id)}
                   language={language}
@@ -1832,7 +1884,7 @@ export default function ListenPage() {
                 <GuideFigure
                   key={character.id}
                   character={character}
-                  active={character.id === activeCharacterId}
+                  active={musicianTurnActive && character.id === nextScheduledSpeakerId}
                   commented={revealed.has(character.id)}
                   loading={loading.has(character.id)}
                   streaming={streaming.has(character.id)}
@@ -1902,7 +1954,11 @@ export default function ListenPage() {
 
             {isReflective && (
               <div
-                className={`left-1/2 z-[92] w-[min(720px,78vw)] border border-[#b9895d]/52 bg-[#211c26]/94 px-5 py-3 shadow-[0_18px_58px_rgba(0,0,0,0.38)] backdrop-blur ${
+                className={`left-1/2 z-[92] w-[min(720px,78vw)] border bg-[#211c26]/94 px-5 py-3 backdrop-blur ${
+                  openingUserTurn
+                    ? "border-[#e9b872]/76 shadow-[0_18px_68px_rgba(0,0,0,0.5),0_0_36px_rgba(235,176,98,0.16)]"
+                    : "border-[#b9895d]/52 shadow-[0_18px_58px_rgba(0,0,0,0.38)]"
+                } ${
                   hasUserContribution
                     ? "fixed bottom-2"
                     : "absolute top-4"
@@ -1926,8 +1982,10 @@ export default function ListenPage() {
                   ) : (
                     <p className="mt-1 text-xs font-medium leading-relaxed text-[#e5c39e]">
                       {hasUserContribution
-                        ? generationReady
-                          ? facilitatorPlan?.stageSubtitle
+                        ? reflectiveAwaitingComments
+                          ? copy.hearAllComments
+                          : generationReady
+                            ? facilitatorPlan?.stageSubtitle
                           : facilitatorPlan?.userInvitation || copy.reflectiveTip
                         : copy.freeInputHint}
                     </p>
@@ -1940,7 +1998,7 @@ export default function ListenPage() {
                 )}
                 {!generationReady ? (
                   <>
-                    <div className="mt-2">
+                    {!openingUserTurn && <div className="mt-2">
                       <button
                         type="button"
                         onClick={() => setShowInspiration((current) => !current)}
@@ -1949,20 +2007,30 @@ export default function ListenPage() {
                       >
                         {showInspiration ? copy.hideInspiration : copy.inspiration}
                       </button>
-                    </div>
-                    <div className="mt-2 flex items-center gap-2 border border-[#8c6a50]/48 bg-[#17141b]/76 px-3 py-2">
+                    </div>}
+                    <div className={`mt-2 flex items-center gap-2 border bg-[#17141b]/76 px-3 py-2 ${
+                      openingUserTurn
+                        ? "mv-user-turn border-[#f1bd76]/85"
+                        : "border-[#8c6a50]/48"
+                    }`}>
                       <textarea
                         value={userNote}
                         onChange={(event) => {
                           setUserNote(event.target.value);
                           setUserNoteError("");
                         }}
-                        disabled={loading.size > 0 || submittingUserNote}
+                        onKeyDown={(event) => {
+                          if (!shouldSubmitOnEnter(event)) return;
+                          event.preventDefault();
+                          void handleSubmitUserNote();
+                        }}
+                        disabled={musicianTurnActive || submittingUserNote}
                         placeholder={copy.feelingPlaceholder}
                         rows={1}
-                        className="h-7 min-w-0 flex-1 resize-none bg-transparent text-sm leading-7 text-[#ffe3bd] outline-none placeholder:text-[#927c69] disabled:opacity-45"
+                        aria-keyshortcuts="Enter"
+                        className={`${openingUserTurn ? "h-10 leading-10" : "h-7 leading-7"} min-w-0 flex-1 resize-none bg-transparent text-sm text-[#ffe3bd] outline-none placeholder:text-[#b79a7d] disabled:opacity-45`}
                       />
-                      <button type="button" onClick={handleSubmitUserNote} disabled={!userNote.trim() || submittingUserNote || loading.size > 0} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35" aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}>
+                      <button type="button" onClick={handleSubmitUserNote} disabled={!userNote.trim() || submittingUserNote || musicianTurnActive} className={`flex shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35 ${openingUserTurn ? "h-10 w-10" : "h-9 w-9"}`} aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}>
                         ↑
                       </button>
                     </div>
@@ -1974,9 +2042,11 @@ export default function ListenPage() {
                         {copy.hearAllComments}
                       </p>
                     )}
-                    <button type="button" onClick={handleContinue} disabled={!reflectiveCanGenerate || generationActionBlocked} className="mt-3 flex h-11 w-full items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 text-sm font-semibold text-[#ffe3bd] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:opacity-40">
-                      {copy.generate}
-                    </button>
+                    {reflectiveCanGenerate && (
+                      <button type="button" onClick={handleContinue} disabled={generationActionBlocked} className="mt-3 flex h-11 w-full items-center justify-center border border-[#ffd083]/82 bg-[#674536]/94 text-sm font-semibold text-[#fff0d2] shadow-[0_0_28px_rgba(255,194,103,0.28)] transition hover:bg-[#77503c] disabled:cursor-not-allowed disabled:border-[#f4bd72]/32 disabled:bg-[#4b3540]/56 disabled:text-[#b59b82] disabled:opacity-50">
+                        {copy.generate}
+                      </button>
+                    )}
                   </>
                 )}
                 {userNoteError && <p className="mt-1.5 text-xs text-[#efb6a5]">{userNoteError}</p>}
@@ -1997,7 +2067,7 @@ export default function ListenPage() {
             className={`absolute left-1/2 z-[90] min-h-0 overflow-hidden border border-[#9f6f45]/48 bg-[#1d1923]/94 shadow-[0_24px_70px_rgba(0,0,0,0.42)] backdrop-blur transition-[opacity,transform] duration-500 ${
               hasUserContribution
                 ? "top-4 h-[min(300px,42vh)] w-[min(780px,76vw)]"
-                : "top-0 h-auto w-[min(640px,78vw)]"
+                : "top-4 h-auto w-[min(640px,78vw)]"
             } ${
               chatOpen
                 ? "opacity-100"
@@ -2009,13 +2079,15 @@ export default function ListenPage() {
           >
             <div className={`flex min-w-0 flex-col ${hasUserContribution ? "h-full" : ""}`}>
             <header className="relative shrink-0 border-b border-[#9f6f45]/30 px-5 py-3">
-              <div className="flex items-baseline gap-3 pr-10">
+              <div className={`flex items-baseline gap-3 ${openingUserTurn ? "pr-0" : "pr-10"}`}>
                 <p className="font-serif text-lg font-semibold text-[#ffe3bd]">
                   {hasUserContribution ? copy.roomTitle : copy.journalTitle}
                 </p>
-                <p className="text-[11px] font-medium tracking-[0.08em] text-[#d8b080]">
-                  {interactionStageLabel}
-                </p>
+                {!openingUserTurn && (
+                  <p className="text-[11px] font-medium tracking-[0.08em] text-[#d8b080]">
+                    {interactionStageLabel}
+                  </p>
+                )}
                 {hasUserContribution && visualBrief && (
                   <EvidenceSlotCheck
                     brief={visualBrief}
@@ -2024,18 +2096,22 @@ export default function ListenPage() {
                   />
                 )}
               </div>
-              <p className="mt-1 text-xs leading-relaxed text-[#c9aa8c]">
-                {hasUserContribution ? copy.roomSubtitle : copy.freeInputHint}
-              </p>
-              <button
-                type="button"
-                onClick={() => setChatOpen(false)}
-                className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-[#8f6b52]/42 text-[#c9aa8c] transition hover:border-[#ffd083]/70 hover:text-[#ffe3bd]"
-                aria-label={copy.closeChat}
-                title={copy.closeChat}
-              >
-                ×
-              </button>
+              {!hasUserContribution && (
+                <p className="mt-1 text-xs leading-relaxed text-[#c9aa8c]">
+                  {copy.freeInputHint}
+                </p>
+              )}
+              {!openingUserTurn && (
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(false)}
+                  className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-[#8f6b52]/42 text-[#c9aa8c] transition hover:border-[#ffd083]/70 hover:text-[#ffe3bd]"
+                  aria-label={copy.closeChat}
+                  title={copy.closeChat}
+                >
+                  ×
+                </button>
+              )}
             </header>
 
             <div className={hasUserContribution ? "flex min-h-0 flex-1" : ""}>
@@ -2086,14 +2162,14 @@ export default function ListenPage() {
                 ? "w-[min(330px,42%)] border-l border-[#9f6f45]/32"
                 : "border-t border-[#9f6f45]/32"
             }`}>
-              <div className="shrink-0 border-l-2 border-[#dca45f]/58 pl-3">
+              {!openingUserTurn && <div className="shrink-0 border-l-2 border-[#dca45f]/58 pl-3">
                 <p className="text-[10px] font-semibold tracking-[0.12em] text-[#d9ac79]">
                   {copy.hostLabel}
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-[#e6c6a4]">
                   {hostControlText}
                 </p>
-              </div>
+              </div>}
               {["streaming-musician", "streaming-guide"].includes(conversationState?.status || "") &&
                 (conversationState?.queuedSpeakerIds.length || 0) > 0 &&
                 streaming.size === 0 &&
@@ -2110,14 +2186,6 @@ export default function ListenPage() {
                     <span>→</span>
                   </button>
                 )}
-              {userTurnActive && needsMoreUserEvidence && facilitatorPlan?.userInvitation && (
-                <p
-                  key={facilitatorPlan.userInvitation}
-                  className="mt-2 shrink-0 border-l border-[#9f7655]/42 pl-2 text-[11px] leading-relaxed text-[#bda186]"
-                >
-                  {facilitatorPlan.userInvitation}
-                </p>
-              )}
               {needsMoreUserEvidence && (
                 <div className={hasUserContribution ? "mt-auto pt-2" : "mt-2"}>
                   <div className={`flex items-center gap-2 rounded-[10px] border px-3 py-1.5 transition duration-300 ${
@@ -2131,16 +2199,22 @@ export default function ListenPage() {
                         setUserNote(event.target.value);
                         setUserNoteError("");
                       }}
+                      onKeyDown={(event) => {
+                        if (!shouldSubmitOnEnter(event)) return;
+                        event.preventDefault();
+                        void handleSubmitUserNote();
+                      }}
                       disabled={!userTurnActive}
                       placeholder={userTurnActive ? copy.feelingPlaceholder : copy.waitingTurn}
                       rows={1}
-                      className="h-8 min-w-0 flex-1 resize-none bg-transparent text-sm leading-8 text-[#ffe3bd] outline-none placeholder:text-[#927c69] disabled:cursor-not-allowed"
+                      aria-keyshortcuts="Enter"
+                      className={`${openingUserTurn ? "h-10 leading-10" : "h-8 leading-8"} min-w-0 flex-1 resize-none bg-transparent text-sm text-[#ffe3bd] outline-none placeholder:text-[#b79a7d] disabled:cursor-not-allowed`}
                     />
                     <button
                       type="button"
                       onClick={handleSubmitUserNote}
                       disabled={!userTurnActive || !userNote.trim() || submittingUserNote}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"
+                      className={`flex shrink-0 items-center justify-center rounded-full bg-[#f4d09a] text-base font-semibold text-[#342831] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35 ${openingUserTurn ? "h-10 w-10" : "h-8 w-8"}`}
                       aria-label={submittingUserNote ? copy.sendingFeeling : copy.sendFeeling}
                     >
                       ↑
@@ -2155,7 +2229,7 @@ export default function ListenPage() {
                   type="button"
                   onClick={handleContinue}
                   disabled={generationActionBlocked}
-                  className="mt-auto flex h-10 w-full shrink-0 items-center justify-center border border-[#f4bd72]/58 bg-[#4b3540]/88 px-5 text-sm font-semibold text-[#ffe3bd] shadow-[0_12px_34px_rgba(0,0,0,0.26)] transition hover:bg-[#5a3b49] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61]"
+                  className="mt-auto flex h-10 w-full shrink-0 items-center justify-center border border-[#ffd083]/82 bg-[#674536]/94 px-5 text-sm font-semibold text-[#fff0d2] shadow-[0_0_28px_rgba(255,194,103,0.28)] transition hover:bg-[#77503c] disabled:cursor-not-allowed disabled:border-[#735844]/35 disabled:bg-[#2a242d] disabled:text-[#806f61] disabled:shadow-none"
                 >
                   {copy.generate}
                 </button>
@@ -2181,6 +2255,35 @@ export default function ListenPage() {
             </button>
           )}
             </>
+          )}
+
+          {expandedCommentId && allComments[expandedCommentId] && (
+            <div
+              className="absolute inset-0 z-[115] flex items-center justify-center bg-[#15111c]/58 px-8 backdrop-blur-[2px]"
+              role="dialog"
+              aria-modal="true"
+              aria-label={copy.expandComment}
+              onMouseDown={(event) => {
+                if (event.currentTarget === event.target) setExpandedCommentId("");
+              }}
+            >
+              <article className="relative w-full max-w-2xl border border-[#f2bd7d]/72 bg-[#ffe0bd] p-6 text-[#322534] shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
+                <button
+                  type="button"
+                  onClick={() => setExpandedCommentId("")}
+                  className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-[#9a7458]/40 bg-[#fff0d7] text-lg"
+                  aria-label={copy.closeComment}
+                >
+                  ×
+                </button>
+                <p className="pr-12 font-serif text-xl font-semibold">
+                  {characterUi[language][expandedCommentId as keyof typeof characterUi.zh]?.name || expandedCommentId}
+                </p>
+                <p className="mt-4 max-h-[52vh] overflow-y-auto pr-2 text-base font-medium leading-8">
+                  {allComments[expandedCommentId]}
+                </p>
+              </article>
+            </div>
           )}
 
           {generating && (
