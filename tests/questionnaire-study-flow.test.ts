@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   CURRENT_STUDY_PROTOCOL_VERSION,
+  usesIntegratedQuestionnaires,
+  usesStreamlinedQuestionnaires,
   type StudySession,
   type StudyTrial,
 } from "../lib/contracts/study-trial.ts";
@@ -40,6 +42,13 @@ const session: StudySession = {
   updatedAt: "2026-08-12T00:00:00.000Z",
   completedAt: null,
 };
+
+test("the spatial-cue protocol keeps V2-18 questionnaire compatibility", () => {
+  assert.equal(CURRENT_STUDY_PROTOCOL_VERSION, "v2-19-spatial-image-cues");
+  assert.equal(usesIntegratedQuestionnaires("v2-18-streamlined-questionnaires"), true);
+  assert.equal(usesStreamlinedQuestionnaires("v2-18-streamlined-questionnaires"), true);
+  assert.equal(usesStreamlinedQuestionnaires(CURRENT_STUDY_PROTOCOL_VERSION), true);
+});
 
 function trial(period: 1 | 2): StudyTrial {
   return {

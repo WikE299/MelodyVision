@@ -9,8 +9,8 @@ import {
 } from "../visual-brief/state.ts";
 
 export type ConversationRoundGoal =
-  | "subject-space"
-  | "motion-composition"
+  | "subject-scene"
+  | "space-composition"
   | "light-color-material"
   | "meaning-constraints";
 
@@ -20,12 +20,12 @@ export interface RoundGuidance {
 }
 
 export const ROUND_GUIDANCE: Record<ConversationRoundGoal, RoundGuidance> = {
-  "subject-space": {
-    question: "这个画面发生在哪里？最先出现的是什么？",
+  "subject-scene": {
+    question: "这段音乐让你最先看见了什么？",
     starters: [],
   },
-  "motion-composition": {
-    question: "如果愿意，可以再说说画面里有什么在变化。",
+  "space-composition": {
+    question: "这个画面把你放在怎样的空间里？",
     starters: [],
   },
   "light-color-material": {
@@ -41,15 +41,15 @@ export const ROUND_GUIDANCE: Record<ConversationRoundGoal, RoundGuidance> = {
 const ROUND_GOALS = Object.keys(ROUND_GUIDANCE) as ConversationRoundGoal[];
 
 const GOAL_FIELDS: Record<ConversationRoundGoal, VisualBriefFieldKey[]> = {
-  "subject-space": ["subject", "space"],
-  "motion-composition": ["motion", "composition"],
+  "subject-scene": ["subject"],
+  "space-composition": ["space", "composition"],
   "light-color-material": ["lighting", "palette", "materials", "atmosphere"],
   "meaning-constraints": ["personalMeaning", "mustInclude", "mustAvoid"],
 };
 
 const GOAL_SLOTS: Record<ConversationRoundGoal, VisualBriefSlotKey> = {
-  "subject-space": "scene",
-  "motion-composition": "dynamics",
+  "subject-scene": "scene",
+  "space-composition": "spatial",
   "light-color-material": "sensory",
   "meaning-constraints": "meaning",
 };

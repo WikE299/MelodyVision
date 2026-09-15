@@ -174,7 +174,7 @@ Ten musicians fit in one desktop viewport, selection is understandable, and Path
 
 ### Step 3: listening and co-creation
 
-This is now the experiential center of the product. Path A offers distinct musician perspectives and preserves four comments; Path B feels like a continuous guided chat. The four-round dimensions provide useful scaffolding: subject/space, motion/composition, light/material, meaning/constraints.
+This is now the experiential center of the product. Path A offers distinct musician perspectives and preserves four comments; Path B feels like a continuous guided chat. The adaptive image cues provide lightweight scaffolding: visible image, space/composition, light/material, and feeling/meaning. Motion remains optional rather than forcing every participant to describe change.
 
 The strongest remaining UX question is not visual polish but cognitive load. Long musician comments may be difficult to read while listening. Log reading time, replay/close actions, and user response latency, then shorten or progressively reveal comments based on pilot data.
 

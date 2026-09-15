@@ -1,7 +1,7 @@
 import type { ConversationState } from "../../contracts/conversation-state.ts";
 import type { VisualBrief, VisualBriefFieldKey, VisualBriefFieldStatus } from "../../contracts/visual-brief.ts";
 
-export const VISUAL_SCRIBE_PROFILE_VERSION = "2.0.0" as const;
+export const VISUAL_SCRIBE_PROFILE_VERSION = "2.1.0" as const;
 
 export interface VisualScribeFieldDraft {
   value: string | string[] | null;

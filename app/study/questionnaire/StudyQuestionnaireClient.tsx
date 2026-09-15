@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import QuestionnaireFlow from "@/components/questionnaire/QuestionnaireFlow";
 import FlowHeader from "@/components/FlowHeader";
+import { useLanguage } from "@/lib/i18n";
 import {
   fetchQuestionnaireProgress,
   saveQuestionnaireAnswers,
@@ -14,7 +15,6 @@ import { startDirectBaseline } from "@/lib/experiment-trial-client";
 import {
   getQuestionnaireDefinition,
   type QuestionnaireAnswers,
-  type QuestionnaireLanguage,
 } from "@/lib/questionnaires";
 
 function requestedStudySessionId(): string {
@@ -35,13 +35,9 @@ function nextRoute(payload: QuestionnaireProgressPayload): string {
 
 export default function StudyQuestionnaireClient() {
   const router = useRouter();
+  const { language } = useLanguage();
   const [payload, setPayload] = useState<QuestionnaireProgressPayload | null>(null);
   const [answers, setAnswers] = useState<QuestionnaireAnswers>({});
-  const [language] = useState<QuestionnaireLanguage>(() => (
-    typeof window !== "undefined" && sessionStorage.getItem("melodyvisionLanguage") === "en"
-      ? "en"
-      : "zh"
-  ));
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const baselineStarted = useRef(new Set<string>());
@@ -203,10 +199,45 @@ export default function StudyQuestionnaireClient() {
     return () => window.clearInterval(timer);
   }, [load, payload, startEligibleBaselines]);
 
-  if (loading || !payload) {
+  if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#18141d] text-[#ffe1b5]">
-        <p className="text-sm">正在恢复实验进度…</p>
+        <p className="text-sm">{language === "zh" ? "正在恢复实验进度…" : "Restoring study progress..."}</p>
+      </main>
+    );
+  }
+
+  if (!payload) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#18141d] px-6 text-[#ffe1b5]">
+        <section className="w-full max-w-xl border border-[#a77b57]/48 bg-[#211c27] p-8 text-center">
+          <h1 className="font-serif text-2xl font-semibold">
+            {language === "zh" ? "实验进度加载失败" : "Could not load study progress"}
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-[#efb6a5]">
+            {error || (language === "zh" ? "请重新加载，已提交的数据不会被清除。" : "Reload the study. Submitted data will remain saved.")}
+          </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                setError("");
+                void load();
+              }}
+              className="h-11 border border-[#ffd083]/70 bg-[#4b3444] px-5 text-sm font-semibold hover:bg-[#5a3b4d]"
+            >
+              {language === "zh" ? "重新加载" : "Reload"}
+            </button>
+            <button
+              type="button"
+              onClick={() => router.replace("/?study=1")}
+              className="h-11 border border-[#a77b57]/48 px-5 text-sm hover:bg-[#332832]"
+            >
+              {language === "zh" ? "返回实验入口" : "Return to study"}
+            </button>
+          </div>
+        </section>
       </main>
     );
   }
@@ -216,11 +247,12 @@ export default function StudyQuestionnaireClient() {
       <main className="flex min-h-screen items-center justify-center bg-[#18141d] px-6 text-[#ffe1b5]">
         <section className="w-full max-w-xl border border-[#a77b57]/48 bg-[#211c27] p-8 text-center">
           <span className="mx-auto block h-10 w-10 animate-spin rounded-full border border-[#a97950]/42 border-t-[#ffd083]" />
-          <h1 className="mt-5 font-serif text-2xl font-semibold">正在准备参照作品</h1>
-          <p className="mt-2 text-sm text-[#cdb297]">已保存当前作品评价，参照作品生成后会自动继续问卷。</p>
-          <button type="button" onClick={() => void load()} className="mt-6 h-11 border border-[#ffd083]/58 px-5 text-sm hover:bg-[#4b3444]">
-            检查生成进度
-          </button>
+          <h1 className="mt-5 font-serif text-2xl font-semibold">
+            {language === "zh" ? "正在准备参照作品" : "Preparing the reference artwork"}
+          </h1>
+          <p className="mt-2 text-sm text-[#cdb297]">
+            {language === "zh" ? "完成后将自动继续" : "The study will continue automatically when it is ready"}
+          </p>
           {error && (
             <button
               type="button"
@@ -229,9 +261,9 @@ export default function StudyQuestionnaireClient() {
                 setError("");
                 void startEligibleBaselines(payload);
               }}
-              className="ml-3 mt-6 h-11 border border-[#d29a6d]/48 px-5 text-sm hover:bg-[#4b3444]"
+              className="mt-6 h-11 border border-[#d29a6d]/48 px-5 text-sm hover:bg-[#4b3444]"
             >
-              重试生成
+              {language === "zh" ? "重试生成" : "Retry generation"}
             </button>
           )}
           {error && <p className="mt-4 text-sm text-[#efb6a5]">{error}</p>}
@@ -244,14 +276,22 @@ export default function StudyQuestionnaireClient() {
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-[#18141d] text-[#ffe1b5]">
-      <div className="shrink-0 px-5 pt-4 lg:px-7"><FlowHeader activeStep={4} /></div>
+      <div className="shrink-0 px-5 pt-4 lg:px-7">
+        <FlowHeader
+          activeStep={4}
+          studyStage={step.scope === "pre_study"
+            ? "preparation"
+            : step.period === 2 ? "experience_2" : "experience_1"}
+        />
+      </div>
       <div className="mx-auto flex min-h-0 w-full max-w-[1180px] flex-1 flex-col px-5 pb-5 pt-3 lg:px-7">
-        <header className="mb-3 flex shrink-0 items-end justify-between border-b border-[#a77b57]/32 pb-3">
-          <div>
-            <p className="text-[11px] text-[#b99978]">正式实验 · 问卷 {step.sequenceIndex}/{step.sequenceTotal}</p>
-            <h1 className="mt-1 font-serif text-2xl font-semibold text-[#ffe3bd]">记录刚才的体验</h1>
-          </div>
-          <span className="text-xs text-[#9e8168]">参与者 {payload.participantId}</span>
+        <header className="mb-3 flex shrink-0 items-center justify-between border-b border-[#a77b57]/32 pb-3">
+          <p className="text-sm font-medium text-[#d6b28c]">
+            {language === "zh" ? "问卷" : "Questionnaire"} {step.sequenceIndex}/{step.sequenceTotal}
+          </p>
+          <span className="text-xs text-[#9e8168]">
+            {language === "zh" ? "参与者" : "Participant"} {payload.participantId}
+          </span>
         </header>
         <section className="min-h-0 flex-1 overflow-hidden border border-[#a77b57]/42 bg-[#f7f5ef] shadow-[0_20px_70px_rgba(0,0,0,0.28)]">
           <QuestionnaireFlow
@@ -263,7 +303,6 @@ export default function StudyQuestionnaireClient() {
               src: step.imageUrl,
               alt: step.imageLabel || "待评价作品",
               label: step.imageLabel || "待评价作品",
-              detail: "请根据刚才聆听的音乐和你形成的画面意象独立评价。",
             } : undefined}
             onAnswersChange={setAnswers}
             onSave={save}

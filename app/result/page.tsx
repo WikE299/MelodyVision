@@ -187,7 +187,7 @@ const COPY = {
     facilitator: "共创引导",
     overview: "查看生成依据",
     studyEvaluationTitle: "先看这幅生成作品",
-    studyEvaluationIntro: "请根据此刻的真实感受逐项评分，提交后可查看同一段音乐直接生成的参照作品。",
+    evaluateArtwork: "评价这幅作品",
     degreeScale: "1 表示很低，5 表示很高。",
     musicMatch: "音乐与画面的匹配程度",
     imaginationMatch: "画面与我脑海中想象的接近程度",
@@ -197,7 +197,6 @@ const COPY = {
     satisfaction: "这幅画作为本次体验结果让我满意的程度",
     continueComparison: "提交并查看参照作品",
     comparisonTitle: "对比两种生成结果",
-    comparisonIntro: "切换查看共创作品与仅依据音乐分析生成的作品，再根据真实感受作答。",
     comparisonMusic: "哪幅更贴近音乐",
     comparisonImagination: "哪幅更贴近我的想象",
     comparisonOverall: "总体更喜欢哪幅",
@@ -221,7 +220,6 @@ const COPY = {
     viewBaseline: "音乐直生作品",
     imageLoading: "作品加载中",
     imageLoadFailed: "作品加载失败，请重新切换后再试",
-    periodEvaluationIntro: "先独立评价共创作品，提交后将生成同一段音乐的直出参照供你对比。",
     continueProcessReview: "提交并查看参照作品",
     periodCompleteTitle: "第一次体验已完成",
     periodCompleteIntro: "稍作停顿后，进入另一段音乐与另一种聆听体验。",
@@ -237,7 +235,6 @@ const COPY = {
     sessionComparisonReason: "简单说说你偏好这次体验的原因",
     submitSessionComparison: "提交体验对比",
     baselineReviewTitle: (period: number) => `查看体验 ${period} 的音乐直生参照`,
-    baselineReviewIntro: "这一步只比较同一段音乐的共创作品与音乐分析直接生成作品。",
     nextBaseline: "继续查看体验二",
     finishStudy: "完成实验",
   },
@@ -306,7 +303,7 @@ const COPY = {
     facilitator: "Co-creation guide",
     overview: "View generation rationale",
     studyEvaluationTitle: "First, consider this generated artwork",
-    studyEvaluationIntro: "Rate your immediate response. You can view a reference generated directly from the same music after submitting.",
+    evaluateArtwork: "Evaluate this artwork",
     degreeScale: "1 means very low and 5 means very high.",
     musicMatch: "Degree of match between the music and artwork",
     imaginationMatch: "Degree of match with what I imagined",
@@ -316,7 +313,6 @@ const COPY = {
     satisfaction: "Degree of satisfaction with this artwork as the outcome",
     continueComparison: "Submit and view reference",
     comparisonTitle: "Compare the two generation results",
-    comparisonIntro: "Switch between the co-created artwork and the music-only generation, then answer from your actual response.",
     comparisonMusic: "Which better matches the music",
     comparisonImagination: "Which better matches what I imagined",
     comparisonOverall: "Which do you prefer overall",
@@ -340,7 +336,6 @@ const COPY = {
     viewBaseline: "Music-only",
     imageLoading: "Loading artwork",
     imageLoadFailed: "Artwork failed to load. Switch away and try again.",
-    periodEvaluationIntro: "Rate the co-created artwork first. A music-only reference will then be generated for comparison.",
     continueProcessReview: "Submit and view the reference",
     periodCompleteTitle: "The first experience is complete",
     periodCompleteIntro: "Take a short pause, then continue with another piece of music and listening experience.",
@@ -356,7 +351,6 @@ const COPY = {
     sessionComparisonReason: "Briefly explain your preference",
     submitSessionComparison: "Submit experience comparison",
     baselineReviewTitle: (period: number) => `Review the music-only reference for experience ${period}`,
-    baselineReviewIntro: "This step compares the co-created artwork with a music-only result for the same track.",
     nextBaseline: "Continue to experience two",
     finishStudy: "Complete study",
   },
@@ -710,22 +704,6 @@ export default function ResultPage() {
     window.sessionStorage.getItem("integratedQuestionnairesComplete") === studySessionId
   );
 
-  useEffect(() => {
-    if (
-      !usesStreamlinedQuestionnaires ||
-      !studySessionId ||
-      integratedQuestionnairesFinished
-    ) return;
-    router.replace(
-      `/study/questionnaire?studySessionId=${encodeURIComponent(studySessionId)}`
-    );
-  }, [
-    integratedQuestionnairesFinished,
-    router,
-    studySessionId,
-    usesStreamlinedQuestionnaires,
-  ]);
-
   const startEligibleBaseline = useCallback(async (
     targetTrial: StudyTrial,
     targetProfile: MusicProfile,
@@ -768,6 +746,35 @@ export default function ResultPage() {
       });
     }
   }, [copy.baselineFailed]);
+
+  const beginStreamlinedArtworkEvaluation = useCallback(async () => {
+    if (!studyTrial || !studySessionId || studySaving) return;
+    setStudySaving(true);
+    setStudyError("");
+    try {
+      const response = await fetch("/api/experiment/baseline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trialId: studyTrial.id,
+          action: "start_after_viewing",
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+      if (!response.ok) {
+        throw new Error(String(data.error || copy.baselineFailed));
+      }
+      setBaselineStatus(data.job && typeof data.job === "object" && "status" in data.job
+        ? String((data.job as { status?: unknown }).status) as "pending" | "running" | "completed" | "failed"
+        : "running");
+      router.push(`/study/questionnaire?studySessionId=${encodeURIComponent(studySessionId)}`);
+    } catch (error) {
+      setStudyError(error instanceof Error ? error.message : copy.baselineFailed);
+      router.push(`/study/questionnaire?studySessionId=${encodeURIComponent(studySessionId)}`);
+    } finally {
+      setStudySaving(false);
+    }
+  }, [copy.baselineFailed, router, studySaving, studySessionId, studyTrial]);
 
   useEffect(() => {
     if (!studySessionId) return;
@@ -1555,6 +1562,10 @@ export default function ResultPage() {
   const studyLocked = Boolean(
     studyTrial && studyPhase !== "completed" && !integratedQuestionnairesFinished
   );
+  const streamlinedArtworkViewing = Boolean(
+    studyLocked && usesStreamlinedQuestionnaires && studyPhase === "artwork"
+  );
+  const legacyStudyPanelVisible = Boolean(studyLocked && !usesStreamlinedQuestionnaires);
   const pairedArtworkReady = crossoverFinalPhase
     ? Boolean(crossoverPeriodResult?.coCreated?.imageUrl && crossoverPeriodResult?.baseline?.imageUrl)
     : baselineStatus === "completed" && Boolean(baselineResult?.imageUrl);
@@ -1642,7 +1653,15 @@ export default function ResultPage() {
       <div className="absolute inset-0 opacity-25 [background-image:linear-gradient(115deg,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.035)_1px,transparent_1px)] [background-size:190px_190px,230px_230px]" />
 
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-12 2xl:py-5">
-        <FlowHeader activeStep={4} compact />
+        <FlowHeader
+          activeStep={4}
+          compact
+          studyStage={studyTrial?.studySessionId
+            ? integratedQuestionnairesFinished
+              ? "complete"
+              : studyTrial.period === 2 ? "experience_2" : "experience_1"
+            : undefined}
+        />
         <section className="relative mt-2 min-h-0 flex-1 overflow-hidden rounded-[20px] border border-[#9f6f45]/46 bg-[#1d1923]/34 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
 
           {!studyLocked && <div className="absolute right-5 top-4 z-50 flex gap-3">
@@ -1705,7 +1724,7 @@ export default function ResultPage() {
           )}
 
           <div className={`absolute bottom-[96px] flex items-center justify-center ${
-            studyLocked
+            legacyStudyPanelVisible
               ? "left-6 right-[338px] top-3"
               : canSwitchPairedArtwork
                 ? "inset-x-6 top-[60px]"
@@ -1741,7 +1760,25 @@ export default function ResultPage() {
             </div>
           </div>
 
-          {studyLocked && studyTrial && (
+          {streamlinedArtworkViewing && studyTrial && (
+            <div className="absolute bottom-5 right-5 z-[65] flex flex-col items-end gap-2">
+              {studyError && (
+                <p className="max-w-sm border border-[#b76557]/56 bg-[#291d24]/92 px-3 py-2 text-xs text-[#efb6a5]">
+                  {studyError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={beginStreamlinedArtworkEvaluation}
+                disabled={studySaving || resultImageStatus !== "loaded"}
+                className="h-12 border border-[#ffd083]/64 bg-[#4b3444] px-6 text-sm font-semibold text-[#ffe3bd] shadow-[0_14px_38px_rgba(0,0,0,0.34),0_0_20px_rgba(255,194,103,0.18)] transition hover:bg-[#5a3b4d] disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {studySaving ? copy.submitting : copy.evaluateArtwork}
+              </button>
+            </div>
+          )}
+
+          {legacyStudyPanelVisible && studyTrial && (
             <aside className="absolute bottom-4 right-4 top-4 z-[65] flex w-[306px] flex-col border border-[#a77b57]/48 bg-[#211c27]/96 p-5 shadow-[-18px_0_60px_rgba(0,0,0,0.42)] backdrop-blur-xl">
               {studyPhase === "session_comparison" && renderStudyPeriodSwitcher(
                 "mb-4 grid grid-cols-2 border border-[#a77b57]/44 bg-[#17131a]/72 p-1 text-xs text-[#ffe3bd]"
@@ -1752,9 +1789,6 @@ export default function ResultPage() {
               {studyPhase === "artwork" ? (
                 <>
                   <h2 className="font-serif text-lg font-semibold text-[#ffe3bd]">{copy.studyEvaluationTitle}</h2>
-                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
-                    {studyTrial.studySessionId ? copy.periodEvaluationIntro : copy.studyEvaluationIntro}
-                  </p>
                   <p className="mt-1.5 text-[11px] text-[#a98c72]">{copy.degreeScale}</p>
                   <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                     {([
@@ -1793,11 +1827,6 @@ export default function ResultPage() {
                       ? copy.baselineReviewTitle(baselineReviewPeriod)
                       : copy.comparisonTitle}
                   </h2>
-                  <p className="mt-2 text-xs leading-relaxed text-[#cdb297]">
-                    {studyPhase === "baseline_review"
-                      ? copy.baselineReviewIntro
-                      : copy.comparisonIntro}
-                  </p>
                   {comparisonBaselineFailed ? (
                     <div className="flex flex-1 flex-col items-center justify-center text-center">
                       <p className="text-sm text-[#efb6a5]">

@@ -26,11 +26,28 @@ export interface RawExperimentExport {
   labeledComparisons: RawRecord[];
   manipulationChecks: RawRecord[];
   questionnaireResponses: RawRecord[];
+  annotations: RawRecord[];
+  adminActions: RawRecord[];
 }
 
 export type ResearchCondition = "multi_agent" | "single_agent" | "unknown";
 export type ResearchChoice = "co_created" | "direct_baseline" | "tie";
 export type ResearchDataOrigin = "local" | "online" | "online_cache" | "snapshot";
+export type ResearchClassification = "unclassified" | "formal" | "pilot" | "test" | "excluded";
+export type ResearchEntityType = "study_session" | "trial" | "generation_run";
+
+export interface ResearchDataAnnotation {
+  entityType: ResearchEntityType;
+  entityId: string;
+  classification: ResearchClassification;
+  cohortLabel: string;
+  protected: boolean;
+  excludedFromAnalysis: boolean;
+  trashedAt: string;
+  note: string;
+  updatedAt: string;
+  inheritedFrom: ResearchEntityType | null;
+}
 
 export interface ResearchScoreMetric {
   key: string;
@@ -143,6 +160,9 @@ export interface ResearchTrialRecord {
   generationComplete: boolean;
   baselineComplete: boolean;
   issues: ResearchDataIssue[];
+  annotation: ResearchDataAnnotation;
+  analysisEligible: boolean;
+  trashed: boolean;
 }
 
 export interface ResearchStudySessionRecord {
@@ -164,6 +184,37 @@ export interface ResearchStudySessionRecord {
   questionnaireResponses: RawRecord[];
   complete: boolean;
   issues: ResearchDataIssue[];
+  annotation: ResearchDataAnnotation;
+  analysisEligible: boolean;
+  trashed: boolean;
+}
+
+export interface ResearchArtworkRecord {
+  id: string;
+  dataOrigins: ResearchDataOrigin[];
+  trialId: string;
+  studySessionId: string;
+  participantId: string;
+  period: number | null;
+  condition: ResearchCondition;
+  role: string;
+  createdAt: string;
+  musicTitle: string;
+  imageUrl: string;
+  remoteImageUrl: string;
+  prompt: string;
+  negativePrompt: string;
+  imageModel: string;
+  imageSize: string;
+  totalMs: number | null;
+  musicProfile: unknown;
+  visualBrief: unknown;
+  musicianComments: unknown;
+  promptDirector: unknown;
+  annotation: ResearchDataAnnotation;
+  analysisEligible: boolean;
+  trashed: boolean;
+  raw: RawRecord;
 }
 
 export interface ResearchDashboardDataset {
@@ -177,10 +228,12 @@ export interface ResearchDashboardDataset {
   summary: ResearchSummary;
   trials: ResearchTrialRecord[];
   studySessions: ResearchStudySessionRecord[];
+  artworks: ResearchArtworkRecord[];
+  adminActions: RawRecord[];
   dataQualityIssues: ResearchDataIssue[];
 }
 
-const ARTWORK_SCORE_FIELDS = [
+const LEGACY_ARTWORK_SCORE_FIELDS = [
   ["music_match_score", "音乐匹配"],
   ["imagination_match_score", "想象匹配"],
   ["agency_score", "主体感"],
@@ -189,7 +242,7 @@ const ARTWORK_SCORE_FIELDS = [
   ["satisfaction_score", "满意度"],
 ] as const;
 
-const MANIPULATION_SCORE_FIELDS = [
+const LEGACY_MANIPULATION_SCORE_FIELDS = [
   ["perspective_multiplicity_score", "多视角感"],
   ["articulation_support_score", "表达支持"],
   ["dialogue_experience_score", "对话体验"],
@@ -208,6 +261,7 @@ function text(value: unknown): string {
 }
 
 function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -240,6 +294,49 @@ function choice(value: unknown): ResearchChoice | null {
 
 function condition(value: unknown): ResearchCondition {
   return value === "multi_agent" || value === "single_agent" ? value : "unknown";
+}
+
+function flag(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+function classification(value: unknown): ResearchClassification {
+  return value === "formal" || value === "pilot" || value === "test" || value === "excluded"
+    ? value
+    : "unclassified";
+}
+
+function annotationFor(
+  data: RawExperimentExport,
+  entityType: ResearchEntityType,
+  entityId: string,
+  inherited?: ResearchDataAnnotation
+): ResearchDataAnnotation {
+  const record = data.annotations.find((item) => (
+    text(item.entity_type) === entityType && text(item.entity_id) === entityId
+  ));
+  if (!record && inherited) {
+    return { ...inherited, entityType, entityId, inheritedFrom: inherited.entityType };
+  }
+  return {
+    entityType,
+    entityId,
+    classification: classification(record?.classification),
+    cohortLabel: text(record?.cohort_label),
+    protected: flag(record?.protected),
+    excludedFromAnalysis: flag(record?.excluded_from_analysis),
+    trashedAt: text(record?.trashed_at),
+    note: text(record?.note),
+    updatedAt: text(record?.updated_at),
+    inheritedFrom: null,
+  };
+}
+
+function annotationIsAnalysisEligible(annotation: ResearchDataAnnotation): boolean {
+  return !annotation.trashedAt
+    && !annotation.excludedFromAnalysis
+    && annotation.classification !== "test"
+    && annotation.classification !== "excluded";
 }
 
 function latest(records: RawRecord[]): RawRecord | null {
@@ -445,10 +542,10 @@ export function summarizeResearchTrials(trials: ResearchTrialRecord[]): Research
         };
       })
       .filter((item) => item.trials > 0),
-    artworkScores: ARTWORK_SCORE_FIELDS.map(([field, label]) =>
+    artworkScores: LEGACY_ARTWORK_SCORE_FIELDS.map(([field, label]) =>
       scoreMetric(trials, field, label, "artworkEvaluation")
     ),
-    manipulationScores: MANIPULATION_SCORE_FIELDS.map(([field, label]) =>
+    manipulationScores: LEGACY_MANIPULATION_SCORE_FIELDS.map(([field, label]) =>
       scoreMetric(trials, field, label, "manipulationCheck")
     ),
     choices: [
@@ -476,6 +573,11 @@ function buildTrial(
   const trialId = text(trial.id);
   const sessionId = text(trial.session_id);
   const protocolVersion = text(trial.protocol_version) || "legacy";
+  const studySessionId = text(trial.study_session_id);
+  const sessionAnnotation = studySessionId
+    ? annotationFor(data, "study_session", studySessionId)
+    : undefined;
+  const annotation = annotationFor(data, "trial", trialId, sessionAnnotation);
   const startedAt = Date.parse(text(trial.created_at));
   const nextTrialAt = data.trials
     .filter((candidate) =>
@@ -570,6 +672,9 @@ function buildTrial(
         && text(response.status) === "completed"
       ))
     : Boolean(artworkEvaluation);
+  const artworkEvaluationStarted = interactionEvents.some(
+    (event) => text(event.event_type) === "artwork-evaluation-started"
+  );
   const issues: ResearchDataIssue[] = [];
   if (!audio) issues.push(issue(trialId, "missing_audio_analysis", "缺少音频分析", "error"));
   if (!coCreatedRun && ["generating", "evaluating", "completed"].includes(text(trial.status))) {
@@ -586,7 +691,7 @@ function buildTrial(
       "error"
     ));
   }
-  if (baselineComplete && !coCreatedArtworkReviewed) {
+  if (baselineComplete && !coCreatedArtworkReviewed && !artworkEvaluationStarted) {
     issues.push(issue(
       trialId,
       "premature_baseline",
@@ -616,7 +721,7 @@ function buildTrial(
     dataOrigins: [dataOrigin],
     participantId: text(trial.participant_id),
     sessionId,
-    studySessionId: text(trial.study_session_id),
+    studySessionId,
     period: numberOrNull(trial.period),
     stimulusId: text(trial.stimulus_id),
     condition: condition(trial.condition),
@@ -651,6 +756,9 @@ function buildTrial(
     generationComplete,
     baselineComplete,
     issues,
+    annotation,
+    analysisEligible: annotationIsAnalysisEligible(annotation),
+    trashed: Boolean(annotation.trashedAt),
   };
 }
 
@@ -681,6 +789,8 @@ export function parseExperimentExport(value: unknown): RawExperimentExport {
     labeledComparisons: rows(value.labeledComparisons),
     manipulationChecks: rows(value.manipulationChecks),
     questionnaireResponses: rows(value.questionnaireResponses),
+    annotations: rows(value.annotations),
+    adminActions: rows(value.adminActions),
   };
 }
 
@@ -703,6 +813,7 @@ export function buildResearchDashboardDataset(
   const studySessions = data.studySessions
     .map<ResearchStudySessionRecord>((session) => {
       const id = text(session.id);
+      const annotation = annotationFor(data, "study_session", id);
       const pairedTrials = trials.filter((trial) => trial.studySessionId === id);
       const firstTrial = pairedTrials.find((trial) => trial.period === 1) || null;
       const secondTrial = pairedTrials.find((trial) => trial.period === 2) || null;
@@ -752,14 +863,65 @@ export function buildResearchDashboardDataset(
           && Boolean(secondTrial?.questionnaireComplete)
           && (integratedProtocol ? sessionQuestionnairesComplete : Boolean(comparison)),
         issues,
+        annotation,
+        analysisEligible: annotationIsAnalysisEligible(annotation),
+        trashed: Boolean(annotation.trashedAt),
       };
     })
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   dataQualityIssues.push(...studySessions.flatMap((session) => session.issues));
+  const trialById = new Map(trials.map((trial) => [trial.id, trial]));
+  const artworks = data.runs.map<ResearchArtworkRecord>((rawRun) => {
+    const run = runRecord(rawRun)!;
+    const trial = trialById.get(text(rawRun.trial_id))
+      || trials.find((candidate) => (
+        candidate.coCreatedRun?.id === run.id || candidate.baselineRun?.id === run.id
+      ))
+      || null;
+    const runAnalysis = nested(rawRun, "music_analysis");
+    const sourceMetadata = nested(runAnalysis, "sourceMetadata");
+    const musicProfile = rawRun.music_profile ?? trial?.musicProfile ?? null;
+    const profileAudio = nested(isRecord(musicProfile) ? musicProfile : null, "audio");
+    const annotation = annotationFor(data, "generation_run", run.id, trial?.annotation);
+    return {
+      id: run.id,
+      dataOrigins: [dataOrigin],
+      trialId: trial?.id || text(rawRun.trial_id),
+      studySessionId: trial?.studySessionId || "",
+      participantId: trial?.participantId || "",
+      period: trial?.period || null,
+      condition: trial?.condition || condition(rawRun.condition),
+      role: run.role,
+      createdAt: run.createdAt,
+      musicTitle: trial?.musicTitle
+        || text(sourceMetadata?.title)
+        || text(profileAudio?.name)
+        || "未命名音乐",
+      imageUrl: run.imageUrl,
+      remoteImageUrl: run.remoteImageUrl,
+      prompt: run.prompt,
+      negativePrompt: run.negativePrompt,
+      imageModel: run.imageModel,
+      imageSize: run.imageSize,
+      totalMs: run.totalMs,
+      musicProfile,
+      visualBrief: rawRun.visual_brief ?? trial?.visualBrief ?? null,
+      musicianComments: rawRun.musician_comments ?? [],
+      promptDirector: run.promptDirector,
+      annotation,
+      analysisEligible: annotationIsAnalysisEligible(annotation),
+      trashed: Boolean(annotation.trashedAt),
+      raw: rawRun,
+    };
+  }).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const protocols = [...new Set(trials.map((trial) => trial.protocolVersion))].sort();
-  const defaultTrials = trials.filter(
-    (trial) => trial.protocolVersion === CURRENT_STUDY_PROTOCOL_VERSION
+  const eligibleCurrentTrials = trials.filter(
+    (trial) => trial.protocolVersion === CURRENT_STUDY_PROTOCOL_VERSION && trial.analysisEligible
   );
+  const formalTrials = eligibleCurrentTrials.filter(
+    (trial) => trial.annotation.classification === "formal"
+  );
+  const defaultTrials = formalTrials.length > 0 ? formalTrials : eligibleCurrentTrials;
   return {
     source: {
       kind: sourceKind,
@@ -771,14 +933,18 @@ export function buildResearchDashboardDataset(
     summary: summarizeResearchTrials(defaultTrials),
     trials,
     studySessions,
+    artworks,
+    adminActions: data.adminActions,
     dataQualityIssues,
   };
 }
 
-function recordTimestamp(record: ResearchTrialRecord | ResearchStudySessionRecord): number {
+function recordTimestamp(record: ResearchTrialRecord | ResearchStudySessionRecord | ResearchArtworkRecord): number {
   const value = "updatedAt" in record
     ? record.updatedAt || record.createdAt
-    : record.completedAt || record.createdAt;
+    : "completedAt" in record
+      ? record.completedAt || record.createdAt
+      : record.createdAt;
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
@@ -839,10 +1005,31 @@ export function mergeResearchDashboardDatasets(
       secondTrial: session.secondTrial ? trialMap.get(session.secondTrial.id) || session.secondTrial : null,
     }))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const artworkMap = new Map<string, ResearchArtworkRecord>();
+  for (const dataset of available) {
+    for (const artwork of dataset.artworks) {
+      const existing = artworkMap.get(artwork.id);
+      if (!existing) {
+        artworkMap.set(artwork.id, artwork);
+        continue;
+      }
+      const preferred = recordTimestamp(artwork) >= recordTimestamp(existing) ? artwork : existing;
+      artworkMap.set(artwork.id, {
+        ...preferred,
+        dataOrigins: mergeOrigins(existing.dataOrigins, artwork.dataOrigins),
+      });
+    }
+  }
+  const artworks = [...artworkMap.values()]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const currentProtocolVersion = available[0].currentProtocolVersion;
-  const currentTrials = trials.filter(
-    (trial) => trial.protocolVersion === currentProtocolVersion
+  const eligibleCurrentTrials = trials.filter(
+    (trial) => trial.protocolVersion === currentProtocolVersion && trial.analysisEligible
   );
+  const formalTrials = eligibleCurrentTrials.filter(
+    (trial) => trial.annotation.classification === "formal"
+  );
+  const currentTrials = formalTrials.length > 0 ? formalTrials : eligibleCurrentTrials;
 
   return {
     source: {
@@ -857,6 +1044,8 @@ export function mergeResearchDashboardDatasets(
     summary: summarizeResearchTrials(currentTrials),
     trials,
     studySessions,
+    artworks,
+    adminActions: available.flatMap((dataset) => dataset.adminActions),
     dataQualityIssues: [
       ...trials.flatMap((trial) => trial.issues),
       ...studySessions.flatMap((session) => session.issues),
@@ -919,20 +1108,27 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
     "raw_tlx_total",
     "agency_score",
     "ownership_score",
-    "manipulation_check_total",
+    "manipulation_perspectives_score",
+    "manipulation_development_score",
     "co_created_alignment_mean",
     "baseline_alignment_mean",
     "generation_complete",
     "baseline_complete",
-    ...ARTWORK_SCORE_FIELDS.map(([field]) => field),
+    ...LEGACY_ARTWORK_SCORE_FIELDS.map(([field]) => `legacy_${field}`),
     "music_match_choice",
     "imagination_match_choice",
     "overall_choice",
     "comparison_reason",
-    ...MANIPULATION_SCORE_FIELDS.map(([field]) => field),
+    ...LEGACY_MANIPULATION_SCORE_FIELDS.map(([field]) => `legacy_${field}`),
     "issue_codes",
   ];
   const lines = trials.map((trial) => {
+    const agencyOwnershipMetrics = recordValue(
+      questionnaireForTrial(trial, "agency_ownership")?.metrics
+    );
+    const manipulationMetrics = recordValue(
+      questionnaireForTrial(trial, "manipulation_check")?.metrics
+    );
     const values: Record<string, unknown> = {
       trial_id: trial.id,
       data_sources: trial.dataOrigins.join("|"),
@@ -958,13 +1154,10 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
       csi_total: questionnaireForTrial(trial, "csi")?.score_total,
       sus_total: questionnaireForTrial(trial, "sus")?.score_total,
       raw_tlx_total: questionnaireForTrial(trial, "raw_tlx")?.score_total,
-      agency_score: recordValue(
-        questionnaireForTrial(trial, "agency_ownership")?.metrics
-      )?.agency,
-      ownership_score: recordValue(
-        questionnaireForTrial(trial, "agency_ownership")?.metrics
-      )?.ownership,
-      manipulation_check_total: questionnaireForTrial(trial, "manipulation_check")?.score_total,
+      agency_score: agencyOwnershipMetrics?.agency,
+      ownership_score: agencyOwnershipMetrics?.ownership,
+      manipulation_perspectives_score: manipulationMetrics?.mc_perspectives,
+      manipulation_development_score: manipulationMetrics?.mc_development,
       co_created_alignment_mean: questionnaireForTrial(trial, "image_alignment", "co_created")?.score_total,
       baseline_alignment_mean: questionnaireForTrial(trial, "image_alignment", "direct_baseline")?.score_total,
       generation_complete: trial.generationComplete,
@@ -975,11 +1168,11 @@ export function exportResearchTrialsCsv(trials: ResearchTrialRecord[]): string {
       comparison_reason: trial.comparison?.reason,
       issue_codes: trial.issues.map((item) => item.code).join("|"),
     };
-    for (const [field] of ARTWORK_SCORE_FIELDS) {
-      values[field] = trial.artworkEvaluation?.[field];
+    for (const [field] of LEGACY_ARTWORK_SCORE_FIELDS) {
+      values[`legacy_${field}`] = trial.artworkEvaluation?.[field];
     }
-    for (const [field] of MANIPULATION_SCORE_FIELDS) {
-      values[field] = trial.manipulationCheck?.[field];
+    for (const [field] of LEGACY_MANIPULATION_SCORE_FIELDS) {
+      values[`legacy_${field}`] = trial.manipulationCheck?.[field];
     }
     return headers.map((header) => csvValue(values[header])).join(",");
   });
@@ -1017,10 +1210,12 @@ export function exportResearchStudySessionsCsv(
     "period_1_raw_tlx_total",
     "period_1_agency_score",
     "period_1_ownership_score",
+    "period_1_manipulation_perspectives_score",
+    "period_1_manipulation_development_score",
     "period_1_co_created_alignment_mean",
     "period_1_baseline_alignment_mean",
-    ...ARTWORK_SCORE_FIELDS.map(([field]) => `period_1_${field}`),
-    ...MANIPULATION_SCORE_FIELDS.map(([field]) => `period_1_${field}`),
+    ...LEGACY_ARTWORK_SCORE_FIELDS.map(([field]) => `period_1_legacy_${field}`),
+    ...LEGACY_MANIPULATION_SCORE_FIELDS.map(([field]) => `period_1_legacy_${field}`),
     "period_2_trial_id",
     "period_2_condition",
     "period_2_stimulus_id",
@@ -1033,10 +1228,12 @@ export function exportResearchStudySessionsCsv(
     "period_2_raw_tlx_total",
     "period_2_agency_score",
     "period_2_ownership_score",
+    "period_2_manipulation_perspectives_score",
+    "period_2_manipulation_development_score",
     "period_2_co_created_alignment_mean",
     "period_2_baseline_alignment_mean",
-    ...ARTWORK_SCORE_FIELDS.map(([field]) => `period_2_${field}`),
-    ...MANIPULATION_SCORE_FIELDS.map(([field]) => `period_2_${field}`),
+    ...LEGACY_ARTWORK_SCORE_FIELDS.map(([field]) => `period_2_legacy_${field}`),
+    ...LEGACY_MANIPULATION_SCORE_FIELDS.map(([field]) => `period_2_legacy_${field}`),
     "expression_support_choice",
     "immersion_choice",
     "creative_freedom_choice",
@@ -1068,19 +1265,24 @@ export function exportResearchStudySessionsCsv(
       ? questionnaireForTrial(trial, "agency_ownership")
       : null;
     const agencyOwnershipMetrics = recordValue(agencyOwnership?.metrics);
+    const manipulationMetrics = trial
+      ? recordValue(questionnaireForTrial(trial, "manipulation_check")?.metrics)
+      : null;
     values[`${prefix}_agency_score`] = agencyOwnershipMetrics?.agency;
     values[`${prefix}_ownership_score`] = agencyOwnershipMetrics?.ownership;
+    values[`${prefix}_manipulation_perspectives_score`] = manipulationMetrics?.mc_perspectives;
+    values[`${prefix}_manipulation_development_score`] = manipulationMetrics?.mc_development;
     values[`${prefix}_co_created_alignment_mean`] = trial
       ? questionnaireForTrial(trial, "image_alignment", "co_created")?.score_total
       : null;
     values[`${prefix}_baseline_alignment_mean`] = trial
       ? questionnaireForTrial(trial, "image_alignment", "direct_baseline")?.score_total
       : null;
-    for (const [field] of ARTWORK_SCORE_FIELDS) {
-      values[`${prefix}_${field}`] = trial?.artworkEvaluation?.[field];
+    for (const [field] of LEGACY_ARTWORK_SCORE_FIELDS) {
+      values[`${prefix}_legacy_${field}`] = trial?.artworkEvaluation?.[field];
     }
-    for (const [field] of MANIPULATION_SCORE_FIELDS) {
-      values[`${prefix}_${field}`] = trial?.manipulationCheck?.[field];
+    for (const [field] of LEGACY_MANIPULATION_SCORE_FIELDS) {
+      values[`${prefix}_legacy_${field}`] = trial?.manipulationCheck?.[field];
     }
   };
 

@@ -361,6 +361,30 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       UNIQUE(study_session_id, response_key)
     );
 
+    CREATE TABLE IF NOT EXISTS research_data_annotations (
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      classification TEXT NOT NULL DEFAULT 'unclassified',
+      cohort_label TEXT NOT NULL DEFAULT '',
+      protected INTEGER NOT NULL DEFAULT 0,
+      excluded_from_analysis INTEGER NOT NULL DEFAULT 0,
+      trashed_at TEXT,
+      note TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (entity_type, entity_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS research_admin_actions (
+      id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_ids_json TEXT NOT NULL,
+      source TEXT NOT NULL,
+      affected_counts_json TEXT NOT NULL,
+      backup_ref TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_generation_runs_session
       ON generation_runs(session_id, created_at);
 
@@ -414,6 +438,12 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
 
     CREATE INDEX IF NOT EXISTS idx_questionnaire_responses_participant
       ON questionnaire_responses(participant_id, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_research_annotations_classification
+      ON research_data_annotations(classification, trashed_at, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_research_admin_actions_created
+      ON research_admin_actions(created_at);
   `);
 
   ensureColumn(database, "generation_runs", "music_profile_json", "TEXT NOT NULL DEFAULT 'null'");

@@ -9,6 +9,7 @@ import {
   exportResearchTrialsCsv,
   mergeResearchDashboardDatasets,
   summarizeResearchTrials,
+  type RawExperimentExport,
 } from "../lib/research-dashboard.ts";
 import {
   buildResearchQuestionnaireWorkbook,
@@ -23,7 +24,31 @@ import {
 } from "../lib/questionnaires/index.ts";
 import ExcelJS from "exceljs";
 
-function fixture() {
+function parseCsvRow(line: string): string[] {
+  const values: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"') {
+      if (quoted && line[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      values.push(value);
+      value = "";
+    } else {
+      value += character;
+    }
+  }
+  values.push(value);
+  return values;
+}
+
+function fixture(): RawExperimentExport {
   return {
     schemaVersion: 6,
     exportedAt: "2026-07-18T00:00:00.000Z",
@@ -205,7 +230,11 @@ function fixture() {
         status: "completed",
         answers: {},
         score_total: instrument === "sus" ? 75 : null,
-        metrics: instrument === "agency_ownership" ? { agency: 4, ownership: 5 } : {},
+        metrics: instrument === "agency_ownership"
+          ? { agency: 4, ownership: 5 }
+          : instrument === "manipulation_check"
+            ? { mc_perspectives: 3, mc_development: 4 }
+            : {},
         created_at: "2026-07-18T00:03:00.000Z",
       })),
       ...["co_created", "direct_baseline"].map((role) => ({
@@ -228,6 +257,8 @@ function fixture() {
         created_at: "2026-07-18T00:03:00.000Z",
       })),
     ],
+    annotations: [],
+    adminActions: [],
   };
 }
 
@@ -490,24 +521,64 @@ test("dashboard flags a baseline generated before artwork evaluation", () => {
   assert.ok(current.issues.some((item) => item.code === "premature_baseline"));
 });
 
+test("dashboard accepts a baseline started from the explicit artwork evaluation action", () => {
+  const data = fixture();
+  data.artworkEvaluations = [];
+  data.questionnaireResponses = data.questionnaireResponses.filter((response) => (
+    response.response_key !== "period:1:artwork:co_created"
+  ));
+  data.interactionEvents.push({
+    id: "event-artwork-evaluation-started",
+    trial_id: "trial-current",
+    session_id: "session-current",
+    created_at: "2026-08-12T00:00:03.000Z",
+    event_type: "artwork-evaluation-started",
+    page: "/result",
+    payload_json: "{}",
+  });
+  const dataset = buildResearchDashboardDataset(data);
+  const current = dataset.trials.find((trial) => trial.id === "trial-current");
+  assert.ok(current);
+  assert.ok(!current.issues.some((item) => item.code === "premature_baseline"));
+});
+
 test("dashboard CSV is one row per trial and neutralizes formulas", () => {
   const dataset = buildResearchDashboardDataset(fixture());
   const csv = exportResearchTrialsCsv(dataset.trials);
+  const headers = csv.trim().split("\n")[0].replace(/^\uFEFF/, "").split(",");
   assert.equal(csv.trim().split("\n").length, 3);
   assert.match(csv, /"'=unsafe"/);
-  assert.match(csv, /music_match_score/);
+  assert.equal(headers.filter((header) => header === "agency_score").length, 1);
+  assert.equal(headers.filter((header) => header === "ownership_score").length, 1);
+  assert.ok(headers.includes("manipulation_perspectives_score"));
+  assert.ok(headers.includes("manipulation_development_score"));
+  assert.ok(headers.includes("legacy_music_match_score"));
   assert.match(csv, /baseline_failed/);
 });
 
 test("participant CSV keeps both periods on one row and neutralizes formulas", () => {
   const dataset = buildResearchDashboardDataset(fixture());
   const csv = exportResearchStudySessionsCsv(dataset.studySessions);
+  const [headerLine, valueLine] = csv.trim().split("\n");
+  const headers = parseCsvRow(headerLine.replace(/^\uFEFF/, ""));
+  const values = parseCsvRow(valueLine);
+  const row = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
   assert.equal(csv.trim().split("\n").length, 2);
   assert.match(csv, /"'=unsafe"/);
   assert.match(csv, /period_1_condition/);
   assert.match(csv, /single_agent/);
   assert.match(csv, /background_answers_json/);
   assert.match(csv, /session_preference/);
+  assert.equal(headers.filter((header) => header === "period_1_agency_score").length, 1);
+  assert.equal(headers.filter((header) => header === "period_1_ownership_score").length, 1);
+  assert.ok(headers.includes("period_1_manipulation_perspectives_score"));
+  assert.ok(headers.includes("period_1_manipulation_development_score"));
+  assert.ok(headers.includes("period_1_legacy_agency_score"));
+  assert.equal(row.period_1_agency_score, "4");
+  assert.equal(row.period_1_ownership_score, "5");
+  assert.equal(row.period_1_manipulation_perspectives_score, "3");
+  assert.equal(row.period_1_manipulation_development_score, "4");
+  assert.equal(row.period_1_legacy_agency_score, "3");
 });
 
 test("raw questionnaire CSV keeps one answer per row with trial and session links", () => {
@@ -704,4 +775,52 @@ test("dashboard deduplicates matching trial ids and keeps every source label", (
     ["local", "online"]
   );
   assert.deepEqual(merged.studySessions[0].dataOrigins, ["local", "online"]);
+});
+
+test("dashboard applies session classifications to trials and artwork records", () => {
+  const data = fixture();
+  data.annotations = [{
+    entity_type: "study_session",
+    entity_id: "study-current",
+    classification: "formal",
+    cohort_label: "formal-wave-1",
+    protected: 1,
+    excluded_from_analysis: 0,
+    trashed_at: null,
+    note: "verified participant",
+    updated_at: "2026-07-18T01:00:00.000Z",
+  }];
+
+  const dataset = buildResearchDashboardDataset(data, "database");
+  const trial = dataset.trials.find((item) => item.id === "trial-current");
+  const artwork = dataset.artworks.find((item) => item.id === "co-current");
+
+  assert.equal(trial?.annotation.classification, "formal");
+  assert.equal(trial?.annotation.inheritedFrom, "study_session");
+  assert.equal(trial?.annotation.protected, true);
+  assert.equal(artwork?.annotation.classification, "formal");
+  assert.equal(artwork?.participantId, "=unsafe");
+  assert.equal(artwork?.musicTitle, "Current Song");
+  assert.equal(dataset.summary.totalTrials, 1);
+});
+
+test("trashed sessions and test data are excluded from the default summary", () => {
+  const data = fixture();
+  data.annotations = [{
+    entity_type: "study_session",
+    entity_id: "study-current",
+    classification: "test",
+    cohort_label: "automation",
+    protected: 0,
+    excluded_from_analysis: 1,
+    trashed_at: "2026-07-18T02:00:00.000Z",
+    note: "e2e",
+    updated_at: "2026-07-18T02:00:00.000Z",
+  }];
+
+  const dataset = buildResearchDashboardDataset(data, "database");
+  const trial = dataset.trials.find((item) => item.id === "trial-current");
+  assert.equal(trial?.trashed, true);
+  assert.equal(trial?.analysisEligible, false);
+  assert.equal(dataset.summary.totalTrials, 0);
 });

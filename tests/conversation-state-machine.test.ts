@@ -100,13 +100,8 @@ test("the next internal goal follows missing brief fields instead of a fixed vis
     status: "confirmed",
     sources: [],
   };
-  brief.fields.space = {
-    value: "向外扩张的空处",
-    status: "confirmed",
-    sources: [],
-  };
 
-  assert.equal(goalForVisualBrief(brief, 0), "motion-composition");
+  assert.equal(goalForVisualBrief(brief, 0), "space-composition");
 });
 
 test("four-person opening schedules every selected musician before yielding to the user", () => {
@@ -191,8 +186,8 @@ test("speaker eligibility favors musicians with fewer turns and avoids immediate
 
   assert.deepEqual(getEligibleSpeakerIds(state).slice(0, 2), ["abing", "armstrong"]);
   const nextPlan = createDeterministicFacilitatorPlan({ state, musicianNames });
-  assert.equal(nextPlan.currentGoal, "motion-composition");
-  assert.equal(nextPlan.userInvitation, "如果愿意，可以再说说画面里有什么在变化。");
+  assert.equal(nextPlan.currentGoal, "space-composition");
+  assert.equal(nextPlan.userInvitation, "这个画面把你放在怎样的空间里？");
 });
 
 test("one free expression and one targeted follow-up are the maximum user input", () => {
@@ -413,7 +408,7 @@ test("facilitator model plans are constrained to eligible speakers", async () =>
     async () => ({
       content: JSON.stringify({
         speakerIds: ["beethoven", "abing"],
-        transition: "刚才的画面还很开阔，接下来探索 motion-composition。",
+        transition: "刚才的画面还很开阔，接下来探索 space-composition。",
         userInvitation: "你更靠近哪一种，又看见了什么？",
         sentenceStarters: ["我最先看见……", "它像是在……"],
       }),
@@ -422,11 +417,11 @@ test("facilitator model plans are constrained to eligible speakers", async () =>
   );
   assert.equal(valid.source, "model");
   assert.equal(valid.model, "test-model");
-  assert.equal(valid.stageSubtitle, "刚才的画面还很开阔，接下来探索 画面的运动。");
-  assert.equal(valid.currentGoal, "subject-space");
+  assert.equal(valid.stageSubtitle, "刚才的画面还很开阔，接下来探索 画面的空间关系。");
+  assert.equal(valid.currentGoal, "subject-scene");
   assert.equal(
     valid.userInvitation,
-    "这个画面发生在哪里？最先出现的是什么？"
+    "这段音乐让你最先看见了什么？"
   );
   assert.deepEqual(valid.sentenceStarters, []);
 

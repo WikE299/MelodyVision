@@ -16,6 +16,10 @@ export interface ExternalMusicResult {
   downloadable: boolean;
 }
 
+export function getExternalMusicPlaybackUrl(trackId: string): string {
+  return `/api/music/download?id=${encodeURIComponent(trackId)}`;
+}
+
 export interface MusicSearchTag {
   id: string;
   label: string;
@@ -68,13 +72,17 @@ export function getMusicSearchTags(tagIds: string[]): MusicSearchTag[] {
   return MUSIC_SEARCH_TAGS.filter((tag) => selected.has(tag.id));
 }
 
-export function isAllowedJamendoAudioUrl(value: string): boolean {
+export function isAllowedJamendoAudioUrl(value: string, expectedTrackId?: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" &&
+    const allowedHost = url.protocol === "https:" &&
       !url.username &&
       !url.password &&
       /^prod-\d+\.storage\.jamendo\.com$/i.test(url.hostname);
+    if (!allowedHost || !expectedTrackId) return allowedHost;
+    const queryTrackId = url.searchParams.get("trackid");
+    const pathTrackId = url.pathname.match(/\/track\/(\d+)(?:\/|$)/)?.[1];
+    return queryTrackId === expectedTrackId || pathTrackId === expectedTrackId;
   } catch {
     return false;
   }

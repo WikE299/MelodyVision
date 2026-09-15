@@ -1,4 +1,8 @@
 import { isAllowedJamendoAudioUrl } from "@/lib/audio/external-music";
+import {
+  createAudioProxyResponse,
+  getUpstreamAudioHeaders,
+} from "@/lib/audio/jamendo-audio-proxy";
 
 export const runtime = "nodejs";
 
@@ -17,13 +21,6 @@ interface JamendoResponse {
 
 function getJamendoClientId() {
   return process.env.JAMENDO_CLIENT_ID?.trim() || "";
-}
-
-function safeFilename(value: string) {
-  return value
-    .normalize("NFKD")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "jamendo-track";
 }
 
 async function getTrack(id: string) {
@@ -47,14 +44,16 @@ async function getTrack(id: string) {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const id = url.searchParams.get("id")?.trim();
-  const source = url.searchParams.get("source")?.trim() || "";
+  const source = url.searchParams.get("source")?.trim()
+    || request.headers.get("x-melodyvision-audio-source")?.trim()
+    || "";
   if (!id && !source) {
     return Response.json({ error: "id or source is required" }, { status: 400 });
   }
 
   let track: JamendoTrack | null;
   if (source) {
-    if (!isAllowedJamendoAudioUrl(source)) {
+    if (!isAllowedJamendoAudioUrl(source, id)) {
       return Response.json({ error: "Unsupported audio source" }, { status: 400 });
     }
     track = {
@@ -83,35 +82,46 @@ export async function GET(request: Request) {
     return Response.json({ error: "Track download is not allowed" }, { status: 403 });
   }
 
-  let audioRes: Response;
+  let audioRes: Response | null = null;
+  let downloadError: unknown;
   try {
     audioRes = await fetch(track.audiodownload, {
-      headers: { Accept: "audio/mpeg,audio/*" },
+      headers: getUpstreamAudioHeaders(request),
       signal: AbortSignal.timeout(45_000),
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? `Audio download failed: ${error.message}` : "Audio download failed" },
-      { status: 502 }
-    );
-  }
-  if (!audioRes.ok) {
-    return Response.json({ error: `Audio download failed with ${audioRes.status}` }, { status: 502 });
+    downloadError = error;
   }
 
-  const audio = new Uint8Array(await audioRes.arrayBuffer());
-  if (audio.byteLength < 1024) {
+  // Search results include a short-lived signed URL. Use it for a fast first
+  // request, then transparently refresh it by track id if it has expired.
+  if ((!audioRes?.ok || !audioRes.body) && source && id && getJamendoClientId()) {
+    try {
+      const refreshedTrack = await getTrack(id);
+      if (refreshedTrack?.audiodownload_allowed && refreshedTrack.audiodownload) {
+        track = refreshedTrack;
+        audioRes = await fetch(refreshedTrack.audiodownload, {
+          headers: getUpstreamAudioHeaders(request),
+          signal: AbortSignal.timeout(45_000),
+        });
+      }
+    } catch (error) {
+      downloadError = error;
+    }
+  }
+  if (!audioRes?.ok || !audioRes.body) {
+    const detail = downloadError instanceof Error
+      ? `: ${downloadError.message}`
+      : audioRes
+        ? ` with ${audioRes.status}`
+        : "";
+    return Response.json({ error: `Audio download failed${detail}` }, { status: 502 });
+  }
+
+  const contentLength = Number(audioRes.headers.get("content-length") || 0);
+  if (contentLength > 0 && contentLength < 1024 && audioRes.status !== 206) {
     return Response.json({ error: "Downloaded audio is empty or invalid" }, { status: 502 });
   }
 
-  return new Response(audio, {
-    headers: {
-      "Content-Type": audioRes.headers.get("content-type")?.startsWith("audio/")
-        ? audioRes.headers.get("content-type")!
-        : "audio/mpeg",
-      "Content-Length": String(audio.byteLength),
-      "Content-Disposition": `attachment; filename="${safeFilename(track.name || id || "jamendo-track")}.mp3"`,
-      "Cache-Control": "private, max-age=3600",
-    },
-  });
+  return createAudioProxyResponse(audioRes, track.name || id || "jamendo-track");
 }

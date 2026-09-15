@@ -7,6 +7,7 @@ import AudioUploader from "@/components/AudioUploader";
 import FlowHeader from "@/components/FlowHeader";
 import { audioCatalog, getAudioPlaybackUrl, type AudioCatalogItem } from "@/lib/audio/catalog";
 import {
+  getExternalMusicPlaybackUrl,
   MUSIC_SEARCH_TAG_GROUPS,
   MUSIC_SEARCH_TAGS,
   type ExternalMusicResult,
@@ -31,6 +32,7 @@ import {
 } from "@/lib/contracts";
 import { getExperimentSessionId } from "@/lib/experiment-session";
 import { createStudyTrial } from "@/lib/experiment-trial-client";
+import { isAcceptanceMode } from "@/lib/acceptance-runtime";
 import {
   createOrRecoverStudySession,
   fetchStudySession,
@@ -69,17 +71,16 @@ const COPY = {
   zh: {
     productHint: "选一段声音，在引导中把感受变成画作。",
     pathTitle: "选择你的聆听方式",
-    pathIntro: "两条路径会以不同方式陪你把音乐变成一幅画。",
     paths: {
       A: {
         title: "聆听路径 A",
         label: "静心聆听",
-        description: "从不同听法中停下来，逐步写下你看见的画面",
+        description: "逐一聆听，再写下你看见的画面",
       },
       B: {
         title: "聆听路径 B",
         label: "流动聆听",
-        description: "让不同听法自然接续，在交流中逐步靠近画面",
+        description: "在交流中，让画面自然浮现",
       },
     },
     selectedPath: "当前方式",
@@ -96,6 +97,8 @@ const COPY = {
     exampleFailed: "示例音频加载失败，请稍后再试或上传自己的音频。",
     searchFailed: "音乐搜索失败，请稍后再试。",
     downloadFailed: "音乐下载失败，请换一首或稍后再试。",
+    downloadingMusic: "正在缓存音乐",
+    preparingMusic: "正在准备…",
     modes: {
       examples: {
         title: "试试示例",
@@ -154,17 +157,16 @@ const COPY = {
   en: {
     productHint: "Choose a sound and turn what you hear into an artwork through guided listening.",
     pathTitle: "Choose how you want to listen",
-    pathIntro: "Each path offers a different way to turn the music into an image.",
     paths: {
       A: {
         title: "Listening Path A",
         label: "Still Listening",
-        description: "Pause with different perspectives and record the image you see",
+        description: "Listen one voice at a time, then describe what you see",
       },
       B: {
         title: "Listening Path B",
         label: "Flowing Listening",
-        description: "Let different perspectives continue through conversation toward an image",
+        description: "Let the image emerge through conversation",
       },
     },
     selectedPath: "Current path",
@@ -181,6 +183,8 @@ const COPY = {
     exampleFailed: "The example audio could not be loaded. Try again later or upload your own audio.",
     searchFailed: "Music search failed. Please try again later.",
     downloadFailed: "Music download failed. Try another track or try again later.",
+    downloadingMusic: "Caching music",
+    preparingMusic: "Preparing…",
     modes: {
       examples: {
         title: "Try Example",
@@ -277,6 +281,7 @@ export default function HomePageClient() {
   const [externalResults, setExternalResults] = useState<ExternalMusicResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
+  const [preparingSearchAudio, setPreparingSearchAudio] = useState<{ id: string; progress: number | null } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
   const [analysisServiceReady, setAnalysisServiceReady] = useState(false);
@@ -308,7 +313,10 @@ export default function HomePageClient() {
 
   useEffect(() => {
     if (studyMode !== true) return;
-    const storedStudySessionId = localStorage.getItem("melodyvisionStudySessionId");
+    const acceptanceMode = isAcceptanceMode();
+    const storedStudySessionId = acceptanceMode
+      ? sessionStorage.getItem("studySessionId")
+      : localStorage.getItem("melodyvisionStudySessionId");
     if (!storedStudySessionId) return;
 
     let cancelled = false;
@@ -321,7 +329,7 @@ export default function HomePageClient() {
         sessionStorage.setItem("studySession", JSON.stringify(payload.session));
       })
       .catch(() => {
-        if (!cancelled) localStorage.removeItem("melodyvisionStudySessionId");
+        if (!cancelled && !acceptanceMode) localStorage.removeItem("melodyvisionStudySessionId");
       });
     return () => {
       cancelled = true;
@@ -510,7 +518,9 @@ export default function HomePageClient() {
       if (trial.studySessionId && trial.period) {
         sessionStorage.setItem("studySessionId", trial.studySessionId);
         sessionStorage.setItem("studyPeriod", String(trial.period));
-        localStorage.setItem("melodyvisionStudySessionId", trial.studySessionId);
+        if (!isAcceptanceMode()) {
+          localStorage.setItem("melodyvisionStudySessionId", trial.studySessionId);
+        }
       }
       recordExperimentEvent("condition-assigned", "/", {
         trialId: trial.id,
@@ -575,6 +585,50 @@ export default function HomePageClient() {
     setError(null);
   };
 
+  const downloadSearchAudio = async ({
+    id,
+    title,
+    sourceUrl,
+  }: {
+    id: string;
+    title: string;
+    sourceUrl?: string;
+  }): Promise<File> => {
+    const downloadResponse = await fetch(getExternalMusicPlaybackUrl(id), {
+      headers: sourceUrl ? { "X-MelodyVision-Audio-Source": sourceUrl } : undefined,
+    });
+    if (!downloadResponse.ok) {
+      const data = await downloadResponse.json().catch(() => null) as { error?: string } | null;
+      throw new Error(data?.error || copy.downloadFailed);
+    }
+
+    const contentType = downloadResponse.headers.get("content-type") || "audio/mpeg";
+    const totalBytes = Number(downloadResponse.headers.get("content-length") || 0);
+    if (!downloadResponse.body) {
+      const blob = await downloadResponse.blob();
+      if (blob.size < 1024) throw new Error(copy.downloadFailed);
+      return new File([blob], `${title}.mp3`, { type: contentType });
+    }
+
+    const reader = downloadResponse.body.getReader();
+    const chunks: ArrayBuffer[] = [];
+    let receivedBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = new Uint8Array(value.byteLength);
+      chunk.set(value);
+      chunks.push(chunk.buffer);
+      receivedBytes += value.byteLength;
+      setPreparingSearchAudio({
+        id,
+        progress: totalBytes > 0 ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : null,
+      });
+    }
+    if (receivedBytes < 1024) throw new Error(copy.downloadFailed);
+    return new File(chunks, `${title}.mp3`, { type: contentType });
+  };
+
   const studyChoiceFromCatalog = (item: AudioCatalogItem): StudyAudioChoice => ({
     id: `preset:${item.id}`,
     sourceKind: "preset",
@@ -599,13 +653,38 @@ export default function HomePageClient() {
     tags: item.tags,
     source: "Jamendo",
     sourceUrl: item.sourceUrl,
-    playbackUrl: item.previewUrl,
+    playbackUrl: getExternalMusicPlaybackUrl(item.id),
     catalogItemId: item.id,
-    remoteSourceUrl: item.previewUrl,
+    remoteSourceUrl: null,
     fileName: `${item.title}.mp3`,
     fileSize: 0,
     mimeType: "audio/mpeg",
   });
+
+  const chooseSearchedStudyAudio = async (item: ExternalMusicResult) => {
+    if (analyzing || preparingSearchAudio) return;
+    const choice = studyChoiceFromSearch(item);
+    setPreparingSearchAudio({ id: item.id, progress: 0 });
+    setError(null);
+    try {
+      const cachedFile = await getStudyAudioFile(choice.id);
+      if (cachedFile) {
+        await chooseStudyAudio({ ...choice, fileSize: cachedFile.size });
+        return;
+      }
+      const file = await downloadSearchAudio({
+        id: item.id,
+        title: item.title,
+        sourceUrl: item.previewUrl,
+      });
+      await chooseStudyAudio({ ...choice, fileSize: file.size }, file);
+    } catch (err) {
+      console.error("Study music cache failed:", err);
+      setError(copy.downloadFailed);
+    } finally {
+      setPreparingSearchAudio(null);
+    }
+  };
 
   const chooseUploadedStudyAudio = async (file: File) => {
     const choice: StudyAudioChoice = {
@@ -678,6 +757,26 @@ export default function HomePageClient() {
       const file = await getStudyAudioFile(choice.id);
       if (!file) throw new Error("STUDY_UPLOAD_MISSING");
       await handleFileSelect(file, context);
+      return;
+    }
+    if (choice.sourceKind === "search") {
+      let file = await getStudyAudioFile(choice.id);
+      if (!file) {
+        if (!choice.catalogItemId) throw new Error("STUDY_SEARCH_AUDIO_MISSING");
+        setPreparingSearchAudio({ id: choice.catalogItemId, progress: 0 });
+        try {
+          file = await downloadSearchAudio({ id: choice.catalogItemId, title: choice.name });
+          await saveStudyAudioFile(choice.id, file);
+        } finally {
+          setPreparingSearchAudio(null);
+        }
+      }
+      await handleFileSelect(file, {
+        ...context,
+        playbackUrl: undefined,
+        remoteSourceUrl: undefined,
+        fileSize: file.size,
+      });
       return;
     }
     await handleFileSelect(null, context);
@@ -789,21 +888,15 @@ export default function HomePageClient() {
     if (analyzing) return;
     setAnalysisElapsedSeconds(0);
     setAnalyzing(true);
+    setPreparingSearchAudio({ id: item.id, progress: 0 });
     setError(null);
 
     try {
-      const downloadParams = new URLSearchParams({
+      const file = await downloadSearchAudio({
         id: item.id,
-        source: item.previewUrl,
+        title: item.title,
+        sourceUrl: item.previewUrl,
       });
-      const downloadResponse = await fetch(`/api/music/download?${downloadParams.toString()}`);
-      if (!downloadResponse.ok) {
-        const data = await downloadResponse.json().catch(() => null) as { error?: string } | null;
-        throw new Error(data?.error || copy.downloadFailed);
-      }
-      const blob = await downloadResponse.blob();
-      if (blob.size < 1024) throw new Error(copy.downloadFailed);
-      const file = new File([blob], `${item.title}.mp3`, { type: blob.type || "audio/mpeg" });
       await handleFileSelect(file, {
         sourceKind: "search",
         fileName: `${item.title}.mp3`,
@@ -821,6 +914,8 @@ export default function HomePageClient() {
       console.error("External music download failed:", err);
       setAnalyzing(false);
       setError(copy.downloadFailed);
+    } finally {
+      setPreparingSearchAudio(null);
     }
   };
 
@@ -845,7 +940,9 @@ export default function HomePageClient() {
         });
         sessionCreated = true;
         setStudyPayload(payload);
-        localStorage.setItem("melodyvisionStudySessionId", payload.session.id);
+        if (!isAcceptanceMode()) {
+          localStorage.setItem("melodyvisionStudySessionId", payload.session.id);
+        }
         sessionStorage.setItem("studySession", JSON.stringify(payload.session));
       }
       sessionStorage.setItem("studySessionId", payload.session.id);
@@ -1001,7 +1098,16 @@ export default function HomePageClient() {
       <div className="absolute bottom-[9%] left-[3%] h-28 w-28 rotate-12 border border-white/8 bg-black/20" />
 
       <div className="relative z-10 flex min-h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
-        <FlowHeader activeStep={1} />
+        <FlowHeader
+          activeStep={1}
+          studyStage={studyMode === true
+            ? studyPayload?.session.currentPeriod === 2
+              ? "experience_2"
+              : studyPayload?.session.currentPeriod === 1 && studyPayload.session.firstTrialId
+                ? "experience_1"
+                : "preparation"
+            : undefined}
+        />
 
         <section className="relative mt-2 flex flex-1 items-center justify-center rounded-[42px] border border-[#9f6f45]/75 bg-[#261f2a]/45 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:px-10">
           <div className="absolute inset-0 overflow-hidden rounded-[42px]">
@@ -1063,8 +1169,7 @@ export default function HomePageClient() {
               {studyMode === false && !selectedPath && (
                 <div className="mb-3">
                   <p className="text-center font-serif text-2xl font-semibold text-[#ffe5bd] drop-shadow-[0_2px_5px_rgba(17,12,20,0.92)]">{copy.pathTitle}</p>
-                  <p className="mb-4 mt-1 text-center text-xs text-[#ead0b2] drop-shadow-[0_2px_4px_rgba(17,12,20,0.92)]">{copy.pathIntro}</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="mt-4 grid grid-cols-2 gap-3">
                     {(["A", "B"] as ListeningPath[]).map((path) => {
                       const pathCopy = copy.paths[path];
                       return (
@@ -1361,9 +1466,11 @@ export default function HomePageClient() {
                           <ExternalMusicCard
                             key={`${item.provider}-${item.id}`}
                             item={item}
-                            disabled={analyzing}
+                            disabled={analyzing || Boolean(preparingSearchAudio)}
+                            preparing={preparingSearchAudio?.id === item.id}
+                            progress={preparingSearchAudio?.id === item.id ? preparingSearchAudio.progress : null}
                             onSelect={(item) => studyMode === true
-                              ? void chooseStudyAudio(studyChoiceFromSearch(item))
+                              ? void chooseSearchedStudyAudio(item)
                               : void handleExternalSelect(item)}
                             copy={studyMode === true ? { ...copy, startWithThis: copy.studyMusicChoose } : copy}
                           />
@@ -1430,11 +1537,15 @@ export default function HomePageClient() {
 function ExternalMusicCard({
   item,
   disabled,
+  preparing,
+  progress,
   onSelect,
   copy,
 }: {
   item: ExternalMusicResult;
   disabled: boolean;
+  preparing: boolean;
+  progress: number | null;
   onSelect: (item: ExternalMusicResult) => void;
   copy: typeof COPY.zh | typeof COPY.en;
 }) {
@@ -1469,7 +1580,7 @@ function ExternalMusicCard({
         </p>
       </div>
       <div className="flex flex-col gap-2">
-        <audio controls preload="none" src={item.previewUrl} className="h-9 w-full" aria-label={`${copy.preview} ${item.title}`} />
+        <audio controls preload="none" src={getExternalMusicPlaybackUrl(item.id)} className="h-9 w-full" aria-label={`${copy.preview} ${item.title}`} />
         <button
           type="button"
           disabled={disabled || !item.downloadable}
@@ -1480,7 +1591,9 @@ function ExternalMusicCard({
               : "cursor-pointer border-[#ffd083] bg-[#ffd083] text-[#2c2028] shadow-[0_0_24px_rgba(255,194,103,0.32)] hover:bg-[#ffe0a6]"
           }`}
         >
-          {copy.startWithThis}
+          {preparing
+            ? `${copy.preparingMusic}${progress === null ? "" : ` ${progress}%`}`
+            : copy.startWithThis}
         </button>
       </div>
     </div>

@@ -1,5 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type {
+  ResearchAnnotationInput,
+  ResearchDeletionPlan,
+  ResearchTarget,
+} from "./research-admin.ts";
 
 const CACHE_PATH = path.join(process.cwd(), "data", "research-cache", "remote-latest.json");
 const MAX_EXPORT_BYTES = 50 * 1024 * 1024;
@@ -39,6 +45,8 @@ const JSON_COLUMNS = new Set([
   "selected_reasons_json",
   "answers_json",
   "metrics_json",
+  "target_ids_json",
+  "affected_counts_json",
 ]);
 
 const SUPABASE_TABLES = {
@@ -59,6 +67,8 @@ const SUPABASE_TABLES = {
   labeledComparisons: "labeled_comparisons",
   manipulationChecks: "manipulation_checks",
   questionnaireResponses: "questionnaire_responses",
+  annotations: "research_data_annotations",
+  adminActions: "research_admin_actions",
 } as const;
 
 const OPTIONAL_SUPABASE_TABLES = new Set([
@@ -66,6 +76,8 @@ const OPTIONAL_SUPABASE_TABLES = new Set([
   "study_assignment_blocks",
   "session_comparisons",
   "questionnaire_responses",
+  "research_data_annotations",
+  "research_admin_actions",
 ]);
 
 function normalizeSupabaseRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -81,7 +93,7 @@ function normalizeSupabaseRow(row: Record<string, unknown>): Record<string, unkn
 }
 
 export function getRemoteResearchConfig(
-  environment: NodeJS.ProcessEnv = process.env
+  environment: Record<string, string | undefined> = process.env
 ): RemoteResearchConfig | null {
   const exportUrl = environment.RESEARCH_REMOTE_EXPORT_URL?.trim() || "";
   const token = environment.RESEARCH_REMOTE_EXPORT_TOKEN?.trim()
@@ -97,7 +109,7 @@ export function getRemoteResearchConfig(
 }
 
 export function getRemoteSupabaseResearchConfig(
-  environment: NodeJS.ProcessEnv = process.env
+  environment: Record<string, string | undefined> = process.env
 ): RemoteSupabaseResearchConfig | null {
   const baseUrl = environment.RESEARCH_SUPABASE_URL?.trim().replace(/\/$/, "") || "";
   const serviceRoleKey = environment.RESEARCH_SUPABASE_SERVICE_ROLE_KEY?.trim() || "";
@@ -188,7 +200,7 @@ export async function fetchSupabaseResearchExport(
     ] as const
   ));
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     exportedAt: new Date().toISOString(),
     ...Object.fromEntries(entries),
   };
@@ -205,4 +217,139 @@ export async function readRemoteResearchCache(): Promise<unknown | null> {
   } catch {
     return null;
   }
+}
+
+function supabaseHeaders(config: RemoteSupabaseResearchConfig): Record<string, string> {
+  return {
+    apikey: config.serviceRoleKey,
+    Authorization: `Bearer ${config.serviceRoleKey}`,
+    "Content-Type": "application/json",
+  };
+}
+
+export async function upsertSupabaseResearchAnnotations(
+  config: RemoteSupabaseResearchConfig,
+  annotations: ResearchAnnotationInput[],
+  fetcher: typeof fetch = fetch
+): Promise<void> {
+  const now = new Date().toISOString();
+  const response = await fetcher(
+    `${config.baseUrl}/rest/v1/research_data_annotations?on_conflict=entity_type,entity_id`,
+    {
+      method: "POST",
+      headers: {
+        ...supabaseHeaders(config),
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(annotations.map((annotation) => ({
+        entity_type: annotation.entityType,
+        entity_id: annotation.entityId,
+        classification: annotation.classification,
+        cohort_label: annotation.cohortLabel,
+        protected: annotation.protected ? 1 : 0,
+        excluded_from_analysis: annotation.excludedFromAnalysis ? 1 : 0,
+        trashed_at: annotation.trashedAt,
+        note: annotation.note,
+        updated_at: now,
+      }))),
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`Supabase annotation update failed (${response.status}): ${await response.text()}`);
+  }
+}
+
+export async function recordSupabaseResearchAdminAction(
+  config: RemoteSupabaseResearchConfig,
+  input: {
+    action: string;
+    targets: ResearchTarget[];
+    source: string;
+    affectedCounts?: Record<string, number>;
+    backupRef?: string;
+  },
+  fetcher: typeof fetch = fetch
+): Promise<void> {
+  const response = await fetcher(`${config.baseUrl}/rest/v1/research_admin_actions`, {
+    method: "POST",
+    headers: { ...supabaseHeaders(config), Prefer: "return=minimal" },
+    body: JSON.stringify({
+      id: randomUUID(),
+      action: input.action,
+      target_type: [...new Set(input.targets.map((target) => target.entityType))].join("|"),
+      target_ids_json: input.targets.map((target) => target.entityId),
+      source: input.source,
+      affected_counts_json: input.affectedCounts || {},
+      backup_ref: input.backupRef || "",
+      created_at: new Date().toISOString(),
+    }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Supabase admin audit failed (${response.status}): ${await response.text()}`);
+  }
+}
+
+function supabaseArtworkPath(
+  config: RemoteSupabaseResearchConfig,
+  imageUrl: string,
+  runId: string,
+  bucket: string
+): string | null {
+  try {
+    const url = new URL(imageUrl);
+    if (url.origin !== config.baseUrl) return null;
+    const prefix = `/storage/v1/object/public/${encodeURIComponent(bucket)}/`;
+    if (!url.pathname.startsWith(prefix)) return null;
+    const storagePath = decodeURIComponent(url.pathname.slice(prefix.length));
+    if (!storagePath.startsWith("artworks/") || path.parse(storagePath).name !== runId) return null;
+    return storagePath;
+  } catch {
+    return null;
+  }
+}
+
+export async function purgeSupabaseResearchData(
+  config: RemoteSupabaseResearchConfig,
+  plan: ResearchDeletionPlan,
+  environment: Record<string, string | undefined> = process.env,
+  fetcher: typeof fetch = fetch
+): Promise<{ affectedCounts: Record<string, number>; deletedImages: number; imageErrors: string[] }> {
+  if (plan.protectedTargets.length > 0) throw new Error("受保护的实验数据不能永久删除");
+  const response = await fetcher(`${config.baseUrl}/rest/v1/rpc/research_purge_records`, {
+    method: "POST",
+    headers: supabaseHeaders(config),
+    body: JSON.stringify({ p_plan: plan.idsByTable }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Supabase purge failed (${response.status}): ${await response.text()}`);
+  }
+  const affectedCounts = await response.json() as Record<string, number>;
+  const bucket = environment.RESEARCH_SUPABASE_GENERATED_BUCKET?.trim()
+    || environment.SUPABASE_GENERATED_BUCKET?.trim()
+    || "generated";
+  const prefixes = plan.images
+    .map((image) => supabaseArtworkPath(config, image.imageUrl, image.runId, bucket))
+    .filter((value): value is string => Boolean(value));
+  const imageErrors: string[] = [];
+  let deletedImages = 0;
+  if (prefixes.length > 0) {
+    const imageResponse = await fetcher(
+      `${config.baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}`,
+      {
+        method: "DELETE",
+        headers: supabaseHeaders(config),
+        body: JSON.stringify({ prefixes }),
+        signal: AbortSignal.timeout(30_000),
+      }
+    );
+    if (imageResponse.ok) deletedImages = prefixes.length;
+    else imageErrors.push(`storage:${imageResponse.status}`);
+  }
+  return { affectedCounts, deletedImages, imageErrors };
 }
