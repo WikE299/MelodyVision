@@ -133,5 +133,18 @@ begin
 end;
 $$;
 
-revoke all on function public.research_purge_records(jsonb) from public, anon, authenticated;
-grant execute on function public.research_purge_records(jsonb) to service_role;
+revoke all on function public.research_purge_records(jsonb) from public;
+
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    revoke all on function public.research_purge_records(jsonb) from anon;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    revoke all on function public.research_purge_records(jsonb) from authenticated;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.research_purge_records(jsonb) to service_role;
+  end if;
+end;
+$$;
