@@ -55,6 +55,15 @@ Version 2 使用三个 JSON 可序列化的核心对象连接音频分析、共�
 - 用户个人意义
 - 必须包含与必须避免的内容
 
+聆听页将这些字段压缩为四组进度：
+
+- 画面：`subject`
+- 空间：`space`、`composition`
+- 光色：`materials`、`palette`、`lighting`
+- 感受：`atmosphere`、`personalMeaning`、`mustInclude`、`mustAvoid`
+
+`motion` 仍会在用户或音乐家明确表达运动时记录并进入生图，但不再作为完成画面必须补齐的槽位。
+
 每个字段包含：
 
 - 当前值

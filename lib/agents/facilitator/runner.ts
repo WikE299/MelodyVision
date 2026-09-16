@@ -158,7 +158,7 @@ ${requiredCoverage.length > 0 ? `本轮必须让这些尚未发言的音乐家�
 - 必须承接用户已经说过的词或关系，不能要求用户按字段、顺序或固定句式作答。
 - 不提供具体场景例子，不用星空、沙漠、森林、人物等意象替用户开题。
 - 如果当前阶段是 convergence，不再打开新方向，只说明线索已经足够并允许用户补充。
-- 不得向用户说出 subject-space、motion-composition、light-color-material、meaning-constraints 或 VisualBrief 等内部名称。
+- 不得向用户说出 subject-scene、space-composition、subject-space、motion-composition、light-color-material、meaning-constraints 或 VisualBrief 等内部名称。
 - 主持人不评论音乐，不总结成最终画面，不使用姓名之外的人格表演。
 - userInvitation 必须给用户真实回答空间，不能只让用户二选一。`;
 }
@@ -172,8 +172,10 @@ function cleanSubtitle(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
   const singleLine = value
     .replace(/[\r\n]+/g, " ")
-    .replace(/subject-space/gi, "画面的主体与空间")
-    .replace(/motion-composition/gi, "画面的运动")
+    .replace(/subject-scene/gi, "画面中出现的内容")
+    .replace(/space-composition/gi, "画面的空间关系")
+    .replace(/subject-space/gi, "画面中出现的内容")
+    .replace(/motion-composition/gi, "画面的空间关系")
     .replace(/light-color-material/gi, "光线、颜色与触感")
     .replace(/meaning-constraints/gi, "想保留的意义")
     .replace(/VisualBrief/gi, "当前画面")

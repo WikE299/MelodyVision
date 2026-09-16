@@ -6,8 +6,12 @@ const root = process.cwd();
 const serviceDir = join(root, "services", "audio-analysis");
 const isWindows = process.platform === "win32";
 const python = join(serviceDir, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
+const webPort = process.env.PORT || "3000";
+const audioPort = process.env.AUDIO_ANALYSIS_PORT || "8001";
+const audioAnalysisUrl = process.env.AUDIO_ANALYSIS_URL || `http://127.0.0.1:${audioPort}`;
 const audioServiceEnv = {
   ...process.env,
+  AUDIO_ANALYSIS_PORT: audioPort,
   HF_HOME: process.env.HF_HOME || ".cache/huggingface",
   CLAP_DISABLED: process.env.CLAP_DISABLED || "1",
   CLAP_PRELOAD: process.env.CLAP_PRELOAD || "0",
@@ -19,13 +23,18 @@ if (!existsSync(python)) {
 }
 
 const children = [
-  spawn(python, ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8001"], {
+  spawn(python, ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", audioPort], {
     cwd: serviceDir,
     env: audioServiceEnv,
     stdio: "inherit",
   }),
   spawn(isWindows ? "npm.cmd" : "npm", ["run", "dev:web"], {
     cwd: root,
+    env: {
+      ...process.env,
+      PORT: webPort,
+      AUDIO_ANALYSIS_URL: audioAnalysisUrl,
+    },
     stdio: "inherit",
   }),
 ];

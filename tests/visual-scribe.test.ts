@@ -91,13 +91,13 @@ test("visual scribe creates a traceable ready brief from user and musician evide
   assert.equal(result.brief.fields.materials.sources[0].kind, "musician-message");
 });
 
-test("an abstract scene can be ready without a literal subject", () => {
+test("an abstract image can be ready with a non-literal visual focus", () => {
   const fields = createEmptyVisualBrief({
     conversationId: "abstract-conversation",
     musicProfileId: "abstract-music",
   }).fields;
+  fields.subject = { value: "一片没有边界的空域", status: "confirmed", sources: [] };
   fields.space = { value: "没有边界的远距离空间", status: "confirmed", sources: [] };
-  fields.motion = { value: ["缓慢向外扩张"], status: "confirmed", sources: [] };
   fields.lighting = { value: "中心冷光逐渐退去", status: "confirmed", sources: [] };
   fields.atmosphere = { value: ["失重", "安静"], status: "confirmed", sources: [] };
   fields.personalMeaning = { value: "希望保留失重与疏离感", status: "confirmed", sources: [] };
@@ -105,7 +105,7 @@ test("an abstract scene can be ready without a literal subject", () => {
   const readiness = calculateVisualBriefReadiness(fields);
   const slots = assessVisualBriefSlots(fields);
   assert.equal(readiness.ready, true);
-  assert.equal(readiness.missingFields.includes("subject"), true);
+  assert.equal(readiness.missingFields.includes("motion"), true);
   assert.equal(slots.every((slot) => slot.status === "filled"), true);
 });
 
@@ -121,10 +121,10 @@ test("a sparse feeling receives one targeted follow-up instead of false readines
   const readiness = calculateVisualBriefReadiness(fields);
   const slots = assessVisualBriefSlots(fields);
   assert.equal(readiness.ready, false);
-  assert.equal(slots.find((slot) => slot.key === "dynamics")?.status, "missing");
+  assert.equal(slots.find((slot) => slot.key === "scene")?.status, "missing");
   assert.equal(slots.find((slot) => slot.key === "sensory")?.status, "missing");
   assert.equal(slots.filter((slot) => slot.status === "filled").length, 2);
-  assert.match(readiness.reasons.join(" "), /变化与画面关系、光色与质地/);
+  assert.match(readiness.reasons.join(" "), /画面内容、光色与质地/);
 });
 
 test("musician or music suggestions do not fill a user evidence slot", () => {
@@ -133,15 +133,31 @@ test("musician or music suggestions do not fill a user evidence slot", () => {
     musicProfileId: "suggested-music",
   }).fields;
   fields.subject = { value: "远处的一道人影", status: "confirmed", sources: [] };
+  fields.space = { value: "远处的开放空间", status: "suggested", sources: [] };
   fields.motion = { value: ["向外扩散"], status: "suggested", sources: [] };
   fields.lighting = { value: "冷光", status: "suggested", sources: [] };
   fields.personalMeaning = { value: "不想丢掉疏离感", status: "confirmed", sources: [] };
 
   const slots = assessVisualBriefSlots(fields);
   assert.equal(slots.find((slot) => slot.key === "scene")?.status, "filled");
-  assert.equal(slots.find((slot) => slot.key === "dynamics")?.status, "partial");
+  assert.equal(slots.find((slot) => slot.key === "spatial")?.status, "partial");
   assert.equal(slots.find((slot) => slot.key === "sensory")?.status, "partial");
   assert.equal(slots.find((slot) => slot.key === "meaning")?.status, "filled");
+  assert.equal(calculateVisualBriefReadiness(fields).ready, false);
+});
+
+test("motion remains optional and cannot replace a missing spatial cue", () => {
+  const fields = createEmptyVisualBrief({
+    conversationId: "motion-only-conversation",
+    musicProfileId: "motion-only-music",
+  }).fields;
+  fields.subject = { value: "一束冷光", status: "confirmed", sources: [] };
+  fields.motion = { value: ["快速扩散"], status: "confirmed", sources: [] };
+  fields.lighting = { value: "冷光", status: "confirmed", sources: [] };
+  fields.atmosphere = { value: ["紧张"], status: "confirmed", sources: [] };
+
+  const slots = assessVisualBriefSlots(fields);
+  assert.equal(slots.find((slot) => slot.key === "spatial")?.status, "missing");
   assert.equal(calculateVisualBriefReadiness(fields).ready, false);
 });
 

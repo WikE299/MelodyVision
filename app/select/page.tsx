@@ -22,35 +22,29 @@ const MAX_SELECTION = 4;
 const COPY = {
   zh: {
     commentFailed: "聆听室初始化失败，请稍后重试",
-    eyebrow: "✦ 选择你的聆听导览者 ✦",
     title: "选择你的聆听导览者",
-    subtitle: "可多选 1-4 位",
+    subtitle: "选择 1-4 位",
     selected: "已选择",
-    maxSelected: "最多可选 4 位",
     clear: "清空选择",
     defaultCombo: "推荐组合",
     defaultNames: "伯牙 + 贝多芬 + 阿炳 + 阿姆斯特朗",
     empty: "请选择至少一位音乐家",
     entering: "正在进入...",
     enter: "进入聆听室",
-    helper: "进入后，音乐家会依次邀请你说出自己的画面。",
     generating: "正在安排第一轮共同聆听，完成后会自动进入聆听页",
     degradedAnalysis: "当前使用基础音频分析模式，音乐理解精度会较低。",
   },
   en: {
     commentFailed: "Failed to initialize the listening room. Please try again later.",
-    eyebrow: "✦ Choose Your Listening Guides ✦",
     title: "Choose Your Listening Guides",
     subtitle: "Select 1-4 musicians",
     selected: "Selected",
-    maxSelected: "Up to 4 guides",
     clear: "Clear",
     defaultCombo: "Preset",
     defaultNames: "Boya · Beethoven · A Bing · Armstrong",
     empty: "Choose at least one musician",
     entering: "Entering...",
     enter: "Enter Listening Room",
-    helper: "Inside, the musicians will invite you to describe the image you hear.",
     generating: "Preparing the first listening round. The room will open soon.",
     degradedAnalysis: "Basic audio analysis is active, so music understanding may be less precise.",
   },
@@ -165,6 +159,9 @@ export default function SelectPage() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const analysisMode = mounted ? sessionStorage.getItem("audioAnalysisMode") || "" : "";
+  const formalStudyPeriod = mounted && sessionStorage.getItem("studySessionId")
+    ? sessionStorage.getItem("studyPeriod") === "2" ? 2 : 1
+    : null;
 
   const guides = useMemo(() => {
     const allCharacters = [...chineseCharacters, ...westernCharacters];
@@ -256,7 +253,10 @@ export default function SelectPage() {
       <div className="absolute inset-0 opacity-45 [background-image:linear-gradient(115deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(25deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:180px_180px,220px_220px]" />
 
       <div className="relative z-10 flex h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
-        <FlowHeader activeStep={2} />
+        <FlowHeader
+          activeStep={2}
+          studyStage={formalStudyPeriod === 2 ? "experience_2" : formalStudyPeriod === 1 ? "experience_1" : undefined}
+        />
 
         <section className="relative mt-3 flex flex-1 flex-col overflow-clip rounded-[22px] border border-[#9f6f45]/55 bg-[#251f2b]/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] 2xl:mt-5 2xl:rounded-[26px]">
           <div className="absolute inset-0">
@@ -293,8 +293,7 @@ export default function SelectPage() {
 
           <div className="relative z-10 flex min-h-0 flex-1 flex-col px-4 pt-3 lg:px-5 2xl:px-8 2xl:pt-7">
             <div className="text-center">
-              <p className="text-xs tracking-[0.3em] text-[#f8c875]/78 2xl:text-sm 2xl:tracking-[0.34em]">{copy.eyebrow}</p>
-              <h2 className="mt-1 font-serif text-[clamp(28px,2.4vw,36px)] font-semibold tracking-wide text-[#ffe5c1] drop-shadow-[0_4px_18px_rgba(0,0,0,0.45)] 2xl:mt-2">
+              <h2 className="font-serif text-[clamp(28px,2.4vw,36px)] font-semibold tracking-wide text-[#ffe5c1] drop-shadow-[0_4px_18px_rgba(0,0,0,0.45)]">
                 {copy.title}
               </h2>
               <p className="mt-1 text-sm text-[#f8d8af]/88 2xl:mt-2 2xl:text-base">{copy.subtitle}</p>
@@ -326,7 +325,6 @@ export default function SelectPage() {
               <div className="flex min-w-0 items-center gap-1.5 lg:gap-3 2xl:gap-6">
                 <div>
                   <p className="whitespace-nowrap text-base font-semibold lg:text-xl 2xl:text-2xl">{copy.selected} {selected.length} / {MAX_SELECTION}</p>
-                  <p className="mt-0.5 hidden text-xs text-[#5f5361] lg:block 2xl:mt-1 2xl:text-sm">{copy.maxSelected}</p>
                 </div>
                 <button
                   type="button"
@@ -388,7 +386,7 @@ export default function SelectPage() {
                 )}
               </div>
 
-              <div className="flex flex-col items-stretch gap-2">
+              <div className="flex flex-col items-stretch">
                 <button
                   type="button"
                   onClick={handleContinue}
@@ -402,7 +400,6 @@ export default function SelectPage() {
                   <span>{generating ? copy.entering : copy.enter}</span>
                   <span className="text-2xl 2xl:text-3xl">→</span>
                 </button>
-                <p className="hidden text-center text-xs text-[#6a5b5a] lg:block">{copy.helper}</p>
               </div>
             </div>
           </div>

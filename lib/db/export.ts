@@ -24,6 +24,8 @@ const JSON_COLUMNS = new Set([
   "selected_reasons_json",
   "answers_json",
   "metrics_json",
+  "target_ids_json",
+  "affected_counts_json",
 ]);
 
 function parseJsonColumns(row: Record<string, unknown>) {
@@ -62,7 +64,7 @@ async function readRows(
 export async function exportExperimentJson() {
   const database = await getDatabase();
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     exportedAt: new Date().toISOString(),
     sessions: await readRows(database, "experiment_sessions"),
     studySessions: await readRows(database, "study_sessions"),
@@ -81,6 +83,8 @@ export async function exportExperimentJson() {
     labeledComparisons: await readRows(database, "labeled_comparisons"),
     manipulationChecks: await readRows(database, "manipulation_checks"),
     questionnaireResponses: await readRows(database, "questionnaire_responses", "updated_at"),
+    annotations: await readRows(database, "research_data_annotations", "updated_at"),
+    adminActions: await readRows(database, "research_admin_actions"),
   };
 }
 

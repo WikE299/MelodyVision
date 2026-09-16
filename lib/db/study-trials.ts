@@ -274,7 +274,10 @@ export class BaselineNotEligibleError extends Error {
   }
 }
 
-export async function claimBaselineJob(trialId: string): Promise<{ acquired: boolean; job: BaselineJob }> {
+export async function claimBaselineJob(
+  trialId: string,
+  options: { checkpoint?: "evaluation_completed" | "artwork_viewed" } = {}
+): Promise<{ acquired: boolean; job: BaselineJob }> {
   const database = await getDatabase();
   return database.transaction(async (transaction) => {
     if (transaction.provider === "supabase") {
@@ -303,6 +306,7 @@ export async function claimBaselineJob(trialId: string): Promise<{ acquired: boo
         String(trialRow?.protocol_version || "")
       )
     );
+    const canStartAfterViewing = streamlined && options.checkpoint === "artwork_viewed";
     const checkpointRow = streamlined
       ? (await transaction.prepare(`
           SELECT run_id FROM questionnaire_responses
@@ -318,7 +322,7 @@ export async function claimBaselineJob(trialId: string): Promise<{ acquired: boo
         ).all(trialId))[0];
     const checkpointRunId = typeof checkpointRow?.run_id === "string" ? checkpointRow.run_id : "";
     if (!coCreatedRunId) throw new BaselineNotEligibleError();
-    if (checkpointRunId !== coCreatedRunId) {
+    if (!canStartAfterViewing && checkpointRunId !== coCreatedRunId) {
       throw new BaselineNotEligibleError();
     }
     if (

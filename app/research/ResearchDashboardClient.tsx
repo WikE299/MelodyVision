@@ -19,6 +19,8 @@ import {
   mergeResearchDashboardDatasets,
   summarizeResearchTrials,
   type ResearchCondition,
+  type ResearchClassification,
+  type ResearchArtworkRecord,
   type ResearchDataOrigin,
   type ResearchDashboardDataset,
   type ResearchDataIssue,
@@ -32,7 +34,7 @@ import {
   usesStreamlinedQuestionnaires,
 } from "@/lib/contracts";
 
-type View = "overview" | "trials" | "questionnaires" | "quality";
+type View = "overview" | "trials" | "questionnaires" | "artworks" | "management" | "quality";
 
 type QuestionnaireRow = {
   id: string;
@@ -62,6 +64,8 @@ interface Filters {
   from: string;
   to: string;
   query: string;
+  classification: "eligible" | "all" | ResearchClassification;
+  trash: "active" | "trashed" | "all";
 }
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
@@ -139,6 +143,61 @@ const DATA_ORIGIN_LABELS: Record<ResearchDataOrigin, string> = {
   snapshot: "导入快照",
 };
 
+const CLASSIFICATION_LABELS: Record<ResearchClassification, string> = {
+  unclassified: "未分类",
+  formal: "正式实验",
+  pilot: "前期预实验",
+  test: "系统测试",
+  excluded: "排除分析",
+};
+
+function ClassificationBadge({
+  classification,
+  protected: isProtected,
+  trashed,
+}: {
+  classification: ResearchClassification;
+  protected: boolean;
+  trashed: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <span className={`inline-flex rounded px-2 py-1 text-[10px] font-semibold ${
+        classification === "formal"
+          ? "bg-emerald-100 text-emerald-800"
+          : classification === "pilot"
+            ? "bg-blue-100 text-blue-800"
+            : classification === "test"
+              ? "bg-amber-100 text-amber-800"
+              : classification === "excluded"
+                ? "bg-rose-100 text-rose-800"
+                : "bg-zinc-100 text-zinc-600"
+      }`}>{CLASSIFICATION_LABELS[classification]}</span>
+      {isProtected && <span className="inline-flex rounded bg-indigo-50 px-2 py-1 text-[10px] font-semibold text-indigo-700">已保护</span>}
+      {trashed && <span className="inline-flex rounded bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-700">回收站</span>}
+    </div>
+  );
+}
+
+function matchesAnnotationFilters(
+  record: {
+    annotation: { classification: ResearchClassification };
+    analysisEligible: boolean;
+    trashed: boolean;
+  },
+  filters: Pick<Filters, "classification" | "trash">
+): boolean {
+  if (filters.trash === "active" && record.trashed) return false;
+  if (filters.trash === "trashed" && !record.trashed) return false;
+  if (filters.classification === "eligible" && !record.analysisEligible) return false;
+  if (
+    filters.classification !== "all"
+    && filters.classification !== "eligible"
+    && record.annotation.classification !== filters.classification
+  ) return false;
+  return true;
+}
+
 function DataOriginBadges({ origins }: { origins: ResearchDataOrigin[] }) {
   return (
     <div className="flex flex-wrap gap-1">
@@ -172,6 +231,8 @@ const INITIAL_FILTERS: Filters = {
   from: "",
   to: "",
   query: "",
+  classification: "eligible",
+  trash: "active",
 };
 
 function formatDate(value: string, full = false): string {
@@ -209,7 +270,9 @@ function safeStringify(value: unknown): string {
 }
 
 function scoreValue(record: Record<string, unknown> | null, key: string): string {
-  const value = Number(record?.[key]);
+  const rawValue = record?.[key];
+  if (rawValue === null || rawValue === undefined || rawValue === "") return "未采集";
+  const value = Number(rawValue);
   return Number.isFinite(value) ? String(value) : "未采集";
 }
 
@@ -264,7 +327,9 @@ function questionnaireScore(
     && textValue(item.status) === "completed"
     && (!generationRole || textValue(item.generation_role) === generationRole)
   ));
-  const score = Number(response?.score_total);
+  const rawScore = response?.score_total;
+  if (rawScore === null || rawScore === undefined || rawScore === "") return null;
+  const score = Number(rawScore);
   return Number.isFinite(score) ? score : null;
 }
 
@@ -660,6 +725,7 @@ function TrialDrawer({
 }) {
   const artwork = trial.artworkEvaluation;
   const manipulation = trial.manipulationCheck;
+  const integratedQuestionnaires = usesIntegratedQuestionnaires(trial.protocolVersion);
   const visualBrief = trial.visualBrief && typeof trial.visualBrief === "object"
     ? trial.visualBrief as Record<string, unknown>
     : null;
@@ -781,47 +847,58 @@ function TrialDrawer({
                 ))}
               </div>
             )}
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-left text-xs">
-                <thead className="border-b border-zinc-200 text-zinc-500">
-                  <tr>
-                    <th className="py-2 font-medium">音乐匹配</th>
-                    <th className="py-2 font-medium">想象匹配</th>
-                    <th className="py-2 font-medium">主体感</th>
-                    <th className="py-2 font-medium">所有权</th>
-                    <th className="py-2 font-medium">沉浸感</th>
-                    <th className="py-2 font-medium">满意度</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="font-semibold text-zinc-900">
-                    {[
-                      "music_match_score",
-                      "imagination_match_score",
-                      "agency_score",
-                      "ownership_score",
-                      "immersion_score",
-                      "satisfaction_score",
-                    ].map((key) => <td key={key} className="py-3">{scoreValue(artwork, key)}</td>)}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 grid gap-3 border-t border-zinc-200 pt-4 text-sm sm:grid-cols-3">
-              <p><span className="block text-xs text-zinc-500">音乐匹配选择</span>{choiceLabel(trial.comparison?.musicMatchChoice)}</p>
-              <p><span className="block text-xs text-zinc-500">想象／审美选择</span>{choiceLabel(trial.comparison?.imaginationMatchChoice)}</p>
-              <p><span className="block text-xs text-zinc-500">总体选择</span>{choiceLabel(trial.comparison?.overallChoice)}</p>
-            </div>
-            {trial.comparison?.reason && (
-              <p className="mt-3 border-l-2 border-zinc-300 pl-3 text-sm leading-relaxed text-zinc-700">
-                {trial.comparison.reason}
-              </p>
+            {integratedQuestionnaires ? (
+              <div className="grid gap-3 border-t border-zinc-200 pt-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                <p><span className="block text-xs text-zinc-500">共创图像契合度</span>{questionnaireScore(trial, "image_alignment", "co_created") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">音乐直出图像契合度</span>{questionnaireScore(trial, "image_alignment", "direct_baseline") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">CSI</span>{questionnaireScore(trial, "csi") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">SUS</span>{questionnaireScore(trial, "sus") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">任务负荷</span>{questionnaireScore(trial, "raw_tlx") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">主体感</span>{questionnaireMetric(trial, "agency_ownership", "agency") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">所有权</span>{questionnaireMetric(trial, "agency_ownership", "ownership") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">多视角感</span>{questionnaireMetric(trial, "manipulation_check", "mc_perspectives") ?? "未采集"}</p>
+                <p><span className="block text-xs text-zinc-500">画面发展支持</span>{questionnaireMetric(trial, "manipulation_check", "mc_development") ?? "未采集"}</p>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-left text-xs">
+                    <thead className="border-b border-zinc-200 text-zinc-500">
+                      <tr>
+                        <th className="py-2 font-medium">音乐匹配</th>
+                        <th className="py-2 font-medium">想象匹配</th>
+                        <th className="py-2 font-medium">主体感</th>
+                        <th className="py-2 font-medium">所有权</th>
+                        <th className="py-2 font-medium">沉浸感</th>
+                        <th className="py-2 font-medium">满意度</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="font-semibold text-zinc-900">
+                        {["music_match_score", "imagination_match_score", "agency_score", "ownership_score", "immersion_score", "satisfaction_score"].map((key) => (
+                          <td key={key} className="py-3">{scoreValue(artwork, key)}</td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-4 grid gap-3 border-t border-zinc-200 pt-4 text-sm sm:grid-cols-3">
+                  <p><span className="block text-xs text-zinc-500">音乐匹配选择</span>{choiceLabel(trial.comparison?.musicMatchChoice)}</p>
+                  <p><span className="block text-xs text-zinc-500">想象／审美选择</span>{choiceLabel(trial.comparison?.imaginationMatchChoice)}</p>
+                  <p><span className="block text-xs text-zinc-500">总体选择</span>{choiceLabel(trial.comparison?.overallChoice)}</p>
+                </div>
+                {trial.comparison?.reason && (
+                  <p className="mt-3 border-l-2 border-zinc-300 pl-3 text-sm leading-relaxed text-zinc-700">
+                    {trial.comparison.reason}
+                  </p>
+                )}
+                <div className="mt-4 grid gap-3 border-t border-zinc-200 pt-4 text-sm sm:grid-cols-3">
+                  <p><span className="block text-xs text-zinc-500">多视角感</span>{scoreValue(manipulation, "perspective_multiplicity_score")}</p>
+                  <p><span className="block text-xs text-zinc-500">表达支持</span>{scoreValue(manipulation, "articulation_support_score")}</p>
+                  <p><span className="block text-xs text-zinc-500">对话体验</span>{scoreValue(manipulation, "dialogue_experience_score")}</p>
+                </div>
+              </>
             )}
-            <div className="mt-4 grid gap-3 border-t border-zinc-200 pt-4 text-sm sm:grid-cols-3">
-              <p><span className="block text-xs text-zinc-500">多视角感</span>{scoreValue(manipulation, "perspective_multiplicity_score")}</p>
-              <p><span className="block text-xs text-zinc-500">表达支持</span>{scoreValue(manipulation, "articulation_support_score")}</p>
-              <p><span className="block text-xs text-zinc-500">对话体验</span>{scoreValue(manipulation, "dialogue_experience_score")}</p>
-            </div>
           </section>
 
           <section className="mb-7">
@@ -1478,6 +1555,291 @@ function QualityView({
   );
 }
 
+type ManagementTarget = {
+  entityType: "study_session" | "trial";
+  entityId: string;
+};
+
+function ArtworkLibraryView({
+  artworks,
+  onSelect,
+}: {
+  artworks: ResearchArtworkRecord[];
+  onSelect: (artwork: ResearchArtworkRecord) => void;
+}) {
+  return (
+    <section>
+      <SectionTitle
+        title="实验图片库"
+        description={`${artworks.length} 张作品，包含共创作品和音乐直出作品。`}
+      />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        {artworks.map((artwork) => {
+          const imageUrl = artwork.imageUrl || artwork.remoteImageUrl;
+          return (
+            <article key={artwork.id} className="overflow-hidden rounded-md border border-zinc-200 bg-white">
+              <button
+                type="button"
+                onClick={() => onSelect(artwork)}
+                className="block w-full text-left"
+              >
+                <div className="aspect-video bg-zinc-100">
+                  {imageUrl ? (
+                    <img
+                      src={buildResearchThumbnailUrl(imageUrl)}
+                      alt={`${artwork.musicTitle} ${GENERATION_ROLE_LABELS[artwork.role] || "实验作品"}`}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover"
+                      onError={(event) => {
+                        if (event.currentTarget.src !== imageUrl) event.currentTarget.src = imageUrl;
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-rose-600">图片文件缺失</div>
+                  )}
+                </div>
+                <div className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-zinc-900">{artwork.musicTitle}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {GENERATION_ROLE_LABELS[artwork.role] || artwork.role || "历史作品"}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[10px] text-zinc-400">{formatDate(artwork.createdAt)}</span>
+                  </div>
+                  <p className="mt-3 truncate font-mono text-[11px] text-zinc-600">
+                    {artwork.participantId ? shortId(artwork.participantId) : `Run ${shortId(artwork.id)}`}
+                  </p>
+                  <div className="mt-3 flex items-end justify-between gap-2">
+                    <ClassificationBadge
+                      classification={artwork.annotation.classification}
+                      protected={artwork.annotation.protected}
+                      trashed={artwork.trashed}
+                    />
+                    <DataOriginBadges origins={artwork.dataOrigins} />
+                  </div>
+                </div>
+              </button>
+            </article>
+          );
+        })}
+      </div>
+      {artworks.length === 0 && (
+        <div className="border-y border-zinc-200 bg-white py-16 text-center text-sm text-zinc-400">
+          当前筛选条件下没有实验图片。
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ArtworkDrawer({
+  artwork,
+  onClose,
+}: {
+  artwork: ResearchArtworkRecord;
+  onClose: () => void;
+}) {
+  const imageUrl = artwork.imageUrl || artwork.remoteImageUrl;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/25" role="presentation" onMouseDown={onClose}>
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="实验作品详情"
+        className="ml-auto flex h-full w-[min(760px,96vw)] flex-col bg-white shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-teal-700">{GENERATION_ROLE_LABELS[artwork.role] || "实验作品"}</p>
+            <h2 className="mt-1 truncate text-xl font-semibold">{artwork.musicTitle}</h2>
+            <p className="mt-1 text-xs text-zinc-500">{artwork.participantId || "未关联参与者"} · {formatDate(artwork.createdAt, true)}</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 text-xl text-zinc-500" aria-label="关闭">×</button>
+        </header>
+        <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div className="aspect-video overflow-hidden rounded border border-zinc-200 bg-zinc-100">
+            {imageUrl ? <img src={imageUrl} alt={artwork.musicTitle} className="h-full w-full object-contain" /> : <div className="flex h-full items-center justify-center text-sm text-rose-600">图片文件缺失</div>}
+          </div>
+          {imageUrl && (
+            <a href={imageUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-teal-700 hover:border-teal-500">
+              查看或下载原图
+            </a>
+          )}
+          <dl className="mt-6 grid gap-4 text-sm sm:grid-cols-2">
+            <div><dt className="text-xs text-zinc-500">参与者编号</dt><dd className="mt-1 break-all font-mono text-xs">{artwork.participantId || "未关联"}</dd></div>
+            <div><dt className="text-xs text-zinc-500">实验条件</dt><dd className="mt-1">{CONDITION_LABELS[artwork.condition]}</dd></div>
+            <div><dt className="text-xs text-zinc-500">模型与尺寸</dt><dd className="mt-1">{artwork.imageModel || "未记录"} · {artwork.imageSize || "未记录"}</dd></div>
+            <div><dt className="text-xs text-zinc-500">生成耗时</dt><dd className="mt-1">{formatDuration(artwork.totalMs)}</dd></div>
+            <div className="sm:col-span-2"><dt className="text-xs text-zinc-500">Run / Trial / Session</dt><dd className="mt-1 break-all font-mono text-[11px]">{artwork.id} / {artwork.trialId || "-"} / {artwork.studySessionId || "-"}</dd></div>
+          </dl>
+          <section className="mt-7">
+            <SectionTitle title="生图 Prompt" />
+            <p className="whitespace-pre-wrap rounded bg-zinc-50 p-4 text-sm leading-6 text-zinc-800">{artwork.prompt || "未记录"}</p>
+            {artwork.negativePrompt && <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-zinc-500"><strong>Negative Prompt：</strong>{artwork.negativePrompt}</p>}
+          </section>
+          <div className="mt-6">
+            <JsonDetails title="MusicProfile / 音乐分析 Brief" value={artwork.musicProfile} />
+            <JsonDetails title="VisualBrief" value={artwork.visualBrief} />
+            <JsonDetails title="音乐家评论" value={artwork.musicianComments} />
+            <JsonDetails title="Prompt Director" value={artwork.promptDirector} />
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function DataManagementView({
+  sessions,
+  standaloneTrials,
+  selected,
+  source,
+  onlineWritable,
+  classification,
+  cohortLabel,
+  isProtected,
+  excluded,
+  note,
+  onSourceChange,
+  onSelectionChange,
+  onClassificationChange,
+  onCohortChange,
+  onProtectedChange,
+  onExcludedChange,
+  onNoteChange,
+  onAction,
+  loading,
+}: {
+  sessions: ResearchStudySessionRecord[];
+  standaloneTrials: ResearchTrialRecord[];
+  selected: Set<string>;
+  source: "local" | "online";
+  onlineWritable: boolean;
+  classification: ResearchClassification;
+  cohortLabel: string;
+  isProtected: boolean;
+  excluded: boolean;
+  note: string;
+  onSourceChange: (source: "local" | "online") => void;
+  onSelectionChange: (key: string, checked: boolean) => void;
+  onClassificationChange: (value: ResearchClassification) => void;
+  onCohortChange: (value: string) => void;
+  onProtectedChange: (value: boolean) => void;
+  onExcludedChange: (value: boolean) => void;
+  onNoteChange: (value: string) => void;
+  onAction: (action: "annotate" | "trash" | "restore" | "purge") => void;
+  loading: boolean;
+}) {
+  const writable = source === "local" || onlineWritable;
+  return (
+    <div className="space-y-7">
+      <section>
+        <SectionTitle title="数据管理" description="先分类，再清理。正式实验和预实验可以锁定保护。" />
+        <div className="grid gap-4 border-y border-zinc-200 bg-white p-4 lg:grid-cols-[180px_180px_minmax(180px,1fr)_auto_auto]">
+          <FilterField label="操作数据源">
+            <select value={source} onChange={(event) => onSourceChange(event.target.value as "local" | "online")} className="h-9 w-full rounded border border-zinc-300 px-2 text-sm">
+              <option value="local">本地数据库</option>
+              <option value="online">线上 Supabase</option>
+            </select>
+          </FilterField>
+          <FilterField label="数据分类">
+            <select value={classification} onChange={(event) => onClassificationChange(event.target.value as ResearchClassification)} className="h-9 w-full rounded border border-zinc-300 px-2 text-sm">
+              {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </FilterField>
+          <FilterField label="实验批次">
+            <input value={cohortLabel} onChange={(event) => onCohortChange(event.target.value)} placeholder="例如：正式实验第一批" className="h-9 w-full rounded border border-zinc-300 px-3 text-sm" />
+          </FilterField>
+          <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={isProtected} onChange={(event) => onProtectedChange(event.target.checked)} />保护数据</label>
+          <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={excluded} onChange={(event) => onExcludedChange(event.target.checked)} />排除分析</label>
+          <div className="lg:col-span-3">
+            <FilterField label="管理备注">
+              <input value={note} onChange={(event) => onNoteChange(event.target.value)} placeholder="记录分类或排除原因" className="h-9 w-full rounded border border-zinc-300 px-3 text-sm" />
+            </FilterField>
+          </div>
+          <div className="flex items-end gap-2 lg:col-span-2 lg:justify-end">
+            <button type="button" disabled={!writable || selected.size === 0 || loading} onClick={() => onAction("annotate")} className="h-9 rounded bg-teal-700 px-3 text-sm font-medium text-white disabled:opacity-40">保存分类</button>
+            <button type="button" disabled={!writable || selected.size === 0 || loading} onClick={() => onAction("trash")} className="h-9 rounded border border-amber-300 px-3 text-sm font-medium text-amber-800 disabled:opacity-40">移入回收站</button>
+            <button type="button" disabled={!writable || selected.size === 0 || loading} onClick={() => onAction("restore")} className="h-9 rounded border border-zinc-300 px-3 text-sm font-medium disabled:opacity-40">恢复</button>
+            <button type="button" disabled={!writable || selected.size === 0 || loading} onClick={() => onAction("purge")} className="h-9 rounded bg-rose-700 px-3 text-sm font-medium text-white disabled:opacity-40">永久删除</button>
+          </div>
+        </div>
+        {source === "online" && !onlineWritable && (
+          <p className="mt-3 border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">必须先成功同步线上实时数据；显示缓存时禁止修改线上记录。</p>
+        )}
+      </section>
+
+      <section>
+        <SectionTitle title="实验会话" description="按参与者完整管理两次体验。" />
+        <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
+          <table className="w-full min-w-[940px] text-left text-xs">
+            <thead className="bg-zinc-50 text-zinc-500"><tr><th className="w-12 px-3 py-3"></th><th className="px-3 py-3">参与者</th><th className="px-3 py-3">分类</th><th className="px-3 py-3">批次</th><th className="px-3 py-3">协议</th><th className="px-3 py-3">状态</th><th className="px-3 py-3">体验数</th><th className="px-3 py-3">时间</th></tr></thead>
+            <tbody>{sessions.map((session) => {
+              const key = `study_session:${session.id}`;
+              return <tr key={key} className="border-t border-zinc-100"><td className="px-3 py-3"><input type="checkbox" checked={selected.has(key)} onChange={(event) => onSelectionChange(key, event.target.checked)} aria-label={`选择 ${session.participantId}`} /></td><td className="px-3 py-3 font-mono">{shortId(session.participantId)}</td><td className="px-3 py-3"><ClassificationBadge classification={session.annotation.classification} protected={session.annotation.protected} trashed={session.trashed} /></td><td className="px-3 py-3">{session.annotation.cohortLabel || "-"}</td><td className="px-3 py-3 font-mono text-[10px]">{session.protocolVersion}</td><td className="px-3 py-3">{STUDY_SESSION_STATUS_LABELS[session.status] || session.status}</td><td className="px-3 py-3">{[session.firstTrial, session.secondTrial].filter(Boolean).length}/2</td><td className="px-3 py-3">{formatDate(session.createdAt, true)}</td></tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </section>
+
+      {standaloneTrials.length > 0 && (
+        <section>
+          <SectionTitle title="历史独立 Trial" description="这些旧记录没有完整实验会话，可单独管理。" />
+          <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
+            <table className="w-full min-w-[860px] text-left text-xs">
+              <thead className="bg-zinc-50 text-zinc-500"><tr><th className="w-12 px-3 py-3"></th><th className="px-3 py-3">参与者</th><th className="px-3 py-3">音乐</th><th className="px-3 py-3">分类</th><th className="px-3 py-3">协议</th><th className="px-3 py-3">状态</th><th className="px-3 py-3">时间</th></tr></thead>
+              <tbody>{standaloneTrials.map((trial) => {
+                const key = `trial:${trial.id}`;
+                return <tr key={key} className="border-t border-zinc-100"><td className="px-3 py-3"><input type="checkbox" checked={selected.has(key)} onChange={(event) => onSelectionChange(key, event.target.checked)} aria-label={`选择 ${trial.participantId}`} /></td><td className="px-3 py-3 font-mono">{shortId(trial.participantId)}</td><td className="px-3 py-3">{trial.musicTitle}</td><td className="px-3 py-3"><ClassificationBadge classification={trial.annotation.classification} protected={trial.annotation.protected} trashed={trial.trashed} /></td><td className="px-3 py-3 font-mono text-[10px]">{trial.protocolVersion}</td><td className="px-3 py-3">{STATUS_LABELS[trial.status] || trial.status}</td><td className="px-3 py-3">{formatDate(trial.createdAt, true)}</td></tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function PurgeDialog({
+  plan,
+  targetCount,
+  confirmation,
+  onConfirmationChange,
+  onCancel,
+  onConfirm,
+  loading,
+}: {
+  plan: { counts: Record<string, number>; images: unknown[]; protectedTargets: unknown[]; warnings: string[] };
+  targetCount: number;
+  confirmation: string;
+  onConfirmationChange: (value: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  loading: boolean;
+}) {
+  const expected = `永久删除 ${targetCount} 条实验数据`;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <section role="dialog" aria-modal="true" aria-label="永久删除确认" className="w-full max-w-xl rounded-md bg-white p-5 shadow-2xl">
+        <h2 className="text-xl font-semibold text-zinc-900">确认永久删除</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-600">数据库记录会先生成 JSON 清单，随后删除关联记录和图片。该操作不能通过后台恢复。</p>
+        <div className="mt-4 grid grid-cols-2 gap-2 rounded bg-zinc-50 p-4 text-sm sm:grid-cols-3">
+          {Object.entries(plan.counts).filter(([, count]) => count > 0).map(([table, count]) => <p key={table}><span className="block text-[10px] text-zinc-500">{table}</span><strong>{count}</strong></p>)}
+          <p><span className="block text-[10px] text-zinc-500">关联图片</span><strong>{plan.images.length}</strong></p>
+        </div>
+        {plan.protectedTargets.length > 0 && <p className="mt-3 rounded bg-rose-50 px-3 py-2 text-sm text-rose-800">包含受保护数据，请先取消保护。</p>}
+        {plan.warnings.map((warning) => <p key={warning} className="mt-2 text-xs text-amber-700">{warning}</p>)}
+        <label className="mt-5 block text-sm"><span className="mb-1 block text-xs text-zinc-500">输入“{expected}”确认</span><input value={confirmation} onChange={(event) => onConfirmationChange(event.target.value)} className="h-10 w-full rounded border border-zinc-300 px-3" /></label>
+        <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onCancel} className="rounded border border-zinc-300 px-4 py-2 text-sm">取消</button><button type="button" onClick={onConfirm} disabled={confirmation !== expected || plan.protectedTargets.length > 0 || loading} className="rounded bg-rose-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">永久删除</button></div>
+      </section>
+    </div>
+  );
+}
+
 export default function ResearchDashboardClient({
   initialData,
   remoteSyncEnabled,
@@ -1499,16 +1861,33 @@ export default function ResearchDashboardClient({
   const [view, setView] = useState<View>("overview");
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [selectedTrial, setSelectedTrial] = useState<ResearchTrialRecord | null>(null);
+  const [selectedArtwork, setSelectedArtwork] = useState<ResearchArtworkRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const autoSyncAttemptedRef = useRef(false);
+  const [remoteTransport, setRemoteTransport] = useState<"live" | "cache" | null>(null);
+  const [managementSource, setManagementSource] = useState<"local" | "online">("local");
+  const [managementSelection, setManagementSelection] = useState<Set<string>>(new Set());
+  const [managementClassification, setManagementClassification] = useState<ResearchClassification>("unclassified");
+  const [managementCohort, setManagementCohort] = useState("");
+  const [managementProtected, setManagementProtected] = useState(false);
+  const [managementExcluded, setManagementExcluded] = useState(false);
+  const [managementNote, setManagementNote] = useState("");
+  const [purgePlan, setPurgePlan] = useState<{
+    counts: Record<string, number>;
+    images: unknown[];
+    protectedTargets: unknown[];
+    warnings: string[];
+  } | null>(null);
+  const [purgeConfirmation, setPurgeConfirmation] = useState("");
 
   const filteredTrials = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
     return dataset.trials.filter((trial) => {
+      if (!matchesAnnotationFilters(trial, filters)) return false;
       if (
         filters.origin === "local" &&
         !trial.dataOrigins.includes("local")
@@ -1546,13 +1925,33 @@ export default function ResearchDashboardClient({
     [filteredTrials]
   );
   const filteredStudySessions = useMemo(
-    () => dataset.studySessions.filter((session) =>
-      [session.firstTrial, session.secondTrial].some(
+    () => dataset.studySessions.filter((session) => (
+      matchesAnnotationFilters(session, filters)
+      && [session.firstTrial, session.secondTrial].some(
         (trial) => trial && filteredTrialIds.has(trial.id)
       )
-    ),
-    [dataset.studySessions, filteredTrialIds]
+    )),
+    [dataset.studySessions, filteredTrialIds, filters]
   );
+  const trialById = useMemo(() => new Map(dataset.trials.map((trial) => [trial.id, trial])), [dataset.trials]);
+  const filteredArtworks = useMemo(() => {
+    const query = filters.query.trim().toLowerCase();
+    return dataset.artworks.filter((artwork) => {
+      if (!matchesAnnotationFilters(artwork, filters)) return false;
+      if (filters.origin === "local" && !artwork.dataOrigins.includes("local")) return false;
+      if (filters.origin === "online" && !artwork.dataOrigins.some((origin) => origin === "online" || origin === "online_cache")) return false;
+      if (filters.origin === "snapshot" && !artwork.dataOrigins.includes("snapshot")) return false;
+      if (filters.condition !== "all" && artwork.condition !== filters.condition) return false;
+      const trial = trialById.get(artwork.trialId);
+      if (filters.protocol !== "all" && trial?.protocolVersion !== filters.protocol) return false;
+      const date = localDateValue(artwork.createdAt);
+      if (filters.from && date < filters.from) return false;
+      if (filters.to && date > filters.to) return false;
+      if (query && ![artwork.id, artwork.participantId, artwork.musicTitle, artwork.prompt]
+        .some((value) => value.toLowerCase().includes(query))) return false;
+      return true;
+    });
+  }, [dataset.artworks, filters, trialById]);
   const originCounts = useMemo(() => ({
     local: dataset.trials.filter((trial) => trial.dataOrigins.includes("local")).length,
     online: dataset.trials.filter((trial) =>
@@ -1560,6 +1959,21 @@ export default function ResearchDashboardClient({
     ).length,
     snapshot: dataset.trials.filter((trial) => trial.dataOrigins.includes("snapshot")).length,
   }), [dataset.trials]);
+  const managementDataset = managementSource === "local" ? localDataset : remoteDataset;
+  const managementSessions = useMemo(
+    () => managementDataset?.studySessions || [],
+    [managementDataset]
+  );
+  const managementSessionIds = useMemo(
+    () => new Set(managementSessions.map((session) => session.id)),
+    [managementSessions]
+  );
+  const managementStandaloneTrials = useMemo(
+    () => (managementDataset?.trials || []).filter((trial) => (
+      !trial.studySessionId || !managementSessionIds.has(trial.studySessionId)
+    )),
+    [managementDataset, managementSessionIds]
+  );
 
   const refreshDatabase = async () => {
     setLoading(true);
@@ -1569,6 +1983,7 @@ export default function ResearchDashboardClient({
       if (!response.ok) throw new Error("无法读取本地研究数据库");
       setLocalDataset(await response.json() as ResearchDashboardDataset);
       setSelectedTrial(null);
+      setSelectedArtwork(null);
       setMessage("已刷新本地数据库，其他来源保持不变");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "刷新失败");
@@ -1592,12 +2007,15 @@ export default function ResearchDashboardClient({
         throw new Error(result.error || "无法同步线上研究数据");
       }
       setRemoteDataset(result.dataset);
+      setRemoteTransport(result.transport || "live");
       setSelectedTrial(null);
+      setSelectedArtwork(null);
       const sourceMessage = result.transport === "cache"
         ? `线上实时同步暂时不可用，已合并线上缓存（截止 ${formatDate(result.dataset.source.capturedAt, true)}）`
         : `线上数据已同步并与本地合并（${result.dataset.trials.length} 次体验）`;
       setMessage(sourceMessage);
     } catch (error) {
+      setRemoteTransport(null);
       setMessage(error instanceof Error ? error.message : "线上同步失败");
     } finally {
       setLoading(false);
@@ -1618,6 +2036,7 @@ export default function ResearchDashboardClient({
       const next = buildResearchDashboardDataset(parsed, "snapshot");
       setSnapshotDataset(next);
       setSelectedTrial(null);
+      setSelectedArtwork(null);
       setMessage(`已合并快照：${file.name}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "无法读取快照");
@@ -1727,6 +2146,100 @@ export default function ResearchDashboardClient({
     }
   };
 
+  const managementTargets = useMemo<ManagementTarget[]>(() => (
+    [...managementSelection].map((key) => {
+      const separator = key.indexOf(":");
+      return {
+        entityType: key.slice(0, separator) as ManagementTarget["entityType"],
+        entityId: key.slice(separator + 1),
+      };
+    }).filter((target) => target.entityId)
+  ), [managementSelection]);
+
+  const refreshManagementSource = async (source: "local" | "online") => {
+    if (source === "online") {
+      await syncRemoteData();
+      return;
+    }
+    await refreshDatabase();
+  };
+
+  const runManagementAction = async (action: "annotate" | "trash" | "restore" | "purge") => {
+    if (managementTargets.length === 0) return;
+    setLoading(true);
+    setMessage("");
+    try {
+      if (action === "purge") {
+        const response = await fetch("/api/research/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "preview", source: managementSource, targets: managementTargets }),
+        });
+        const result = await response.json() as { plan?: typeof purgePlan; error?: string };
+        if (!response.ok || !result.plan) throw new Error(result.error || "无法生成删除预览");
+        setPurgePlan(result.plan);
+        setPurgeConfirmation("");
+        return;
+      }
+      const response = await fetch("/api/research/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          source: managementSource,
+          targets: managementTargets,
+          annotation: action === "annotate" ? {
+            classification: managementClassification,
+            cohortLabel: managementCohort,
+            protected: managementProtected,
+            excludedFromAnalysis: managementExcluded,
+            note: managementNote,
+          } : undefined,
+        }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "数据管理操作失败");
+      setManagementSelection(new Set());
+      await refreshManagementSource(managementSource);
+      setMessage(action === "annotate" ? "分类与保护设置已保存" : action === "trash" ? "所选数据已移入回收站" : "所选数据已恢复");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "数据管理操作失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmPurge = async () => {
+    if (!purgePlan || managementTargets.length === 0) return;
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/research/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "purge",
+          source: managementSource,
+          targets: managementTargets,
+          confirmation: purgeConfirmation,
+        }),
+      });
+      const result = await response.json() as { error?: string; result?: { backupRef?: string } };
+      if (!response.ok) throw new Error(result.error || "永久删除失败");
+      setPurgePlan(null);
+      setPurgeConfirmation("");
+      setManagementSelection(new Set());
+      await refreshManagementSource(managementSource);
+      setMessage(result.result?.backupRef
+        ? `永久删除完成，备份：${result.result.backupRef}`
+        : "永久删除完成，操作已写入审计日志");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "永久删除失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-[#f4f5f6] text-zinc-900">
       <header className="border-b border-zinc-200 bg-white">
@@ -1830,6 +2343,8 @@ export default function ResearchDashboardClient({
             ["overview", "研究结论"],
             ["trials", "实验记录"],
             ["questionnaires", "问卷数据"],
+            ["artworks", "实验图片库"],
+            ["management", "实验数据管理"],
             ["quality", "数据检查"],
           ] as const).map(([key, label]) => (
             <button
@@ -1907,7 +2422,31 @@ export default function ResearchDashboardClient({
             </div>
           </div>
           {advancedFiltersOpen && (
-            <div className="mt-3 grid gap-3 border-t border-zinc-200 pt-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="mt-3 grid gap-3 border-t border-zinc-200 pt-3 md:grid-cols-2 xl:grid-cols-7">
+              <FilterField label="数据分类">
+                <select
+                  value={filters.classification}
+                  onChange={(event) => updateFilter("classification", event.target.value as Filters["classification"])}
+                  className="h-9 w-full rounded border border-zinc-300 bg-white px-2 text-sm"
+                >
+                  <option value="eligible">纳入分析</option>
+                  <option value="all">全部分类</option>
+                  {Object.entries(CLASSIFICATION_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </FilterField>
+              <FilterField label="回收状态">
+                <select
+                  value={filters.trash}
+                  onChange={(event) => updateFilter("trash", event.target.value as Filters["trash"])}
+                  className="h-9 w-full rounded border border-zinc-300 bg-white px-2 text-sm"
+                >
+                  <option value="active">正常数据</option>
+                  <option value="trashed">回收站</option>
+                  <option value="all">全部</option>
+                </select>
+              </FilterField>
               <FilterField label="流程状态">
                 <select
                   value={filters.status}
@@ -1989,6 +2528,44 @@ export default function ResearchDashboardClient({
               onSelect={setSelectedTrial}
             />
           )}
+          {view === "artworks" && (
+            <ArtworkLibraryView artworks={filteredArtworks} onSelect={setSelectedArtwork} />
+          )}
+          {view === "management" && (
+            <DataManagementView
+              sessions={managementSessions}
+              standaloneTrials={managementStandaloneTrials}
+              selected={managementSelection}
+              source={managementSource}
+              onlineWritable={remoteTransport === "live"}
+              classification={managementClassification}
+              cohortLabel={managementCohort}
+              isProtected={managementProtected}
+              excluded={managementExcluded}
+              note={managementNote}
+              onSourceChange={(source) => {
+                setManagementSource(source);
+                setManagementSelection(new Set());
+              }}
+              onSelectionChange={(key, checked) => setManagementSelection((current) => {
+                const next = new Set(current);
+                if (checked) next.add(key);
+                else next.delete(key);
+                return next;
+              })}
+              onClassificationChange={(classification) => {
+                setManagementClassification(classification);
+                if (classification === "formal" || classification === "pilot") setManagementProtected(true);
+                if (classification === "test" || classification === "excluded") setManagementExcluded(true);
+              }}
+              onCohortChange={setManagementCohort}
+              onProtectedChange={setManagementProtected}
+              onExcludedChange={setManagementExcluded}
+              onNoteChange={setManagementNote}
+              onAction={(action) => void runManagementAction(action)}
+              loading={loading}
+            />
+          )}
           {view === "quality" && (
             <QualityView
               trials={filteredTrials}
@@ -2004,6 +2581,23 @@ export default function ResearchDashboardClient({
           trial={selectedTrial}
           currentProtocolVersion={dataset.currentProtocolVersion}
           onClose={() => setSelectedTrial(null)}
+        />
+      )}
+      {selectedArtwork && (
+        <ArtworkDrawer artwork={selectedArtwork} onClose={() => setSelectedArtwork(null)} />
+      )}
+      {purgePlan && (
+        <PurgeDialog
+          plan={purgePlan}
+          targetCount={managementTargets.length}
+          confirmation={purgeConfirmation}
+          onConfirmationChange={setPurgeConfirmation}
+          onCancel={() => {
+            setPurgePlan(null);
+            setPurgeConfirmation("");
+          }}
+          onConfirm={() => void confirmPurge()}
+          loading={loading}
         />
       )}
     </main>

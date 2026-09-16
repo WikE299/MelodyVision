@@ -62,6 +62,8 @@ test("legacy study databases migrate to the within-subject crossover schema", as
         'labeled_comparisons',
         'manipulation_checks',
         'questionnaire_responses',
+        'research_admin_actions',
+        'research_data_annotations',
         'session_comparisons',
         'study_assignment_blocks',
         'study_sessions'
@@ -80,6 +82,8 @@ test("legacy study databases migrate to the within-subject crossover schema", as
       "labeled_comparisons",
       "manipulation_checks",
       "questionnaire_responses",
+      "research_admin_actions",
+      "research_data_annotations",
       "session_comparisons",
       "study_assignment_blocks",
       "study_sessions",

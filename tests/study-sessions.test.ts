@@ -203,6 +203,42 @@ test("within-subject sessions balance four sequences and preserve paired progres
     assert.equal(completed?.status, "completed");
     assert.ok(completed?.completedAt);
     assert.equal(comparison?.overallChoice, "period_2");
+
+    const viewingSession = (await sessions.createOrRecoverStudySession({
+      participantId: "participant-viewing-checkpoint",
+      deviceSessionId: "device-viewing-checkpoint",
+      stimulusXId: "track-x",
+      stimulusYId: "track-y",
+    })).session;
+    await sessions.saveStudyAudioChoices({
+      studySessionId: viewingSession.id,
+      first: firstAudio,
+      second: secondAudio,
+    });
+    const viewingAssignment = sessions.getStudyPeriodAssignment(viewingSession, 1);
+    const viewingTrial = await trials.createStudyTrial({
+      participantId: viewingSession.participantId,
+      sessionId: viewingSession.deviceSessionId,
+      studySessionId: viewingSession.id,
+      period: 1,
+      stimulusId: viewingAssignment.stimulusId,
+      condition: viewingAssignment.condition,
+      assignmentMethod: "crossover_block",
+      musicProfileId: "profile-viewing-checkpoint",
+    });
+    await trials.updateStudyTrial({
+      id: viewingTrial.id,
+      coCreatedRunId: "co-created-viewing-checkpoint",
+      status: "evaluating",
+    });
+    await assert.rejects(
+      trials.claimBaselineJob(viewingTrial.id),
+      trials.BaselineNotEligibleError
+    );
+    const viewingClaim = await trials.claimBaselineJob(viewingTrial.id, {
+      checkpoint: "artwork_viewed",
+    });
+    assert.equal(viewingClaim.acquired, true);
   } finally {
     await rm(directory, { recursive: true, force: true });
     delete process.env.MELODYVISION_DATA_DIR;

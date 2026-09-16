@@ -20,10 +20,12 @@ The facilitator also receives each selected musician's identity context. Its out
 
 The four conversational goals are:
 
-1. subject and space
-2. motion and composition
+1. visible image or subject
+2. space and composition
 3. light, color, and material
-4. personal meaning and constraints
+4. atmosphere, personal meaning, and constraints
+
+Motion remains an optional visual cue when it is naturally present in the user's description or the music. It is not a required question or readiness gate.
 
 These are conversational scaffolds rather than image-generation controls. The user still writes free text, and the exact user message remains the primary source for confirmed VisualBrief fields.
 

@@ -1,6 +1,6 @@
 # MelodyVision V2 Study Protocol
 
-Status: revised for implementation on 2026-08-13. The active protocol is `v2-18-streamlined-questionnaires`. Earlier V2 records remain readable but must not be pooled with V2-18 without an explicit protocol filter.
+Status: revised for implementation on 2026-09-16. The active protocol is `v2-19-spatial-image-cues`. It retains the streamlined V2-18 questionnaires but replaces the required motion/change cue with space/composition. Earlier records remain readable and must be separated by protocol during analysis.
 
 ## Research design
 

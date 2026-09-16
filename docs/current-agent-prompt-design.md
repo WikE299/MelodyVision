@@ -305,8 +305,8 @@ Profile 数据结构：`identityContext + listeningLenses + interpretiveTensions
 
 内部目标来自四类轮次目标：
 
-- `subject-space`
-- `motion-composition`
+- `subject-scene`
+- `space-composition`
 - `light-color-material`
 - `meaning-constraints`
 
@@ -455,7 +455,7 @@ MusicProfile 与低权重语义候选
 - 每个非空 Brief 字段必须准确进入 `visualBriefMappings`。
 - confirmed 描述字段为 `primary`；suggested/conflicted 为 `supporting`；mustInclude/mustAvoid 为 `constraint`。
 - `personalMeaning` 是情绪中心。
-- MusicProfile 可补充运动、密度、动态、音色和结构，不能覆盖用户确认内容。
+- MusicProfile 可补充空间感、运动、密度、动态、音色和结构，不能覆盖用户确认内容。运动是可选画面线索，不是用户必须补齐的生成门槛。
 - 每条音乐家评论必须恰好出现在 `sourceMappings` 和 `weightingRationale` 中。
 
 ### 9.3 Direct baseline 条件

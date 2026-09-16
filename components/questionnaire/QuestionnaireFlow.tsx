@@ -29,6 +29,7 @@ const COPY = {
     previous: "上一页",
     next: "下一页",
     complete: "完成本模块",
+    submitting: "正在提交",
     saving: "正在保存",
     saved: "已自动保存",
     error: "保存失败，将在下次修改时重试",
@@ -38,11 +39,14 @@ const COPY = {
     notApplicable: "不适用",
     page: "页",
     item: "题",
+    enlarge: "放大查看",
+    closePreview: "关闭大图",
   },
   en: {
     previous: "Previous",
     next: "Next",
     complete: "Complete section",
+    submitting: "Submitting",
     saving: "Saving",
     saved: "Saved automatically",
     error: "Save failed. The next change will retry.",
@@ -52,6 +56,8 @@ const COPY = {
     notApplicable: "Not applicable",
     page: "Page",
     item: "items",
+    enlarge: "Enlarge artwork",
+    closePreview: "Close artwork preview",
   },
 };
 
@@ -65,12 +71,14 @@ function QuestionField({
   question,
   value,
   error,
+  disabled,
   language,
   onChange,
 }: {
   question: QuestionnaireQuestion;
   value: QuestionnaireAnswer | undefined;
   error: boolean;
+  disabled: boolean;
   language: "zh" | "en";
   onChange: (value: QuestionnaireAnswer) => void;
 }) {
@@ -98,6 +106,7 @@ function QuestionField({
           </div>
           <input
             type="range"
+            disabled={disabled}
             min={question.min}
             max={question.max}
             step={question.step}
@@ -118,6 +127,7 @@ function QuestionField({
               <button
                 key={score}
                 type="button"
+                disabled={disabled}
                 onClick={() => onChange(score)}
                 aria-pressed={value === score}
                 className={`h-9 min-w-0 border text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2f6f66] ${
@@ -137,6 +147,7 @@ function QuestionField({
           {question.allowNotApplicable && (
             <button
               type="button"
+              disabled={disabled}
               onClick={() => onChange(NOT_APPLICABLE_VALUE)}
               aria-pressed={value === NOT_APPLICABLE_VALUE}
               className={`mt-2 h-8 border px-3 text-xs transition ${
@@ -155,6 +166,7 @@ function QuestionField({
             <button
               key={option.value}
               type="button"
+              disabled={disabled}
               onClick={() => onChange(option.value)}
               aria-pressed={value === option.value}
               className={`min-h-10 border px-3 py-2 text-left text-sm transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2f6f66] ${
@@ -173,6 +185,7 @@ function QuestionField({
             <button
               key={option.value}
               type="button"
+              disabled={disabled}
               onClick={() => onChange(option.value)}
               aria-pressed={value === option.value}
               className={`min-h-16 border px-4 py-3 text-left text-sm leading-5 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2f6f66] ${
@@ -189,6 +202,7 @@ function QuestionField({
         <label className="mt-3 flex max-w-56 items-center border border-[#b8c2c0] bg-[#fbfaf6] focus-within:border-[#2f6f66]">
           <input
             type="number"
+            disabled={disabled}
             min={question.min}
             max={question.max}
             step={question.step}
@@ -200,6 +214,7 @@ function QuestionField({
         </label>
       ) : (
         <textarea
+          disabled={disabled}
           value={typeof value === "string" ? value : ""}
           maxLength={question.maxLength}
           rows={question.multiline ? 4 : 2}
@@ -227,6 +242,8 @@ export default function QuestionnaireFlow({
   const [pageIndex, setPageIndex] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [submitting, setSubmitting] = useState(false);
+  const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
   const saveSequence = useRef(0);
   const pages = useMemo(() => {
     const result: QuestionnaireQuestion[][] = [];
@@ -259,7 +276,17 @@ export default function QuestionnaireFlow({
     return () => window.clearTimeout(timer);
   }, [answers, onSave, onSaveStateChange]);
 
+  useEffect(() => {
+    if (!mediaPreviewOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMediaPreviewOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mediaPreviewOpen]);
+
   const updateAnswer = (id: string, value: QuestionnaireAnswer) => {
+    if (submitting) return;
     onAnswersChange({ ...answers, [id]: value });
     setErrors((current) => {
       if (!current[id]) return current;
@@ -286,6 +313,7 @@ export default function QuestionnaireFlow({
   };
 
   const complete = async () => {
+    if (submitting) return;
     const validation = validateQuestionnaireAnswers(definition, answers);
     if (!validation.valid) {
       setErrors(validation.errors);
@@ -293,11 +321,14 @@ export default function QuestionnaireFlow({
       if (firstInvalid >= 0) setPageIndex(Math.floor(firstInvalid / definition.pageSize));
       return;
     }
+    setSubmitting(true);
     try {
       await onComplete(answers);
     } catch {
       setSaveState("error");
       onSaveStateChange?.("error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -333,9 +364,18 @@ export default function QuestionnaireFlow({
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">
         {media && (
           <figure className="mb-5 grid gap-4 border-y border-[#c9c4b8] bg-[#ecebe5] p-3 sm:grid-cols-[180px_1fr]">
-            <div className="relative aspect-video overflow-hidden bg-[#1d2327]">
+            <button
+              type="button"
+              onClick={() => setMediaPreviewOpen(true)}
+              className="group relative aspect-video cursor-zoom-in overflow-hidden bg-[#1d2327] outline-none focus-visible:ring-2 focus-visible:ring-[#2f6f66] focus-visible:ring-offset-2"
+              aria-label={copy.enlarge}
+              title={copy.enlarge}
+            >
               <Image src={media.src} alt={media.alt} fill sizes="180px" loading="eager" className="object-contain" unoptimized />
-            </div>
+              <span className="absolute bottom-2 right-2 border border-white/45 bg-[#17242b]/88 px-2 py-1 text-[10px] font-medium text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                {copy.enlarge}
+              </span>
+            </button>
             <figcaption className="self-center">
               <p className="font-mono text-[10px] uppercase text-[#2f6f66]">{media.label}</p>
               {media.detail && <p className="mt-1 text-sm leading-6 text-[#5f6a6f]">{media.detail}</p>}
@@ -349,6 +389,7 @@ export default function QuestionnaireFlow({
               question={question}
               value={answers[question.id]}
               error={Boolean(errors[question.id])}
+              disabled={submitting}
               language={language}
               onChange={(value) => updateAnswer(question.id, value)}
             />
@@ -359,16 +400,53 @@ export default function QuestionnaireFlow({
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[#c9c4b8] bg-[#eeece5] px-5 py-3 sm:px-7">
         <p className="hidden text-xs text-[#6e797d] sm:block">{answeredCount}/{definition.questions.length} {copy.item}</p>
         <div className="ml-auto flex gap-2">
-          <button type="button" onClick={() => setPageIndex((current) => Math.max(0, current - 1))} disabled={pageIndex === 0} className="h-10 border border-[#9fa8a5] px-4 text-sm font-medium text-[#475156] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35">
+          <button type="button" onClick={() => setPageIndex((current) => Math.max(0, current - 1))} disabled={pageIndex === 0 || submitting} className="h-10 border border-[#9fa8a5] px-4 text-sm font-medium text-[#475156] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-35">
             {copy.previous}
           </button>
           {pageIndex < pages.length - 1 ? (
-            <button type="button" onClick={goNext} className="h-10 bg-[#2f6f66] px-5 text-sm font-semibold text-white transition hover:bg-[#285f57]">{copy.next}</button>
+            <button type="button" onClick={goNext} disabled={submitting} className="h-10 bg-[#2f6f66] px-5 text-sm font-semibold text-white transition hover:bg-[#285f57] disabled:cursor-not-allowed disabled:opacity-50">{copy.next}</button>
           ) : (
-            <button type="button" onClick={() => void complete()} className="h-10 bg-[#c28a2f] px-5 text-sm font-semibold text-[#201a10] transition hover:bg-[#d39a3b]">{copy.complete}</button>
+            <button type="button" onClick={() => void complete()} disabled={submitting} className="h-10 min-w-32 bg-[#c28a2f] px-5 text-sm font-semibold text-[#201a10] transition hover:bg-[#d39a3b] disabled:cursor-wait disabled:opacity-60">{submitting ? copy.submitting : copy.complete}</button>
           )}
         </div>
       </footer>
+
+      {media && mediaPreviewOpen && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-[#0d1114]/94 p-5 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label={copy.enlarge}
+        >
+          <button
+            type="button"
+            onClick={() => setMediaPreviewOpen(false)}
+            className="absolute inset-0 cursor-zoom-out"
+            aria-label={copy.closePreview}
+          />
+          <div className="pointer-events-none relative z-10 h-[min(84vh,900px)] w-[min(92vw,1400px)]">
+            <Image
+              src={media.src}
+              alt={media.alt}
+              fill
+              sizes="92vw"
+              loading="eager"
+              className="object-contain"
+              unoptimized
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setMediaPreviewOpen(false)}
+            className="absolute right-5 top-5 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-white/35 bg-[#17242b]/82 text-2xl leading-none text-white transition hover:border-white hover:bg-[#26363d] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            aria-label={copy.closePreview}
+            title={copy.closePreview}
+            autoFocus
+          >
+            ×
+          </button>
+        </div>
+      )}
     </section>
   );
 }

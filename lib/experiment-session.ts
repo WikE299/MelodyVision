@@ -1,6 +1,10 @@
+import { acceptanceExperimentSessionId } from "./acceptance-runtime";
+
 const SESSION_STORAGE_KEY = "melodyvisionSessionId";
 
 export async function getExperimentSessionId(): Promise<string> {
+  const acceptanceSessionId = acceptanceExperimentSessionId();
+  if (acceptanceSessionId) return acceptanceSessionId;
   const existing = localStorage.getItem(SESSION_STORAGE_KEY);
   const response = await fetch("/api/experiment/session", {
     method: "POST",

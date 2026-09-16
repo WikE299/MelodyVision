@@ -27,10 +27,15 @@ export type StudyTrialStatus =
   | "evaluating"
   | "completed";
 export type BaselineJobStatus = "pending" | "running" | "completed" | "failed";
-export const CURRENT_STUDY_PROTOCOL_VERSION = "v2-18-streamlined-questionnaires";
+export const CURRENT_STUDY_PROTOCOL_VERSION = "v2-19-spatial-image-cues";
 export const INTEGRATED_QUESTIONNAIRE_PROTOCOLS = [
   "v2-16-integrated-questionnaires",
   "v2-17-participant-selected-music",
+  "v2-18-streamlined-questionnaires",
+  CURRENT_STUDY_PROTOCOL_VERSION,
+] as const;
+export const STREAMLINED_QUESTIONNAIRE_PROTOCOLS = [
+  "v2-18-streamlined-questionnaires",
   CURRENT_STUDY_PROTOCOL_VERSION,
 ] as const;
 
@@ -39,7 +44,7 @@ export function usesIntegratedQuestionnaires(protocolVersion: string): boolean {
 }
 
 export function usesStreamlinedQuestionnaires(protocolVersion: string): boolean {
-  return protocolVersion === CURRENT_STUDY_PROTOCOL_VERSION;
+  return (STREAMLINED_QUESTIONNAIRE_PROTOCOLS as readonly string[]).includes(protocolVersion);
 }
 
 export interface StudyAudioChoice {

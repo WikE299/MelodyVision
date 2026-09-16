@@ -21,7 +21,7 @@ export const VISUAL_BRIEF_FIELD_KEYS: VisualBriefFieldKey[] = [
   "mustAvoid",
 ];
 
-export type VisualBriefSlotKey = "scene" | "dynamics" | "sensory" | "meaning";
+export type VisualBriefSlotKey = "scene" | "spatial" | "sensory" | "meaning";
 export type VisualBriefSlotStatus = "filled" | "partial" | "missing" | "conflicted";
 
 export interface VisualBriefSlotAssessment {
@@ -32,15 +32,15 @@ export interface VisualBriefSlotAssessment {
 }
 
 export const VISUAL_BRIEF_SLOTS: Record<VisualBriefSlotKey, VisualBriefFieldKey[]> = {
-  scene: ["subject", "space"],
-  dynamics: ["motion", "composition"],
+  scene: ["subject"],
+  spatial: ["space", "composition"],
   sensory: ["materials", "palette", "lighting"],
-  meaning: ["personalMeaning", "mustInclude", "mustAvoid"],
+  meaning: ["atmosphere", "personalMeaning", "mustInclude", "mustAvoid"],
 };
 
 const SLOT_LABELS: Record<VisualBriefSlotKey, string> = {
-  scene: "场景与空间",
-  dynamics: "变化与画面关系",
+  scene: "画面内容",
+  spatial: "空间与画面关系",
   sensory: "光色与质地",
   meaning: "核心感受与限制",
 };
