@@ -27,15 +27,17 @@ export type StudyTrialStatus =
   | "evaluating"
   | "completed";
 export type BaselineJobStatus = "pending" | "running" | "completed" | "failed";
-export const CURRENT_STUDY_PROTOCOL_VERSION = "v2-19-spatial-image-cues";
+export const CURRENT_STUDY_PROTOCOL_VERSION = "v2-20-single-agent-final-supplement";
 export const INTEGRATED_QUESTIONNAIRE_PROTOCOLS = [
   "v2-16-integrated-questionnaires",
   "v2-17-participant-selected-music",
   "v2-18-streamlined-questionnaires",
+  "v2-19-spatial-image-cues",
   CURRENT_STUDY_PROTOCOL_VERSION,
 ] as const;
 export const STREAMLINED_QUESTIONNAIRE_PROTOCOLS = [
   "v2-18-streamlined-questionnaires",
+  "v2-19-spatial-image-cues",
   CURRENT_STUDY_PROTOCOL_VERSION,
 ] as const;
 

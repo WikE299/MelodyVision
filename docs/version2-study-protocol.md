@@ -1,6 +1,6 @@
 # MelodyVision V2 Study Protocol
 
-Status: revised for implementation on 2026-09-16. The active protocol is `v2-19-spatial-image-cues`. It retains the streamlined V2-18 questionnaires but replaces the required motion/change cue with space/composition. Earlier records remain readable and must be separated by protocol during analysis.
+Status: revised for implementation on 2026-09-22. The active protocol is `v2-20-single-agent-final-supplement`. It retains the spatial cues and streamlined questionnaires from V2-19, and adds one optional user supplement after every selected musician has responded in the Single condition. Participants may instead generate immediately. Earlier records remain readable and must be separated by protocol during analysis.
 
 ## Research design
 

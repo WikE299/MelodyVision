@@ -44,7 +44,8 @@ const session: StudySession = {
 };
 
 test("the spatial-cue protocol keeps V2-18 questionnaire compatibility", () => {
-  assert.equal(CURRENT_STUDY_PROTOCOL_VERSION, "v2-19-spatial-image-cues");
+  assert.equal(CURRENT_STUDY_PROTOCOL_VERSION, "v2-20-single-agent-final-supplement");
+  assert.equal(usesStreamlinedQuestionnaires("v2-19-spatial-image-cues"), true);
   assert.equal(usesIntegratedQuestionnaires("v2-18-streamlined-questionnaires"), true);
   assert.equal(usesStreamlinedQuestionnaires("v2-18-streamlined-questionnaires"), true);
   assert.equal(usesStreamlinedQuestionnaires(CURRENT_STUDY_PROTOCOL_VERSION), true);

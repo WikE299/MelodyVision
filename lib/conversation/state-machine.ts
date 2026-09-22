@@ -65,7 +65,7 @@ function assertSelectedMusicians(ids: string[]) {
 }
 
 export function allSelectedMusiciansContributed(state: ConversationState): boolean {
-  return state.condition !== "multi_agent" || state.selectedMusicianIds.every(
+  return state.selectedMusicianIds.every(
     (musicianId) => (state.musicianMemory[musicianId]?.publicTurnCount || 0) > 0
   );
 }
@@ -599,7 +599,11 @@ export function requestGeneration(
   const mayGenerateEarly =
     state.turnPolicy.userMayGenerateEarly &&
     state.completedUserRounds >= 2;
-  if (!mayGenerateEarly && state.phase !== "ready") {
+  const reflectiveDecisionComplete =
+    state.condition === "single_agent" &&
+    state.completedUserRounds >= 1 &&
+    allSelectedMusiciansContributed(state);
+  if (!mayGenerateEarly && state.phase !== "ready" && !reflectiveDecisionComplete) {
     throw new Error("Conversation is not ready to generate");
   }
   if (!allSelectedMusiciansContributed(state)) {
