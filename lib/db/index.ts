@@ -385,6 +385,36 @@ async function createSQLiteDatabase(): Promise<MelodyDatabase> {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS audio_lab_assets (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      storage_provider TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      duration REAL,
+      format TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      user_direction TEXT NOT NULL,
+      visual_summary TEXT NOT NULL,
+      music_prompt TEXT NOT NULL,
+      source_run_id TEXT NOT NULL,
+      source_image_url TEXT NOT NULL,
+      source_thumbnail_url TEXT NOT NULL,
+      source_music_title TEXT NOT NULL,
+      source_role TEXT NOT NULL,
+      source_origins_json TEXT NOT NULL,
+      visual_model TEXT NOT NULL,
+      audio_model TEXT NOT NULL,
+      provider_request_id TEXT NOT NULL,
+      provider_log_id TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audio_lab_assets_created
+      ON audio_lab_assets(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_audio_lab_assets_source_run
+      ON audio_lab_assets(source_run_id);
+
     CREATE INDEX IF NOT EXISTS idx_generation_runs_session
       ON generation_runs(session_id, created_at);
 
