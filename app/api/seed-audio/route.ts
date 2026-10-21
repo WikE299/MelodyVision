@@ -144,6 +144,7 @@ export async function POST(request: Request) {
     return Response.json({
       asset: {
         ...asset,
+        sourceAudio: sourceImage.sourceAudio,
         audioUrl: `/api/audio-lab/assets/${encodeURIComponent(asset.id)}/file`,
         downloadUrl: `/api/audio-lab/assets/${encodeURIComponent(asset.id)}/file?download=1`,
       },

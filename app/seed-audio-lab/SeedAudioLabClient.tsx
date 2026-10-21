@@ -11,6 +11,21 @@ import {
 
 type LabTab = "generate" | "assets";
 
+interface SourceAudioDetails {
+  title: string;
+  artist: string;
+  sourceKind: "preset" | "search" | "upload" | "unknown";
+  source: string;
+  tags: string[];
+  durationSeconds: number | null;
+  bpm: number | null;
+  key: string;
+  mode: string;
+  playbackUrl: string;
+  browserCacheKey: string;
+  availability: "ready" | "browser_cache" | "unavailable";
+}
+
 interface LibraryImage {
   id: string;
   createdAt: string;
@@ -22,20 +37,7 @@ interface LibraryImage {
   dataOrigins: string[];
   artworkType: "co_created" | "direct_baseline";
   condition: "single_agent" | "multi_agent" | "unknown";
-  sourceAudio: {
-    title: string;
-    artist: string;
-    sourceKind: "preset" | "search" | "upload" | "unknown";
-    source: string;
-    tags: string[];
-    durationSeconds: number | null;
-    bpm: number | null;
-    key: string;
-    mode: string;
-    playbackUrl: string;
-    browserCacheKey: string;
-    availability: "ready" | "browser_cache" | "unavailable";
-  };
+  sourceAudio: SourceAudioDetails;
 }
 
 interface AudioAsset {
@@ -52,6 +54,7 @@ interface AudioAsset {
   sourceMusicTitle: string;
   sourceRole: string;
   sourceOrigins: string[];
+  sourceAudio: SourceAudioDetails | null;
   audioUrl: string;
   downloadUrl: string;
 }
@@ -113,6 +116,8 @@ function imageStyle(url: string) {
 
 export default function SeedAudioLabClient() {
   const abortRef = useRef<AbortController | null>(null);
+  const originalAssetAudioRef = useRef<HTMLAudioElement | null>(null);
+  const generatedAssetAudioRef = useRef<HTMLAudioElement | null>(null);
   const [activeTab, setActiveTab] = useState<LabTab>("generate");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [images, setImages] = useState<LibraryImage[]>([]);
@@ -130,6 +135,11 @@ export default function SeedAudioLabClient() {
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<GenerationResult | null>(null);
   const [cachedSourceAudio, setCachedSourceAudio] = useState<{
+    key: string;
+    url: string;
+    missing: boolean;
+  } | null>(null);
+  const [cachedAssetSourceAudio, setCachedAssetSourceAudio] = useState<{
     key: string;
     url: string;
     missing: boolean;
@@ -227,6 +237,30 @@ export default function SeedAudioLabClient() {
     };
   }, [selectedImage?.sourceAudio.browserCacheKey]);
 
+  useEffect(() => {
+    const cacheKey = selectedAsset?.sourceAudio?.browserCacheKey || "";
+    if (!cacheKey) return;
+    let active = true;
+    let objectUrl = "";
+    getStudyAudioFile(cacheKey)
+      .then((file) => {
+        if (!active) return;
+        if (!file) {
+          setCachedAssetSourceAudio({ key: cacheKey, url: "", missing: true });
+          return;
+        }
+        objectUrl = URL.createObjectURL(file);
+        setCachedAssetSourceAudio({ key: cacheKey, url: objectUrl, missing: false });
+      })
+      .catch(() => {
+        if (active) setCachedAssetSourceAudio({ key: cacheKey, url: "", missing: true });
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedAsset?.sourceAudio?.browserCacheKey]);
+
   const chooseMode = (nextMode: VisualMusicMode) => {
     setMode(nextMode);
     setPrompt(VISUAL_MUSIC_MODES[nextMode].defaultDirection);
@@ -254,7 +288,9 @@ export default function SeedAudioLabClient() {
       if (!response.ok) throw new Error(data.error || "音频生成失败");
       setResult(data);
       setStatus("done");
+      setSelectedAssetId(data.asset.id);
       await refreshAssets();
+      setActiveTab("assets");
     } catch (nextError) {
       if (nextError instanceof DOMException && nextError.name === "AbortError") {
         setStatus("idle");
@@ -275,6 +311,15 @@ export default function SeedAudioLabClient() {
     || (selectedImage?.sourceAudio.availability === "browser_cache"
       && cachedSourceAudio?.key === selectedImage.sourceAudio.browserCacheKey
       && cachedSourceAudio.missing);
+  const assetSourceAudioUrl = selectedAsset?.sourceAudio?.playbackUrl
+    || (cachedAssetSourceAudio?.key === selectedAsset?.sourceAudio?.browserCacheKey
+      ? cachedAssetSourceAudio?.url || ""
+      : "");
+  const assetSourceAudioMissing = !selectedAsset?.sourceAudio
+    || selectedAsset.sourceAudio.availability === "unavailable"
+    || (selectedAsset.sourceAudio.availability === "browser_cache"
+      && cachedAssetSourceAudio?.key === selectedAsset.sourceAudio.browserCacheKey
+      && cachedAssetSourceAudio.missing);
 
   return (
     <main className="min-h-screen bg-[#ecebe7] text-[#202522]">
@@ -404,14 +449,27 @@ export default function SeedAudioLabClient() {
                       <div className="h-full w-full bg-contain bg-center bg-no-repeat" style={imageStyle(selectedAsset.sourceImageUrl || selectedAsset.sourceThumbnailUrl)} role="img" aria-label={`${selectedAsset.sourceMusicTitle} 的来源画作`} />
                     </div>
                     <div className="border-t border-[#aaa79e] bg-[#f7f6f2] px-5 py-4 lg:px-7">
-                      <div className="grid items-center gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
+                      <div className="grid items-center gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(460px,0.9fr)]">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-base font-semibold">{selectedAsset.sourceMusicTitle}</h3><span className="border border-[#b69a70] px-2 py-0.5 text-[10px] text-[#77572d]">{VISUAL_MUSIC_MODES[selectedAsset.mode].label}</span><span className="text-[10px] text-[#858a85]">{selectedAsset.sourceRole === "direct_baseline" ? "音乐直生画作" : "共创画作"}</span></div>
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1"><p className="text-[10px] text-[#8a8e8a]">{formatDate(selectedAsset.createdAt)} · {formatDuration(selectedAsset.duration)} · {formatBytes(selectedAsset.bytes)}</p><button type="button" onClick={() => setShowAssetBasis(true)} className="border-b border-[#8b6a3c] text-[10px] font-semibold text-[#745126] transition hover:text-[#4e3418]">查看生成依据</button></div>
                         </div>
-                        <div className="flex min-w-0 items-center gap-3">
-                          <audio key={selectedAsset.id} controls src={selectedAsset.audioUrl} className="h-10 min-w-0 flex-1" preload="metadata" />
-                          <a href={selectedAsset.downloadUrl} className="flex h-10 w-10 shrink-0 items-center justify-center border border-[#8b6a3c] text-[#745126] transition hover:bg-[#eee4d3]" title="下载 MP3" aria-label="下载 MP3"><ToolbarIcon type="download" /></a>
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <div className="w-20 shrink-0"><p className="text-[10px] font-semibold text-[#6c5230]">原始音乐</p><p className="mt-0.5 truncate text-[9px] text-[#8a8e8a]" title={selectedAsset.sourceAudio?.artist || selectedAsset.sourceAudio?.source || ""}>{selectedAsset.sourceAudio?.artist || selectedAsset.sourceAudio?.source || "来源未记录"}</p></div>
+                            {assetSourceAudioUrl ? (
+                              <audio ref={originalAssetAudioRef} key={`original-${selectedAsset.id}-${assetSourceAudioUrl}`} controls src={assetSourceAudioUrl} className="h-9 min-w-0 flex-1" preload="metadata" onPlay={() => generatedAssetAudioRef.current?.pause()} />
+                            ) : assetSourceAudioMissing ? (
+                              <p className="min-w-0 flex-1 text-xs text-[#8b4b3f]">原始音频未保留</p>
+                            ) : (
+                              <p className="min-w-0 flex-1 text-xs text-[#737973]">正在恢复原始音频…</p>
+                            )}
+                          </div>
+                          <div className="flex min-w-0 items-center gap-3">
+                            <div className="w-20 shrink-0"><p className="text-[10px] font-semibold text-[#28473d]">图像生成音乐</p><p className="mt-0.5 text-[9px] text-[#8a8e8a]">{formatDuration(selectedAsset.duration)}</p></div>
+                            <audio ref={generatedAssetAudioRef} key={`generated-${selectedAsset.id}`} controls src={selectedAsset.audioUrl} className="h-9 min-w-0 flex-1" preload="metadata" onPlay={() => originalAssetAudioRef.current?.pause()} />
+                            <a href={selectedAsset.downloadUrl} className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#8b6a3c] text-[#745126] transition hover:bg-[#eee4d3]" title="下载图像生成音乐" aria-label="下载图像生成音乐"><ToolbarIcon type="download" /></a>
+                          </div>
                         </div>
                       </div>
                     </div>

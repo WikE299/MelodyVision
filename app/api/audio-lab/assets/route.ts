@@ -1,4 +1,5 @@
 import { isAudioLabRequestAllowed } from "@/lib/audio-lab/access";
+import { loadAudioLabImageAssets } from "@/lib/audio-lab/image-assets";
 import { listAudioLabAssets } from "@/lib/db/audio-lab-assets";
 
 export const runtime = "nodejs";
@@ -9,8 +10,16 @@ export async function GET(request: Request) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
   try {
-    const assets = (await listAudioLabAssets()).map((asset) => ({
+    const [storedAssets, imageAssets] = await Promise.all([
+      listAudioLabAssets(),
+      loadAudioLabImageAssets(),
+    ]);
+    const sourceAudioByRunId = new Map(
+      imageAssets.map((image) => [image.id, image.sourceAudio] as const)
+    );
+    const assets = storedAssets.map((asset) => ({
       ...asset,
+      sourceAudio: sourceAudioByRunId.get(asset.sourceRunId) || null,
       audioUrl: `/api/audio-lab/assets/${encodeURIComponent(asset.id)}/file`,
       downloadUrl: `/api/audio-lab/assets/${encodeURIComponent(asset.id)}/file?download=1`,
     }));
