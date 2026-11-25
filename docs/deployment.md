@@ -127,11 +127,19 @@ Version 2 rich audio analysis also uses:
 AUDIO_ANALYSIS_URL=http://127.0.0.1:8001
 EXPERIMENT_EXPORT_TOKEN=<long-random-server-secret>
 IMAGE_SIZE=1696*960
+IMAGE_HUMAN_QA_ENABLED=true
+IMAGE_QA_MODEL=qwen3-vl-plus
 ```
 
 These are server-only values. Do not prefix them with `NEXT_PUBLIC_`. Research exports require either `Authorization: Bearer <token>` or `x-export-token: <token>`.
 
 `IMAGE_SIZE` controls the generated artwork dimensions. Version 2 defaults to `1696*960` for a wide 16:9 result; keep the same value on local and server deployments so regeneration and research logs remain comparable.
+
+When user-authored evidence explicitly requests people, `IMAGE_HUMAN_QA_ENABLED`
+enables one server-side visual quality review and at most one controlled
+regeneration for obvious anatomy defects. `IMAGE_QA_MODEL` defaults to
+`qwen3-vl-plus`. Both values are server-only; setting the feature flag to
+`false` skips the review without blocking image generation.
 
 ## Version 2 Audio Service
 

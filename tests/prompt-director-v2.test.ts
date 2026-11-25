@@ -13,8 +13,11 @@ import { runVisualScribeAgent } from "../lib/agents/visual-scribe/index.ts";
 import {
   buildPromptDirectorInput,
   buildPromptDirectorInstruction,
+  buildHumanPresenceNegativePrompt,
   getPromptDirectorUserSourceIds,
+  inferHumanPresencePolicy,
   sanitizeImagePromptForProvider,
+  type PromptDirectorCoCreationContext,
 } from "../lib/prompts/image-gen.ts";
 
 function runtime() {
@@ -153,4 +156,116 @@ test("provider prompt sanitizer translates known IP references into generic visu
   assert.match(prompt, /playful slapstick chase rhythm/);
   assert.match(prompt, /blue-gray ribbon sculpture/);
   assert.match(prompt, /original visual language/);
+});
+
+function humanContext(userMessages: string[], mustAvoid: string[] = []): PromptDirectorCoCreationContext {
+  const sources = userMessages.map((excerpt, index) => ({
+    id: `message-${index + 1}`,
+    kind: "user-message",
+    sourceId: `message-${index + 1}`,
+    speakerId: "user",
+    excerpt,
+  }));
+  return {
+    visualBrief: {
+      id: "brief-human-policy",
+      version: 1,
+      status: "collecting",
+      readiness: {
+        score: 0.5,
+        ready: false,
+        presentFields: [],
+        missingFields: [],
+        conflictedFields: [],
+        reasons: [],
+      },
+      fields: mustAvoid.length
+        ? [{
+            field: "mustAvoid",
+            value: mustAvoid,
+            status: "confirmed",
+            sourceIds: [sources.at(-1)?.id || "message-1"],
+          }]
+        : [],
+    },
+    sources,
+  };
+}
+
+test("human presence policy defaults to none and ignores musician-only suggestions", () => {
+  const coCreation = humanContext([]);
+  coCreation.sources.push({
+    id: "musician-1",
+    kind: "musician-message",
+    sourceId: "musician-1",
+    speakerId: "boya",
+    excerpt: "可以加入一个站在河边的人。",
+  });
+  const policy = inferHumanPresencePolicy({ generationRole: "co_created", coCreation });
+
+  assert.equal(policy.mode, "none");
+  assert.match(buildHumanPresenceNegativePrompt(policy), /people/);
+});
+
+test("human presence policy uses implied mode for a user-requested distant back view", () => {
+  const policy = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    coCreation: humanContext(["远处有一个女孩的背影，站在风里。"]),
+  });
+
+  assert.equal(policy.mode, "implied");
+  assert.equal(policy.count, "single");
+  assert.deepEqual(policy.evidenceSourceIds, ["message-1"]);
+  assert.doesNotMatch(buildHumanPresenceNegativePrompt(policy), /(?:^|, )people(?:,|$)/);
+  assert.match(buildHumanPresenceNegativePrompt(policy), /deformed hands/);
+});
+
+test("human presence policy allows an explicit visible person and preserves count", () => {
+  const policy = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    coCreation: humanContext(["画面中心是一对母女，她们并肩坐在窗边。"]),
+  });
+
+  assert.equal(policy.mode, "visible");
+  assert.equal(policy.count, "pair");
+  assert.match(policy.reason, /visible human subject/);
+});
+
+test("human presence policy honors the latest user exclusion and VisualBrief mustAvoid", () => {
+  const latestExclusion = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    coCreation: humanContext(["画面里有一个男人。", "还是不要出现人物，只留下空椅子。"]),
+  });
+  const explicitConstraint = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    coCreation: humanContext(["画面里有一个男人。"], ["人物", "人脸"]),
+  });
+
+  assert.equal(latestExclusion.mode, "none");
+  assert.equal(explicitConstraint.mode, "none");
+  assert.match(explicitConstraint.reason, /VisualBrief explicitly excludes/);
+});
+
+test("human presence policy follows the last clause without treating ordinary Chinese words as people", () => {
+  const revisedToPerson = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    coCreation: humanContext(["不要空无一人，我希望有一个女孩站在窗边。"]),
+  });
+  const ordinaryPhrase = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    coCreation: humanContext(["这个画面令人平静，像没有边界的天空。"]),
+  });
+  const emptyScene = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    coCreation: humanContext(["房间里没有人，只有一把空椅子。"]),
+  });
+  const regeneratedPrompt = inferHumanPresencePolicy({
+    generationRole: "co_created",
+    userNote: "One adult woman in a blue dress stands alone in a golden corridor.",
+  });
+
+  assert.equal(revisedToPerson.mode, "visible");
+  assert.equal(ordinaryPhrase.mode, "none");
+  assert.equal(emptyScene.mode, "none");
+  assert.equal(regeneratedPrompt.mode, "visible");
 });

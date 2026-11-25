@@ -50,6 +50,8 @@ LLM_IMAGE_PROMPT_MODEL=deepseek-v4-flash
 DASHSCOPE_API_KEY=<server-only key>
 IMAGE_MODEL=wan2.7-image
 IMAGE_SIZE=1696*960
+IMAGE_HUMAN_QA_ENABLED=true
+IMAGE_QA_MODEL=qwen3-vl-plus
 JAMENDO_CLIENT_ID=<Jamendo client id>
 EXPERIMENT_EXPORT_TOKEN=<long random value>
 ```
