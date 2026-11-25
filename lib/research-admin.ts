@@ -98,6 +98,17 @@ function directOrInheritedAnnotation(
     : undefined;
 }
 
+export function areResearchTargetsTrashed(
+  value: unknown,
+  targets: ResearchTarget[]
+): boolean {
+  const data = parseExperimentExport(value);
+  return targets.length > 0 && targets.every((target) => {
+    const annotation = directOrInheritedAnnotation(data, target);
+    return Boolean(text(annotation?.trashed_at));
+  });
+}
+
 function recordsForTrial(
   records: RawRecord[],
   trial: RawRecord,

@@ -1,5 +1,6 @@
 import { exportExperimentJson } from "@/lib/db/export";
 import {
+  areResearchTargetsTrashed,
   buildResearchDeletionPlan,
   purgeLocalResearchData,
   recordLocalResearchAdminAction,
@@ -131,6 +132,9 @@ export async function POST(request: Request) {
     if (action === "purge") {
       if (body.confirmation !== `永久删除 ${targets.length} 条实验数据`) {
         throw new Error("永久删除确认文字不匹配");
+      }
+      if (!areResearchTargetsTrashed(snapshot, targets)) {
+        return Response.json({ error: "永久删除前请先将所选数据移入回收站" }, { status: 409 });
       }
       const plan = buildResearchDeletionPlan(snapshot, targets);
       if (plan.protectedTargets.length > 0) {

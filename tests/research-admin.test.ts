@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildResearchDeletionPlan } from "../lib/research-admin.ts";
+import {
+  areResearchTargetsTrashed,
+  buildResearchDeletionPlan,
+} from "../lib/research-admin.ts";
 import type { RawExperimentExport } from "../lib/research-dashboard.ts";
 
 function fixture(): RawExperimentExport {
@@ -97,4 +100,24 @@ test("protected session annotations block destructive actions in the plan", () =
   assert.deepEqual(plan.protectedTargets, [
     { entityType: "study_session", entityId: "study-1" },
   ]);
+});
+
+test("permanent deletion eligibility requires every target to be in the recycle bin", () => {
+  const data = fixture();
+  data.annotations = [{
+    entity_type: "study_session",
+    entity_id: "study-1",
+    classification: "test",
+    protected: 0,
+    trashed_at: "2026-09-10T12:00:00.000Z",
+  }];
+
+  assert.equal(areResearchTargetsTrashed(data, [
+    { entityType: "trial", entityId: "trial-1" },
+    { entityType: "trial", entityId: "trial-2" },
+  ]), true);
+  assert.equal(areResearchTargetsTrashed(data, [
+    { entityType: "trial", entityId: "trial-1" },
+    { entityType: "trial", entityId: "missing-trial" },
+  ]), false);
 });
