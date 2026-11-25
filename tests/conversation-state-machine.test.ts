@@ -401,6 +401,40 @@ test("reflective listening records independent comments with at most two user no
   );
 });
 
+test("reflective listening may generate or accept one supplement after every musician responds", () => {
+  const runtime = testRuntime();
+  let state = createConversationState({
+    trialId: "trial-single-choice",
+    sessionId: "session-single-choice",
+    musicProfileId: "music-single-choice",
+    selectedMusicianIds: ["boya", "beethoven"],
+    condition: "single_agent",
+    guideId: "co_creation_guide",
+  }, runtime);
+
+  state = startReflectiveListening(state, runtime);
+  state = recordUserMessage(state, "我先看见一条穿过山谷的河。", runtime);
+  state = continueReflectiveListening(state, runtime, false);
+  assert.throws(() => requestGeneration(state, runtime), /not ready/);
+
+  state = recordReflectiveComment(state, {
+    speakerId: "boya",
+    content: "让河面留出更安静的远景。",
+  }, runtime);
+  state = recordReflectiveComment(state, {
+    speakerId: "beethoven",
+    content: "可以让前景的石桥承接更明确的力量。",
+  }, runtime);
+
+  assert.equal(requestGeneration(state, runtime).status, "ready-to-generate");
+
+  state = recordUserMessage(state, "再补一束从云后落下的冷光。", runtime);
+  state = continueReflectiveListening(state, runtime, true);
+  assert.equal(state.completedUserRounds, 2);
+  assert.equal(state.status, "ready-to-generate");
+  assert.equal(state.messages.filter((message) => message.role === "musician").length, 2);
+});
+
 test("facilitator model plans are constrained to eligible speakers", async () => {
   const state = withMusicianCoverage(createFourPersonState());
   const valid = await runFacilitatorAgent(

@@ -1169,21 +1169,124 @@ function OverviewView({
 
 function TrialsView({
   trials,
+  sourceRecords,
   onSelect,
+  selectedIds,
+  source,
+  onlineWritable,
+  loading,
+  onSourceChange,
+  onSelectionChange,
+  onAction,
 }: {
   trials: ResearchTrialRecord[];
+  sourceRecords: ResearchTrialRecord[];
   onSelect: (trial: ResearchTrialRecord) => void;
+  selectedIds: Set<string>;
+  source: ManagementSource;
+  onlineWritable: boolean;
+  loading: boolean;
+  onSourceChange: (source: ManagementSource) => void;
+  onSelectionChange: (ids: Set<string>) => void;
+  onAction: (action: "trash" | "restore" | "purge", trials: ResearchTrialRecord[]) => void;
 }) {
+  const writable = source === "local" || onlineWritable;
+  const sourceTrialById = new Map(sourceRecords.map((trial) => [trial.id, trial]));
+  const sourceTrials = trials.flatMap((trial) => {
+    const sourceTrial = sourceTrialById.get(trial.id);
+    return sourceTrial ? [sourceTrial] : [];
+  });
+  const selectedTrials = sourceTrials.filter((trial) => selectedIds.has(trial.id));
+  const allVisibleSelected = sourceTrials.length > 0
+    && sourceTrials.every((trial) => selectedIds.has(trial.id));
+  const containsProtected = selectedTrials.some((trial) => trial.annotation.protected);
+  const allSelectedTrashed = selectedTrials.length > 0
+    && selectedTrials.every((trial) => trial.trashed);
+
+  const toggleAllVisible = () => {
+    const next = new Set(selectedIds);
+    if (allVisibleSelected) sourceTrials.forEach((trial) => next.delete(trial.id));
+    else sourceTrials.forEach((trial) => next.add(trial.id));
+    onSelectionChange(next);
+  };
+
   return (
     <section>
       <SectionTitle
         title="实验记录"
         description={`当前显示 ${trials.length} 次体验，点击“查看”追溯完整实验链路。`}
       />
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3 border-y border-zinc-200 bg-white px-4 py-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterField label="操作数据源">
+            <select
+              value={source}
+              onChange={(event) => onSourceChange(event.target.value as ManagementSource)}
+              className="h-9 min-w-40 rounded border border-zinc-300 bg-white px-2 text-sm"
+            >
+              <option value="local">本地数据库</option>
+              <option value="online">线上 Supabase</option>
+            </select>
+          </FilterField>
+          <p className="pb-2 text-xs text-zinc-500">
+            已选择 {selectedTrials.length} 条 · 当前来源可操作 {sourceTrials.length} 条
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!writable || selectedTrials.length === 0 || containsProtected || loading}
+            onClick={() => onAction("trash", selectedTrials)}
+            className="h-9 rounded border border-amber-300 px-3 text-sm font-medium text-amber-800 disabled:opacity-40"
+            title={containsProtected ? "所选内容包含受保护数据" : "将所选实验记录移入回收站"}
+          >
+            移入回收站
+          </button>
+          <button
+            type="button"
+            disabled={!writable || selectedTrials.length === 0 || loading}
+            onClick={() => onAction("restore", selectedTrials)}
+            className="h-9 rounded border border-zinc-300 px-3 text-sm font-medium text-zinc-700 disabled:opacity-40"
+          >
+            恢复
+          </button>
+          <button
+            type="button"
+            disabled={!writable || !allSelectedTrashed || containsProtected || loading}
+            onClick={() => onAction("purge", selectedTrials)}
+            className="h-9 rounded bg-rose-700 px-3 text-sm font-medium text-white disabled:opacity-40"
+            title={!allSelectedTrashed ? "永久删除前请先将所选记录移入回收站" : "永久删除所选实验记录"}
+          >
+            永久删除
+          </button>
+          <button
+            type="button"
+            disabled={selectedTrials.length === 0 || loading}
+            onClick={() => onSelectionChange(new Set())}
+            className="h-9 px-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 disabled:opacity-40"
+          >
+            取消选择
+          </button>
+        </div>
+      </div>
+      {source === "online" && !onlineWritable && (
+        <p className="mb-3 border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          必须先成功同步线上实时数据；显示缓存时禁止修改线上记录。
+        </p>
+      )}
       <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
-        <table className="w-full min-w-[1200px] text-left text-xs">
+        <table className="w-full min-w-[1260px] text-left text-xs">
           <thead className="bg-zinc-50 text-zinc-500">
             <tr>
+              <th className="w-12 px-3 py-3 font-medium">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  disabled={!writable || sourceTrials.length === 0 || loading}
+                  onChange={toggleAllVisible}
+                  aria-label="选择当前来源的全部实验记录"
+                />
+              </th>
               <th className="px-3 py-3 font-medium">来源</th>
               <th className="px-3 py-3 font-medium">时间</th>
               <th className="px-3 py-3 font-medium">参与者</th>
@@ -1198,8 +1301,27 @@ function TrialsView({
             </tr>
           </thead>
           <tbody>
-            {trials.map((trial) => (
-              <tr key={trial.id} className="border-t border-zinc-100 text-zinc-700 hover:bg-zinc-50">
+            {trials.map((trial) => {
+              const sourceTrial = sourceTrialById.get(trial.id);
+              const available = Boolean(sourceTrial);
+              const sourceProtected = sourceTrial?.annotation.protected ?? false;
+              const sourceTrashed = sourceTrial?.trashed ?? false;
+              return (
+              <tr key={trial.id} className={`border-t border-zinc-100 text-zinc-700 hover:bg-zinc-50 ${available ? "" : "opacity-55"}`}>
+                <td className="px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(trial.id)}
+                    disabled={!writable || !available || loading}
+                    onChange={(event) => {
+                      const next = new Set(selectedIds);
+                      if (event.target.checked) next.add(trial.id);
+                      else next.delete(trial.id);
+                      onSelectionChange(next);
+                    }}
+                    aria-label={`选择 ${trial.participantId} 的实验记录`}
+                  />
+                </td>
                 <td className="px-3 py-3"><DataOriginBadges origins={trial.dataOrigins} /></td>
                 <td className="whitespace-nowrap px-3 py-3">{formatDate(trial.createdAt)}</td>
                 <td className="px-3 py-3 font-mono text-[11px]" title={trial.participantId}>{shortId(trial.participantId)}</td>
@@ -1230,16 +1352,32 @@ function TrialsView({
                   )}
                 </td>
                 <td className="px-3 py-3 text-right">
-                  <button
-                    type="button"
-                    onClick={() => onSelect(trial)}
-                    className="rounded border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:border-teal-500 hover:text-teal-700"
-                  >
-                    查看
-                  </button>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onSelect(trial)}
+                      className="rounded border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:border-teal-500 hover:text-teal-700"
+                    >
+                      查看
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!writable || !sourceTrial || sourceProtected || loading}
+                      onClick={() => sourceTrial && onAction(sourceTrashed ? "restore" : "trash", [sourceTrial])}
+                      className={`rounded border px-3 py-1.5 font-medium disabled:opacity-40 ${
+                        sourceTrashed
+                          ? "border-zinc-300 text-zinc-700 hover:border-teal-500 hover:text-teal-700"
+                          : "border-amber-300 text-amber-800 hover:border-amber-500"
+                      }`}
+                      title={sourceProtected ? "受保护数据不能删除" : sourceTrashed ? "恢复这条记录" : "将这条记录移入回收站"}
+                    >
+                      {sourceTrashed ? "恢复" : "删除"}
+                    </button>
+                  </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {trials.length === 0 && (
@@ -1555,6 +1693,8 @@ function QualityView({
   );
 }
 
+type ManagementSource = "local" | "online";
+
 type ManagementTarget = {
   entityType: "study_session" | "trial";
   entityId: string;
@@ -1840,6 +1980,45 @@ function PurgeDialog({
   );
 }
 
+function TrashDialog({
+  source,
+  trials,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  source: ManagementSource;
+  trials: ResearchTrialRecord[];
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <section role="dialog" aria-modal="true" aria-label="移入回收站确认" className="w-full max-w-lg rounded-md bg-white p-5 shadow-2xl">
+        <h2 className="text-xl font-semibold text-zinc-900">移入回收站</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-600">
+          将从{source === "local" ? "本地数据库" : "线上 Supabase"}隐藏 {trials.length} 条实验记录。此操作不会立即物理删除，可以在“回收站”筛选中恢复。
+        </p>
+        <div className="mt-4 max-h-56 overflow-y-auto rounded border border-zinc-200">
+          {trials.slice(0, 20).map((trial) => (
+            <div key={trial.id} className="grid grid-cols-[110px_minmax(0,1fr)_auto] gap-3 border-b border-zinc-100 px-3 py-2 text-xs last:border-b-0">
+              <span className="font-mono text-zinc-500">{shortId(trial.participantId)}</span>
+              <span className="truncate font-medium text-zinc-800" title={trial.musicTitle}>{trial.musicTitle}</span>
+              <span className="whitespace-nowrap text-zinc-500">{formatDate(trial.createdAt)}</span>
+            </div>
+          ))}
+          {trials.length > 20 && <p className="px-3 py-2 text-xs text-zinc-500">另有 {trials.length - 20} 条记录</p>}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} disabled={loading} className="rounded border border-zinc-300 px-4 py-2 text-sm disabled:opacity-40">取消</button>
+          <button type="button" onClick={onConfirm} disabled={loading} className="rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">确认移入回收站</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function ResearchDashboardClient({
   initialData,
   remoteSyncEnabled,
@@ -1869,8 +2048,17 @@ export default function ResearchDashboardClient({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const autoSyncAttemptedRef = useRef(false);
   const [remoteTransport, setRemoteTransport] = useState<"live" | "cache" | null>(null);
-  const [managementSource, setManagementSource] = useState<"local" | "online">("local");
+  const [managementSource, setManagementSource] = useState<ManagementSource>("local");
   const [managementSelection, setManagementSelection] = useState<Set<string>>(new Set());
+  const [trialSelection, setTrialSelection] = useState<Set<string>>(new Set());
+  const [trashDialog, setTrashDialog] = useState<{
+    source: ManagementSource;
+    trials: ResearchTrialRecord[];
+  } | null>(null);
+  const [lastTrash, setLastTrash] = useState<{
+    source: ManagementSource;
+    targets: ManagementTarget[];
+  } | null>(null);
   const [managementClassification, setManagementClassification] = useState<ResearchClassification>("unclassified");
   const [managementCohort, setManagementCohort] = useState("");
   const [managementProtected, setManagementProtected] = useState(false);
@@ -1883,6 +2071,8 @@ export default function ResearchDashboardClient({
     warnings: string[];
   } | null>(null);
   const [purgeConfirmation, setPurgeConfirmation] = useState("");
+  const [purgeSource, setPurgeSource] = useState<ManagementSource>("local");
+  const [purgeTargets, setPurgeTargets] = useState<ManagementTarget[]>([]);
 
   const filteredTrials = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -2164,53 +2354,117 @@ export default function ResearchDashboardClient({
     await refreshDatabase();
   };
 
-  const runManagementAction = async (action: "annotate" | "trash" | "restore" | "purge") => {
-    if (managementTargets.length === 0) return;
+  const requestPurge = async (source: ManagementSource, targets: ManagementTarget[]) => {
+    if (targets.length === 0) return;
     setLoading(true);
     setMessage("");
     try {
-      if (action === "purge") {
-        const response = await fetch("/api/research/manage", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "preview", source: managementSource, targets: managementTargets }),
-        });
-        const result = await response.json() as { plan?: typeof purgePlan; error?: string };
-        if (!response.ok || !result.plan) throw new Error(result.error || "无法生成删除预览");
-        setPurgePlan(result.plan);
-        setPurgeConfirmation("");
-        return;
-      }
       const response = await fetch("/api/research/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action,
-          source: managementSource,
-          targets: managementTargets,
-          annotation: action === "annotate" ? {
-            classification: managementClassification,
-            cohortLabel: managementCohort,
-            protected: managementProtected,
-            excludedFromAnalysis: managementExcluded,
-            note: managementNote,
-          } : undefined,
-        }),
+        body: JSON.stringify({ action: "preview", source, targets }),
       });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "数据管理操作失败");
-      setManagementSelection(new Set());
-      await refreshManagementSource(managementSource);
-      setMessage(action === "annotate" ? "分类与保护设置已保存" : action === "trash" ? "所选数据已移入回收站" : "所选数据已恢复");
+      const result = await response.json() as { plan?: typeof purgePlan; error?: string };
+      if (!response.ok || !result.plan) throw new Error(result.error || "无法生成删除预览");
+      setPurgePlan(result.plan);
+      setPurgeSource(source);
+      setPurgeTargets(targets);
+      setPurgeConfirmation("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "数据管理操作失败");
+      setMessage(error instanceof Error ? error.message : "无法生成删除预览");
     } finally {
       setLoading(false);
     }
   };
 
+  const mutateResearchTargets = async (
+    action: "annotate" | "trash" | "restore",
+    source: ManagementSource,
+    targets: ManagementTarget[],
+    annotation?: {
+      classification: ResearchClassification;
+      cohortLabel: string;
+      protected: boolean;
+      excludedFromAnalysis: boolean;
+      note: string;
+    }
+  ): Promise<boolean> => {
+    if (targets.length === 0) return false;
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/research/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          source,
+          targets,
+          annotation,
+        }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "数据管理操作失败");
+      setManagementSelection(new Set());
+      setTrialSelection(new Set());
+      if (action === "trash") setLastTrash({ source, targets });
+      if (action === "restore") setLastTrash(null);
+      await refreshManagementSource(source);
+      setMessage(action === "annotate"
+        ? "分类与保护设置已保存"
+        : action === "trash"
+          ? `已将 ${targets.length} 条实验记录移入回收站`
+          : `已恢复 ${targets.length} 条实验记录`);
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "数据管理操作失败");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runManagementAction = async (action: "annotate" | "trash" | "restore" | "purge") => {
+    if (managementTargets.length === 0) return;
+    if (action === "purge") {
+      await requestPurge(managementSource, managementTargets);
+      return;
+    }
+    await mutateResearchTargets(
+      action,
+      managementSource,
+      managementTargets,
+      action === "annotate" ? {
+        classification: managementClassification,
+        cohortLabel: managementCohort,
+        protected: managementProtected,
+        excludedFromAnalysis: managementExcluded,
+        note: managementNote,
+      } : undefined
+    );
+  };
+
+  const runTrialAction = async (
+    action: "trash" | "restore" | "purge",
+    trials: ResearchTrialRecord[]
+  ) => {
+    const targets = trials.map((trial) => ({
+      entityType: "trial" as const,
+      entityId: trial.id,
+    }));
+    if (action === "trash") {
+      setTrashDialog({ source: managementSource, trials });
+      return;
+    }
+    if (action === "purge") {
+      await requestPurge(managementSource, targets);
+      return;
+    }
+    await mutateResearchTargets("restore", managementSource, targets);
+  };
+
   const confirmPurge = async () => {
-    if (!purgePlan || managementTargets.length === 0) return;
+    if (!purgePlan || purgeTargets.length === 0) return;
     setLoading(true);
     setMessage("");
     try {
@@ -2219,8 +2473,8 @@ export default function ResearchDashboardClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "purge",
-          source: managementSource,
-          targets: managementTargets,
+          source: purgeSource,
+          targets: purgeTargets,
           confirmation: purgeConfirmation,
         }),
       });
@@ -2228,8 +2482,11 @@ export default function ResearchDashboardClient({
       if (!response.ok) throw new Error(result.error || "永久删除失败");
       setPurgePlan(null);
       setPurgeConfirmation("");
+      setPurgeTargets([]);
       setManagementSelection(new Set());
-      await refreshManagementSource(managementSource);
+      setTrialSelection(new Set());
+      setLastTrash(null);
+      await refreshManagementSource(purgeSource);
       setMessage(result.result?.backupRef
         ? `永久删除完成，备份：${result.result.backupRef}`
         : "永久删除完成，操作已写入审计日志");
@@ -2333,7 +2590,18 @@ export default function ResearchDashboardClient({
             本地 {originCounts.local} · 线上 {originCounts.online}
             {originCounts.snapshot > 0 && <> · 快照 {originCounts.snapshot}</>}
           </p>
-          <p>{isDragging ? "松开即可载入 JSON 快照" : message || "可将实验导出 JSON 拖到此处"}</p>
+          <div className="flex items-center gap-3">
+            <p>{isDragging ? "松开即可载入 JSON 快照" : message || "可将实验导出 JSON 拖到此处"}</p>
+            {lastTrash && !loading && (
+              <button
+                type="button"
+                onClick={() => void mutateResearchTargets("restore", lastTrash.source, lastTrash.targets)}
+                className="font-semibold text-teal-700 hover:underline"
+              >
+                撤销上次删除
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -2520,7 +2788,23 @@ export default function ResearchDashboardClient({
               currentProtocolVersion={dataset.currentProtocolVersion}
             />
           )}
-          {view === "trials" && <TrialsView trials={filteredTrials} onSelect={setSelectedTrial} />}
+          {view === "trials" && (
+            <TrialsView
+              trials={filteredTrials}
+              sourceRecords={managementDataset?.trials || []}
+              onSelect={setSelectedTrial}
+              selectedIds={trialSelection}
+              source={managementSource}
+              onlineWritable={remoteTransport === "live"}
+              loading={loading}
+              onSourceChange={(source) => {
+                setManagementSource(source);
+                setTrialSelection(new Set());
+              }}
+              onSelectionChange={setTrialSelection}
+              onAction={(action, trials) => void runTrialAction(action, trials)}
+            />
+          )}
           {view === "questionnaires" && (
             <QuestionnairesView
               trials={filteredTrials}
@@ -2546,6 +2830,7 @@ export default function ResearchDashboardClient({
               onSourceChange={(source) => {
                 setManagementSource(source);
                 setManagementSelection(new Set());
+                setTrialSelection(new Set());
               }}
               onSelectionChange={(key, checked) => setManagementSelection((current) => {
                 const next = new Set(current);
@@ -2586,15 +2871,32 @@ export default function ResearchDashboardClient({
       {selectedArtwork && (
         <ArtworkDrawer artwork={selectedArtwork} onClose={() => setSelectedArtwork(null)} />
       )}
+      {trashDialog && (
+        <TrashDialog
+          source={trashDialog.source}
+          trials={trashDialog.trials}
+          loading={loading}
+          onCancel={() => setTrashDialog(null)}
+          onConfirm={() => void (async () => {
+            const targets = trashDialog.trials.map((trial) => ({
+              entityType: "trial" as const,
+              entityId: trial.id,
+            }));
+            const completed = await mutateResearchTargets("trash", trashDialog.source, targets);
+            if (completed) setTrashDialog(null);
+          })()}
+        />
+      )}
       {purgePlan && (
         <PurgeDialog
           plan={purgePlan}
-          targetCount={managementTargets.length}
+          targetCount={purgeTargets.length}
           confirmation={purgeConfirmation}
           onConfirmationChange={setPurgeConfirmation}
           onCancel={() => {
             setPurgePlan(null);
             setPurgeConfirmation("");
+            setPurgeTargets([]);
           }}
           onConfirm={() => void confirmPurge()}
           loading={loading}

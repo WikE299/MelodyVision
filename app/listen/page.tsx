@@ -84,6 +84,7 @@ const COPY = {
     hostListening: "先听音乐家的回应。全部听完后，再轮到你补充画面。",
     hostWriting: "轮到你了，请回答下面的问题。",
     hostReady: "画面已经聚拢，可以开始生成。",
+    hostFinalChoice: "音乐家的回应已经听完。你可以再补充画面，也可以直接生成。",
     generateHint: "先留下你自己的感受，音乐家才会沿着它继续听。",
     inputNeedsDetail: "再写下一点属于你自己的感受或画面。",
     userNoteFailed: "这句话没有送达，请稍后重试。",
@@ -122,7 +123,11 @@ const COPY = {
     stageOpening: "先从你的感受开始",
     stageExploring: "沿着你的画面继续",
     stageListening: "听音乐家的回应",
+    stageFinalChoice: "补充或生成",
     stageReady: "共同画面已经聚拢",
+    finalSupplementPlaceholder: "还想补充的话，写在这里",
+    saveSupplement: "补充这句",
+    directGenerate: "直接生成 →",
     generate: "生成画作 →",
     generating: "正在把共同听见的画面聚拢成画作",
     generationStages: ["锁定共同画面", "编排视觉提示", "生成并保存画作"],
@@ -166,6 +171,7 @@ const COPY = {
     hostListening: "Listen to the musicians first. You will add to the image after everyone responds.",
     hostWriting: "Your turn. Please answer the question below.",
     hostReady: "The image has converged and is ready to generate.",
+    hostFinalChoice: "You have heard every response. Add one final note, or generate the artwork now.",
     generateHint: "Leave your own first impression, then the musicians will listen along it.",
     inputNeedsDetail: "Add a little of your own feeling or image.",
     userNoteFailed: "Your note did not send. Please try again.",
@@ -204,7 +210,11 @@ const COPY = {
     stageOpening: "Begin with your own impression",
     stageExploring: "Continue along your image",
     stageListening: "Hear the musicians respond",
+    stageFinalChoice: "Add or generate",
     stageReady: "The shared image has converged",
+    finalSupplementPlaceholder: "Add one last detail if you wish",
+    saveSupplement: "Add This Note",
+    directGenerate: "Generate Now →",
     generate: "Generate Artwork →",
     generating: "Gathering what you heard together into an artwork",
     generationStages: ["Locking the shared image", "Composing the visual direction", "Generating and saving"],
@@ -906,6 +916,7 @@ export default function ListenPage() {
   const visualBriefRefRef = useRef(initialState.conversationState?.visualBriefRef || null);
   const trialRecoveryRef = useRef<Promise<StudyTrial | null> | null>(null);
   const reflectiveTimerRef = useRef<number | null>(null);
+  const reflectiveSupplementEventRef = useRef("");
   const isReflective = conversationState?.condition === "single_agent";
   const isFormalStudy = Boolean(initialState.studyTrial?.studySessionId);
 
@@ -1286,6 +1297,14 @@ export default function ListenPage() {
       setUserNoteError(copy.inputNeedsDetail);
       return;
     }
+    const submittingFinalSupplement = Boolean(
+      isReflective &&
+      conversationState.completedUserRounds === 1 &&
+      hasAllSelectedMusicianComments(
+        conversationState.selectedMusicianIds,
+        allCommentsRef.current
+      )
+    );
 
     userSubmissionInFlightRef.current = true;
     setSubmittingUserNote(true);
@@ -1322,6 +1341,15 @@ export default function ListenPage() {
         completedRound: (data.state as ConversationState).completedUserRounds,
         characterCount: content.length,
       });
+      if (submittingFinalSupplement) {
+        recordExperimentEvent("final-supplement-submitted", "/listen", {
+          trialId: conversationState.trialId,
+          condition: conversationState.condition,
+          conversationId: conversationState.id,
+          completedRound: (data.state as ConversationState).completedUserRounds,
+          characterCount: content.length,
+        });
+      }
       if (data.facilitatorPlan) {
         setFacilitatorPlan(data.facilitatorPlan as FacilitatorPlan);
         sessionStorage.setItem("facilitatorPlan", JSON.stringify(data.facilitatorPlan));
@@ -1424,6 +1452,21 @@ export default function ListenPage() {
     ) {
       setGenerationError(copy.hearAllComments);
       return;
+    }
+    if (
+      isReflective &&
+      generationState.completedUserRounds === 1 &&
+      hasAllSelectedMusicianComments(
+        generationState.selectedMusicianIds,
+        allCommentsRef.current
+      )
+    ) {
+      recordExperimentEvent("final-supplement-skipped", "/listen", {
+        trialId: generationState.trialId,
+        condition: generationState.condition,
+        conversationId: generationState.id,
+        completedRound: generationState.completedUserRounds,
+      });
     }
     cancelActiveTurn();
     setGenerating(true);
@@ -1627,7 +1670,16 @@ export default function ListenPage() {
     selectedChars.map((character) => character.id),
     allComments
   );
-  const reflectiveCanGenerate = generationReady && reflectiveCommentsReady;
+  const reflectiveSupplementAvailable = Boolean(
+    isReflective &&
+    reflectiveCommentsReady &&
+    conversationState?.completedUserRounds === 1
+  );
+  const reflectiveCanGenerate = Boolean(
+    isReflective &&
+    reflectiveCommentsReady &&
+    (conversationState?.completedUserRounds || 0) >= 1
+  );
   const reflectiveAwaitingComments = Boolean(
     isReflective && hasUserContribution && !reflectiveCommentsReady
   );
@@ -1666,8 +1718,10 @@ export default function ListenPage() {
     !submittingUserNote
   );
   const openingUserTurn = !hasUserContribution && userTurnActive;
-  const hostControlText = reflectiveAwaitingComments
-    ? copy.hostListening
+  const hostControlText = reflectiveSupplementAvailable
+    ? copy.hostFinalChoice
+    : reflectiveAwaitingComments
+      ? copy.hostListening
     : generationReady
       ? copy.hostReady
     : musicianTurnActive
@@ -1675,8 +1729,10 @@ export default function ListenPage() {
       : hasUserContribution
         ? facilitatorPlan?.userInvitation || copy.hostWriting
         : copy.hostOpening;
-  const interactionStageLabel = reflectiveAwaitingComments
-    ? copy.stageListening
+  const interactionStageLabel = reflectiveSupplementAvailable
+    ? copy.stageFinalChoice
+    : reflectiveAwaitingComments
+      ? copy.stageListening
     : generationReady
       ? copy.stageReady
     : hasUserContribution
@@ -1694,6 +1750,24 @@ export default function ListenPage() {
     copy.generationStages.length - 1,
     Math.floor((Math.max(generationProgress, 1) / 100) * copy.generationStages.length)
   );
+
+  useEffect(() => {
+    const conversationId = conversationState?.id || "";
+    if (!reflectiveSupplementAvailable || !conversationId) return;
+    const eventKey = `reflective-supplement-offered:${conversationId}`;
+    if (
+      reflectiveSupplementEventRef.current === eventKey ||
+      sessionStorage.getItem(eventKey) === "1"
+    ) return;
+    reflectiveSupplementEventRef.current = eventKey;
+    sessionStorage.setItem(eventKey, "1");
+    recordExperimentEvent("final-supplement-offered", "/listen", {
+      trialId: conversationState?.trialId,
+      condition: conversationState?.condition,
+      conversationId,
+      completedRound: conversationState?.completedUserRounds,
+    });
+  }, [conversationState, reflectiveSupplementAvailable]);
 
   if (!mounted) return null;
 
@@ -1982,7 +2056,9 @@ export default function ListenPage() {
                   ) : (
                     <p className="mt-1 text-xs font-medium leading-relaxed text-[#e5c39e]">
                       {hasUserContribution
-                        ? reflectiveAwaitingComments
+                        ? reflectiveSupplementAvailable
+                          ? copy.hostFinalChoice
+                          : reflectiveAwaitingComments
                           ? copy.hearAllComments
                           : generationReady
                             ? facilitatorPlan?.stageSubtitle
@@ -1996,9 +2072,9 @@ export default function ListenPage() {
                     {copy.analyzingEvidence}
                   </p>
                 )}
-                {!generationReady ? (
+                {!generationReady || reflectiveSupplementAvailable ? (
                   <>
-                    {!openingUserTurn && <div className="mt-2">
+                    {!openingUserTurn && !reflectiveSupplementAvailable && <div className="mt-2">
                       <button
                         type="button"
                         onClick={() => setShowInspiration((current) => !current)}
@@ -2025,7 +2101,7 @@ export default function ListenPage() {
                           void handleSubmitUserNote();
                         }}
                         disabled={musicianTurnActive || submittingUserNote}
-                        placeholder={copy.feelingPlaceholder}
+                        placeholder={reflectiveSupplementAvailable ? copy.finalSupplementPlaceholder : copy.feelingPlaceholder}
                         rows={1}
                         aria-keyshortcuts="Enter"
                         className={`${openingUserTurn ? "h-10 leading-10" : "h-7 leading-7"} min-w-0 flex-1 resize-none bg-transparent text-sm text-[#ffe3bd] outline-none placeholder:text-[#b79a7d] disabled:opacity-45`}
@@ -2034,6 +2110,19 @@ export default function ListenPage() {
                         ↑
                       </button>
                     </div>
+                    {reflectiveSupplementAvailable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (userNote.trim()) void handleSubmitUserNote();
+                          else void handleContinue();
+                        }}
+                        disabled={generationActionBlocked}
+                        className="mt-2 flex h-10 w-full items-center justify-center border border-[#ffd083]/66 bg-[#3a2d35]/88 text-sm font-semibold text-[#ffe6c0] transition hover:border-[#ffd083] hover:bg-[#513947] disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        {userNote.trim() ? copy.saveSupplement : copy.directGenerate}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <>

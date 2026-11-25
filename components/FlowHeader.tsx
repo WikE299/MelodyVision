@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useLanguage } from "@/lib/i18n";
 
 type FlowStep = {
@@ -62,12 +63,14 @@ export default function FlowHeader({
   brandLabel = "MelodyVision",
   compact = false,
   studyStage,
+  utilityLink,
 }: {
   activeStep: 1 | 2 | 3 | 4;
   variant?: "dark" | "light";
   brandLabel?: string;
   compact?: boolean;
   studyStage?: StudyStage;
+  utilityLink?: { href: string; label: string };
 }) {
   const isDark = variant === "dark";
   const { language, toggleLanguage } = useLanguage();
@@ -127,18 +130,36 @@ export default function FlowHeader({
         })}
       </nav>
 
-      <button
-        type="button"
-        onClick={toggleLanguage}
-        className={`shrink-0 rounded-full border px-3 text-sm font-semibold transition 2xl:px-4 ${compact ? "py-1.5" : "py-2"} ${
-          isDark
-            ? "border-[#b18b72]/50 bg-white/5 text-[#ffe3bd] hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
-            : "border-[#c8b7a8] bg-white text-[#5d5060] hover:border-[#9f6f45]"
-        }`}
-        aria-label={language === "zh" ? "Switch to English" : "切换到中文"}
-      >
-        {language === "zh" ? "ZH / EN" : "EN / ZH"}
-      </button>
+      <div className="flex shrink-0 items-center gap-2">
+        {utilityLink && (
+          <Link
+            href={utilityLink.href}
+            className={`hidden items-center gap-2 border px-3 text-xs font-semibold transition sm:flex ${compact ? "py-2" : "py-2.5"} ${
+              isDark
+                ? "border-[#b18b72]/45 bg-[#241f29]/70 text-[#f4d6aa] hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
+                : "border-[#c8b7a8] bg-white text-[#5d5060] hover:border-[#9f6f45]"
+            }`}
+            title="打开独立的图片生成音乐测试工具"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+              <path d="M3 13v-2m4 6V7m5 13V4m5 13V7m4 6v-2" strokeLinecap="round" />
+            </svg>
+            {utilityLink.label}
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={toggleLanguage}
+          className={`rounded-full border px-3 text-sm font-semibold transition 2xl:px-4 ${compact ? "py-1.5" : "py-2"} ${
+            isDark
+              ? "border-[#b18b72]/50 bg-white/5 text-[#ffe3bd] hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
+              : "border-[#c8b7a8] bg-white text-[#5d5060] hover:border-[#9f6f45]"
+          }`}
+          aria-label={language === "zh" ? "Switch to English" : "切换到中文"}
+        >
+          {language === "zh" ? "ZH / EN" : "EN / ZH"}
+        </button>
+      </div>
     </header>
   );
 }

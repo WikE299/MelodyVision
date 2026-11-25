@@ -47,7 +47,21 @@ export interface PromptDirectorInput {
   };
   musicProfile: PromptDirectorMusicProfile | null;
   visualPreset: VisualPresetPrompt;
+  humanPresence: HumanPresencePolicy;
   coCreation?: PromptDirectorCoCreationContext;
+}
+
+export type HumanPresenceMode = "none" | "implied" | "visible";
+export type HumanPresenceCount = "single" | "pair" | "group";
+
+export interface HumanPresencePolicy {
+  mode: HumanPresenceMode;
+  count: HumanPresenceCount;
+  evidenceSourceIds: string[];
+  evidenceExcerpts: string[];
+  reason: string;
+  framing: string;
+  riskControls: string[];
 }
 
 export interface PromptDirectorMusicProfile {
@@ -92,6 +106,176 @@ export function getPromptDirectorUserSourceIds(
       .filter((source) => source.kind === "user-message")
       .map((source) => source.sourceId)
   )];
+}
+
+const HUMAN_REFERENCE_PATTERN = /(?:人物|人影|身影|背影|剪影|人群|一个人|两个人|几个人|一位(?:女孩|男孩|女性|男性|老人|少女|青年)|女孩|男孩|女人|男人|老人|孩子|儿童|母亲|父亲|母女|父子|父女|母子|情侣|夫妻|舞者|行人|旅人|面孔|人脸|双手|\bperson\b|\bpeople\b|\bhuman\b|\bfigure\b|\bwoman\b|\bman\b|\bgirl\b|\bboy\b|\bchild(?:ren)?\b|\bdancer\b|\bcouple\b|\bcrowd\b|\bsilhouette\b|\bportrait\b|\bface\b)/i;
+const HUMAN_EXCLUSION_PATTERN = /(?:不要|不想|不需要|避免|排除|禁止|不能|没有|无)(?:让|有|出现|加入|添加|画出|展示)?[^。；，,.!?]{0,16}(?:人物|人影|身影|背影|剪影|人群|一个人|人脸|面孔|女孩|男孩|女人|男人|孩子|人(?!工|声|性|机))|(?:no|without|avoid|exclude|remove|do not (?:show|include|add))[^.!?,;]{0,24}(?:people|person|human|figure|face|portrait|character|crowd)/i;
+const HUMAN_IMPLIED_PATTERN = /(?:人影|身影|背影|剪影|模糊的人|远处的?人|人物轮廓|distant (?:human )?figure|back[- ]view|from behind|silhouette|shadowy figure|human outline)/i;
+const HUMAN_EXPLICIT_FACE_PATTERN = /(?:清晰(?:的)?(?:人脸|面孔|五官)|正脸|面部特写|肖像|直视镜头|close[- ]up (?:face|portrait)|clear face|facing (?:the )?camera|frontal portrait)/i;
+const HUMAN_VISIBLE_PATTERN = /(?:人物|人群|一个人(?!影)|两个人|几个人|一位(?:女孩|男孩|女性|男性|老人|少女|青年)|女孩|男孩|女人|男人|老人|孩子|儿童|母亲|父亲|母女|父子|父女|母子|情侣|夫妻|舞者|行人|旅人|\bperson\b|\bpeople\b|\bhuman\b|\bwoman\b|\bman\b|\bgirl\b|\bboy\b|\bchild(?:ren)?\b|\bdancer\b|\bcouple\b|\bcrowd\b|\bportrait\b)/i;
+const HUMAN_PAIR_PATTERN = /(?:两个人|两人|情侣|夫妻|母女|父子|一对|\btwo (?:people|figures|persons)\b|\bcouple\b|\bpair\b)/i;
+const HUMAN_GROUP_PATTERN = /(?:人群|众人|许多人|一群人|多人|\bcrowd\b|\bgroup of people\b|\bmany people\b)/i;
+
+function hasHumanReference(value: string): boolean {
+  return HUMAN_REFERENCE_PATTERN.test(value);
+}
+
+function classifyHumanText(value: string): HumanPresenceMode | null {
+  if (!value.trim() || HUMAN_EXCLUSION_PATTERN.test(value)) return null;
+  if (HUMAN_EXPLICIT_FACE_PATTERN.test(value)) return "visible";
+  if (HUMAN_IMPLIED_PATTERN.test(value)) return "implied";
+  if (HUMAN_VISIBLE_PATTERN.test(value)) return "visible";
+  return null;
+}
+
+function extractLatestHumanDirective(value: string): {
+  excluded: boolean;
+  mode: HumanPresenceMode | null;
+} | null {
+  let latest: { excluded: boolean; mode: HumanPresenceMode | null } | null = null;
+  const clauses = value.split(/(?:[。；，,.!?\n]+|但是|不过|然而|改成|还是)/).filter(Boolean);
+  for (const clause of clauses) {
+    const excluded = HUMAN_EXCLUSION_PATTERN.test(clause);
+    const mode = classifyHumanText(clause);
+    if (excluded || mode) latest = { excluded, mode };
+  }
+  return latest;
+}
+
+function inferHumanCount(value: string): HumanPresenceCount {
+  if (HUMAN_GROUP_PATTERN.test(value)) return "group";
+  if (HUMAN_PAIR_PATTERN.test(value)) return "pair";
+  return "single";
+}
+
+function resolveFieldUserSourceIds(
+  fieldSourceIds: string[],
+  coCreation?: PromptDirectorCoCreationContext
+): string[] {
+  if (!coCreation) return [];
+  const sources = new Map(coCreation.sources.map((source) => [source.id, source]));
+  return [...new Set(fieldSourceIds
+    .map((sourceId) => sources.get(sourceId))
+    .filter((source) => source?.kind === "user-message")
+    .map((source) => source!.sourceId))];
+}
+
+export function inferHumanPresencePolicy(params: {
+  generationRole: GenerationRole;
+  userNote?: string;
+  coCreation?: PromptDirectorCoCreationContext;
+}): HumanPresencePolicy {
+  const none = (
+    reason: string,
+    evidenceSourceIds: string[] = [],
+    evidenceExcerpts: string[] = []
+  ): HumanPresencePolicy => ({
+    mode: "none",
+    count: "single",
+    evidenceSourceIds,
+    evidenceExcerpts,
+    reason,
+    framing: "environment-only",
+    riskControls: ["Do not introduce people without confirmed user evidence."],
+  });
+
+  if (params.generationRole === "direct_baseline") {
+    return none("Direct baseline has no user-authorized human evidence.");
+  }
+
+  const coCreation = params.coCreation;
+  const mustAvoid = coCreation?.visualBrief.fields.find((field) => field.field === "mustAvoid");
+  const mustAvoidText = mustAvoid
+    ? (Array.isArray(mustAvoid.value) ? mustAvoid.value.join(" ") : mustAvoid.value)
+    : "";
+  if (mustAvoidText && hasHumanReference(mustAvoidText)) {
+    return none(
+      "The user-backed VisualBrief explicitly excludes human presence.",
+      resolveFieldUserSourceIds(mustAvoid?.sourceIds || [], coCreation),
+      [mustAvoidText]
+    );
+  }
+
+  const rawUserSources = new Map<string, string>();
+  for (const source of coCreation?.sources || []) {
+    if (source.kind === "user-message") rawUserSources.set(source.sourceId, source.excerpt);
+  }
+  if (rawUserSources.size === 0 && params.userNote?.trim()) {
+    params.userNote.split(/\n+/).filter(Boolean).forEach((excerpt, index) => {
+      rawUserSources.set(`user-note-${index + 1}`, excerpt.trim());
+    });
+  }
+
+  const directives = [...rawUserSources.entries()]
+    .map(([sourceId, excerpt]) => {
+      const directive = extractLatestHumanDirective(excerpt);
+      return {
+        sourceId,
+        excerpt,
+        excluded: directive?.excluded || false,
+        mode: directive?.mode || null,
+      };
+    })
+    .filter((item) => item.excluded || item.mode);
+  const latestDirective = directives[directives.length - 1];
+
+  if (!latestDirective) {
+    return none("No explicit user-authored human presence was found.");
+  }
+  if (latestDirective.excluded || !latestDirective.mode) {
+    return none(
+      "The user's latest human-related instruction excludes people.",
+      [latestDirective.sourceId],
+      [latestDirective.excerpt]
+    );
+  }
+
+  const relevant = directives.filter((item) => item.mode && !item.excluded);
+  const evidenceSourceIds = relevant.map((item) => item.sourceId);
+  const evidenceExcerpts = relevant.map((item) => item.excerpt);
+  const combinedEvidence = evidenceExcerpts.join(" ");
+  const mode = latestDirective.mode;
+  const count = inferHumanCount(combinedEvidence);
+
+  return {
+    mode,
+    count,
+    evidenceSourceIds,
+    evidenceExcerpts,
+    reason: mode === "implied"
+      ? "The user explicitly requested a distant, obscured, or implied human presence."
+      : "The user explicitly requested a visible human subject.",
+    framing: mode === "implied"
+      ? "distant, back-view, silhouette, or environmentally obscured"
+      : count === "group"
+        ? "wide environmental shot"
+        : "medium or wide shot unless the user explicitly requests a close portrait",
+    riskControls: mode === "implied"
+      ? ["Keep faces unreadable.", "Keep hands small, hidden, or outside the focal area.", "Avoid complex poses."]
+      : ["Use anatomically stable poses.", "Avoid unnecessary hand prominence or interlocked limbs.", "Keep the requested people count exact."],
+  };
+}
+
+export function buildHumanPresenceInstruction(policy: HumanPresencePolicy): string {
+  if (policy.mode === "none") {
+    return "Do not include people, human figures, faces, bodies, portraits, silhouettes, crowds, or characters. Human presence may be suggested only through environmental traces such as an empty chair or footprints.";
+  }
+  if (policy.mode === "implied") {
+    return `Human presence is authorized only by user evidence (${policy.evidenceSourceIds.join(", ")}). Include ${policy.count === "single" ? "one" : policy.count === "pair" ? "two" : "a small group of"} distant or obscured human ${policy.count === "single" ? "figure" : "figures"}, using ${policy.framing} framing. Keep faces unreadable, keep hands hidden or visually minor, and avoid complex poses. Do not make the figure more prominent than the user's description.`;
+  }
+  return `Visible human presence is authorized by user evidence (${policy.evidenceSourceIds.join(", ")}). Preserve the requested ${policy.count} human subject faithfully. Use ${policy.framing}; prefer natural, anatomically stable poses and avoid unnecessary hand, finger, or interlocked-limb complexity. Musician comments may refine atmosphere or pose but may not add extra people.`;
+}
+
+export function buildHumanPresenceNegativePrompt(policy: HumanPresencePolicy): string {
+  const common = ["text", "letters", "caption", "logo", "watermark", "signature", "blurry", "low quality"];
+  if (policy.mode === "none") {
+    return ["people", "human figure", "face", "portrait", "silhouette", "character", "crowd", ...common].join(", ");
+  }
+  const anatomy = ["deformed face", "deformed hands", "extra fingers", "missing fingers", "fused fingers", "malformed limbs", "extra limbs", "duplicate body", "disconnected limbs", "unnatural anatomy"];
+  if (policy.mode === "implied") {
+    return ["close-up face", "detailed hands", "complex pose", ...(policy.count === "group" ? [] : ["crowd"]), ...anatomy, ...common].join(", ");
+  }
+  return [...(policy.count === "group" ? [] : ["crowd"]), ...anatomy, ...common].join(", ");
 }
 
 export interface PromptDirectorBrief {
@@ -273,6 +457,8 @@ export function buildPromptDirectorInput(
       }
     : {};
 
+  const coCreationContext = buildPromptDirectorCoCreationContext(coCreation);
+
   return {
     generationRole,
     comments: commentSummary,
@@ -280,7 +466,12 @@ export function buildPromptDirectorInput(
     musicAnalysis: musicContext,
     musicProfile: buildPromptDirectorMusicProfile(coCreation?.musicProfile),
     visualPreset: buildVisualPresetPrompt(presets),
-    coCreation: buildPromptDirectorCoCreationContext(coCreation),
+    humanPresence: inferHumanPresencePolicy({
+      generationRole,
+      userNote,
+      coCreation: coCreationContext,
+    }),
+    coCreation: coCreationContext,
   };
 }
 
@@ -396,6 +587,8 @@ function normalizeCommentWeight(value: unknown): number {
 }
 
 export function buildPromptDirectorInstruction(input: PromptDirectorInput): string {
+  const humanPresenceInstruction = buildHumanPresenceInstruction(input.humanPresence);
+  const requiredNegativePrompt = buildHumanPresenceNegativePrompt(input.humanPresence);
   const coCreationRules = input.coCreation
     ? `
 Version 2 co-creation rules:
@@ -439,7 +632,7 @@ Hard rules:
 8. Do not mention music, comments, BPM, musicians, analysis, or prompt in finalPrompt.
 9. finalPrompt must be concrete and imageable, not abstract.
 10. Do not use names or titles from existing films, television, games, comics, characters, franchises, brands, studios, or artists in finalPrompt or any visual translation. Convert every such reference into generic drawable traits, motion, material, palette, and composition.
-11. Do not include any people, human figures, faces, bodies, portraits, silhouettes, crowds, or characters in the image.
+11. ${humanPresenceInstruction}
 12. Do not include any visible text, letters, captions, handwriting, signs, subtitles, logos, or watermarks in the image.
 13. Choose a visualDomain before writing finalPrompt. Consider objects, interiors, architecture, natural phenomena, still life, material studies, geometric space, microscopic worlds, surreal environments, machines, weather systems, or ceremonial spaces as appropriate.
 14. Do not default to mountains, rivers, mist, bamboo, moonlight, bridges, or generic tranquil landscapes unless those motifs are directly justified by the inputs.
@@ -448,7 +641,7 @@ Hard rules:
 17. finalPrompt must faithfully compose every source available for the current generationRole. If userNote is empty, userNoteTrace must say "none".
 18. If detailed audio evidence exists, at least one concrete visual decision must come from the strongest phase or a salient change.
 19. Return valid JSON only.
-20. Keep exclusions out of finalPrompt. Put forbidden subjects and visible text constraints in negativePrompt only; finalPrompt itself must not contain the words used to name those exclusions.
+20. Keep exclusions out of finalPrompt. Put forbidden subjects and visible text constraints in negativePrompt only; finalPrompt itself must not contain the words used to name those exclusions. Human terms are allowed in finalPrompt only when humanPresence.mode is implied or visible.
 
 Input:
 ${JSON.stringify(input, null, 2)}
@@ -502,7 +695,7 @@ Return this exact JSON shape:
   "mustInclude": ["specific visual requirement; include the speaker name and their visual contribution"],
   "mustAvoid": ["negative visual requirement"],
   "finalPrompt": "English image-generation prompt, 90-140 words, concrete visual description only",
-  "negativePrompt": "comma-separated English negative prompt; must include people, human figure, face, portrait, character, text, letters, caption, logo, watermark"
+  "negativePrompt": "comma-separated English negative prompt; it must include these policy-specific safeguards: ${requiredNegativePrompt}"
 }`;
 }
 
@@ -541,7 +734,7 @@ Do not remove any musician's influence.
 Keep every input comment exactly once in weightingRationale and copy comment.weight exactly.
 Do not include forbidden meta words in finalPrompt.
 Remove every film, television, game, comic, character, franchise, brand, studio, and artist name from finalPrompt and all visual translations. Preserve only generic drawable traits.
-Do not include any people or visible text in finalPrompt.`;
+Apply the exact humanPresence policy from the input. Do not add a person when mode is none, and do not remove the user-authorized person when mode is implied or visible. Never include visible text in finalPrompt.`;
 }
 
 /**

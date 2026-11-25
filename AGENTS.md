@@ -1,5 +1,5 @@
 <!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Next.js version-specific guidance
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+Before changing Next.js APIs, routing, rendering, or configuration, read the relevant installed guide in `node_modules/next/dist/docs/`. If it is unavailable, check the installed Next.js version and consult matching official documentation. Unrelated edits do not require this step. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->

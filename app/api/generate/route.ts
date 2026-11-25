@@ -4,13 +4,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   formatCompactMusicEvidence,
+  buildHumanPresenceInstruction,
+  buildHumanPresenceNegativePrompt,
   buildPromptDirectorInput,
   buildPromptDirectorInstruction,
   buildPromptDirectorRepairInstruction,
   getPromptDirectorUserSourceIds,
+  inferHumanPresencePolicy,
   sanitizeImagePromptForProvider,
   PromptDirectorBrief,
   PromptDirectorInput,
+  type HumanPresencePolicy,
 } from "@/lib/prompts/image-gen";
 import {
   callImagePromptSafetyRewrite,
@@ -103,6 +107,23 @@ interface ImageGenerationAttempt {
   error?: string;
 }
 
+interface HumanImageQualityReview {
+  status: "passed" | "failed" | "error" | "not-required";
+  model: string | null;
+  confidence: number;
+  humanPresent: boolean | null;
+  peopleCount: number | null;
+  issues: string[];
+  repairInstruction: string;
+  error?: string;
+}
+
+interface HumanImageQualityControl {
+  policy: HumanPresencePolicy;
+  regenerated: boolean;
+  reviews: HumanImageQualityReview[];
+}
+
 class ImageGenerationPipelineError extends Error {
   constructor(
     error: unknown,
@@ -134,6 +155,9 @@ function getGenerationModelConfig() {
     promptDirectorRepairTemperature: 0.35,
     promptDirectorMaxTokens: 5000,
     imageGenerationMaxAttempts: 2,
+    humanImageQaEnabled: process.env.IMAGE_HUMAN_QA_ENABLED !== "false",
+    humanImageQaModel: process.env.IMAGE_QA_MODEL || "qwen3-vl-plus",
+    humanImageQaMaxRegenerations: 1,
     promptExtend: false,
     watermark: false,
     imageCount: 1,
@@ -261,6 +285,7 @@ function buildFallbackImagePrompt(
       : "",
     userNote ? `Preserve this personal memory as the emotional core: ${userNote}.` : "",
     musicContext ? `Reflect these audio traits through composition and lighting: ${musicContext}.` : "",
+    directorInput ? buildHumanPresenceInstruction(directorInput.humanPresence) : "",
     "Compose a concrete image with a clear subject, foreground, background, color, light, texture, and emotional tension.",
     "No text, no watermark, no logo.",
   ]
@@ -327,6 +352,32 @@ function appendVisualBriefNegativeConstraints(
     .filter(Boolean)
     .filter((value, index, list) => list.indexOf(value) === index)
     .join(", ");
+}
+
+function appendHumanPresenceNegativeConstraints(
+  negativePrompt: string,
+  policy: HumanPresencePolicy
+): string {
+  const humanSuppressionTerms = new Set([
+    "people",
+    "human figure",
+    "face",
+    "portrait",
+    "silhouette",
+    "character",
+    "crowd",
+  ]);
+  const existing = negativePrompt
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value) => policy.mode === "none" || !humanSuppressionTerms.has(value.toLowerCase()));
+  const required = buildHumanPresenceNegativePrompt(policy)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return [...new Set([...existing, ...required])].join(", ");
 }
 
 function appendVisualPresetPrompt(prompt: string, presets: Record<string, unknown>): string {
@@ -503,16 +554,7 @@ function validatePromptDirectorBrief(
       errors.push(`finalPrompt contains forbidden IP terms: ${forbiddenIpTerms.join(", ")}`);
     }
 
-    const forbiddenVisualTerms = [
-      "person",
-      "people",
-      "human",
-      "figure",
-      "face",
-      "portrait",
-      "silhouette",
-      "crowd",
-      "character",
+    const forbiddenTextTerms = [
       "text",
       "letter",
       "caption",
@@ -522,11 +564,48 @@ function validatePromptDirectorBrief(
       "logo",
       "watermark",
     ];
-    const usedVisualTerms = forbiddenVisualTerms.filter((term) =>
+    const humanVisualTerms = [
+      "person",
+      "people",
+      "human",
+      "face",
+      "portrait",
+      "silhouette",
+      "crowd",
+      "character",
+      "woman",
+      "man",
+      "girl",
+      "boy",
+      "child",
+      "children",
+      "dancer",
+      "couple",
+      "traveler",
+    ];
+    const usedTextTerms = forbiddenTextTerms.filter((term) =>
       new RegExp(`\\b${term}\\b`, "i").test(promptLower)
     );
-    if (usedVisualTerms.length > 0) {
-      errors.push(`finalPrompt contains forbidden visual terms: ${usedVisualTerms.join(", ")}`);
+    if (usedTextTerms.length > 0) {
+      errors.push(`finalPrompt contains forbidden visible-text terms: ${usedTextTerms.join(", ")}`);
+    }
+    const usedHumanTerms = humanVisualTerms.filter((term) =>
+      new RegExp(`\\b${term}\\b`, "i").test(promptLower)
+    );
+    if (/\b(?:lone|distant|small|standing|seated|human|female|male|obscured) figure\b/i.test(promptLower)) {
+      usedHumanTerms.push("human figure");
+    }
+    if (input.humanPresence.mode === "none" && usedHumanTerms.length > 0) {
+      errors.push(`finalPrompt introduces unauthorized human presence: ${usedHumanTerms.join(", ")}`);
+    }
+    if (input.humanPresence.mode !== "none" && usedHumanTerms.length === 0) {
+      errors.push(`finalPrompt omits user-authorized ${input.humanPresence.mode} human presence`);
+    }
+    if (
+      input.humanPresence.mode === "implied" &&
+      /\b(?:close[- ]up|frontal portrait|detailed face|detailed hands)\b/i.test(promptLower)
+    ) {
+      errors.push("finalPrompt makes implied human presence too detailed");
     }
   }
 
@@ -536,7 +615,9 @@ function validatePromptDirectorBrief(
     warnings.push("negativePrompt is short");
   } else {
     const negativePromptLower = brief.negativePrompt.toLowerCase();
-    const requiredNegativeTerms = ["people", "face", "text", "logo", "watermark"];
+    const requiredNegativeTerms = input.humanPresence.mode === "none"
+      ? ["people", "face", "text", "logo", "watermark"]
+      : ["deformed hands", "extra fingers", "malformed limbs", "text", "logo", "watermark"];
     const missingNegativeTerms = requiredNegativeTerms.filter(
       (term) => !negativePromptLower.includes(term)
     );
@@ -910,6 +991,187 @@ async function generateImageWithRetry(prompt: string, negativePrompt?: string) {
   throw new ImageGenerationPipelineError(lastError, attemptLog, safetyRewrite);
 }
 
+function parseJsonObject(content: string): Record<string, unknown> | null {
+  const cleaned = content
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      const parsed = JSON.parse(match[0]);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function inspectGeneratedHumanImage(
+  imageUrl: string,
+  policy: HumanPresencePolicy
+): Promise<HumanImageQualityReview> {
+  const model = process.env.IMAGE_QA_MODEL || "qwen3-vl-plus";
+  if (process.env.IMAGE_HUMAN_QA_ENABLED === "false") {
+    return {
+      status: "not-required",
+      model,
+      confidence: 0,
+      humanPresent: null,
+      peopleCount: null,
+      issues: [],
+      repairInstruction: "",
+    };
+  }
+  const apiKey = process.env.DASHSCOPE_API_KEY;
+  if (!apiKey) {
+    return {
+      status: "error",
+      model,
+      confidence: 0,
+      humanPresent: null,
+      peopleCount: null,
+      issues: [],
+      repairInstruction: "",
+      error: "DASHSCOPE_API_KEY is not configured",
+    };
+  }
+
+  try {
+    const response = await fetch(
+      process.env.IMAGE_QA_API_BASE_URL ||
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.1,
+          max_tokens: 700,
+          messages: [
+            {
+              role: "system",
+              content: "You are a conservative image quality inspector. Report only obvious, visible defects. Artistic stylization is not a defect. Return JSON only.",
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image_url",
+                  image_url: { url: imageUrl, detail: "high" },
+                },
+                {
+                  type: "text",
+                  text: `Inspect the generated artwork against this human-presence policy:\n${JSON.stringify(policy)}\n\nCheck: (1) the authorized human presence exists, (2) people count is compatible with the policy, (3) no obvious malformed face, hands, fingers, limbs, duplicate body, disconnected anatomy, or impossible pose is visible, and (4) implied-mode figures remain distant or obscured. Ignore minor painterly ambiguity. Return exactly: {"passed":true,"confidence":0.0,"humanPresent":true,"peopleCount":1,"issues":[],"repairInstruction":""}. Set passed=false only for a clear policy violation or obvious anatomy defect.`,
+                },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+    const data = await response.json() as {
+      error?: { message?: string };
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    if (!response.ok) {
+      throw new Error(data.error?.message || `Image QA API failed: ${response.status}`);
+    }
+    const parsed = parseJsonObject(data.choices?.[0]?.message?.content || "");
+    if (!parsed) throw new Error("Image QA returned invalid JSON");
+    const passed = parsed.passed === true;
+    const confidence = typeof parsed.confidence === "number"
+      ? Math.max(0, Math.min(1, parsed.confidence))
+      : 0;
+    return {
+      status: passed ? "passed" : "failed",
+      model,
+      confidence,
+      humanPresent: typeof parsed.humanPresent === "boolean" ? parsed.humanPresent : null,
+      peopleCount: typeof parsed.peopleCount === "number" ? parsed.peopleCount : null,
+      issues: Array.isArray(parsed.issues)
+        ? parsed.issues.filter((item): item is string => typeof item === "string").slice(0, 8)
+        : [],
+      repairInstruction: typeof parsed.repairInstruction === "string"
+        ? parsed.repairInstruction.trim()
+        : "",
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      model,
+      confidence: 0,
+      humanPresent: null,
+      peopleCount: null,
+      issues: [],
+      repairInstruction: "",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function generateImageWithHumanQualityControl(
+  prompt: string,
+  negativePrompt: string,
+  policy: HumanPresencePolicy
+) {
+  const initial = await generateImageWithRetry(prompt, negativePrompt);
+  const qualityControl: HumanImageQualityControl = {
+    policy,
+    regenerated: false,
+    reviews: [],
+  };
+  if (policy.mode === "none") {
+    qualityControl.reviews.push({
+      status: "not-required",
+      model: null,
+      confidence: 0,
+      humanPresent: null,
+      peopleCount: null,
+      issues: [],
+      repairInstruction: "",
+    });
+    return { ...initial, qualityControl };
+  }
+
+  const initialReview = await inspectGeneratedHumanImage(initial.result.remoteImageUrl, policy);
+  qualityControl.reviews.push(initialReview);
+  if (initialReview.status !== "failed" || initialReview.confidence < 0.72) {
+    return { ...initial, qualityControl };
+  }
+
+  const repairConstraint = initialReview.repairInstruction ||
+    "Correct the human anatomy and preserve the exact requested people count. Use a calmer, more stable pose, keep hands visually simple, and move the camera slightly farther away without changing the scene, palette, or emotional meaning.";
+  const repaired = await generateImageWithRetry(
+    `${prompt} Human-figure quality correction: ${repairConstraint}`,
+    negativePrompt
+  );
+  qualityControl.regenerated = true;
+  qualityControl.reviews.push(
+    await inspectGeneratedHumanImage(repaired.result.remoteImageUrl, policy)
+  );
+
+  return {
+    ...repaired,
+    attempts: initial.attempts + repaired.attempts,
+    attemptLog: [...initial.attemptLog, ...repaired.attemptLog],
+    safetyRewrite: repaired.safetyRewrite || initial.safetyRewrite,
+    qualityControl,
+  };
+}
+
 function isIpInfringementError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /IP infringement|intellectual property|suspected.*infringement/i.test(message);
@@ -1102,12 +1364,19 @@ export async function POST(request: NextRequest) {
 
     if (promptOverride) {
       const preparedOverrideImagePrompt = appendLandscapeFormatConstraint(promptOverride);
-      const overrideNegativePrompt = negativePromptOverride ||
-        "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs";
+      const overrideHumanPresence = inferHumanPresencePolicy({
+        generationRole: "co_created",
+        userNote: promptOverride,
+      });
+      const overrideNegativePrompt = appendHumanPresenceNegativeConstraints(
+        negativePromptOverride || buildHumanPresenceNegativePrompt(overrideHumanPresence),
+        overrideHumanPresence
+      );
       const imageStartedAt = Date.now();
-      const imageAttempt = await generateImageWithRetry(
+      const imageAttempt = await generateImageWithHumanQualityControl(
         preparedOverrideImagePrompt,
-        overrideNegativePrompt
+        overrideNegativePrompt,
+        overrideHumanPresence
       );
       const overrideImagePrompt = imageAttempt.finalPrompt;
       const imageResult = imageAttempt.result;
@@ -1134,6 +1403,7 @@ export async function POST(request: NextRequest) {
           presets,
           userNote: effectiveUserNote,
           promptOverride: true,
+          humanPresence: overrideHumanPresence,
         },
         prompt: {
           source: "prompt-override",
@@ -1141,6 +1411,7 @@ export async function POST(request: NextRequest) {
           finalImagePrompt: overrideImagePrompt,
           negativePrompt: overrideNegativePrompt,
           safetyRewrite: imageAttempt.safetyRewrite,
+          humanQualityControl: imageAttempt.qualityControl,
         },
         image: {
           attempts: imageAttempt.attemptLog,
@@ -1214,6 +1485,8 @@ export async function POST(request: NextRequest) {
         requestId: imageResult.requestId,
         usage: imageResult.usage,
         promptSafetyRewrite: imageAttempt.safetyRewrite,
+        humanPresence: overrideHumanPresence,
+        humanQualityControl: imageAttempt.qualityControl,
         logPath,
         logRef: logPath,
         timings,
@@ -1269,14 +1542,20 @@ export async function POST(request: NextRequest) {
         promptBrief
       )
     );
-    const negativePrompt = appendVisualBriefNegativeConstraints(
-      promptBrief?.negativePrompt ||
-        "people, human figure, face, portrait, silhouette, character, crowd, text, letters, caption, handwriting, sign, subtitle, logo, watermark, signature, blurry, low quality, distorted anatomy, extra limbs",
-      promptDirectorInput
+    const negativePrompt = appendHumanPresenceNegativeConstraints(
+      appendVisualBriefNegativeConstraints(
+        promptBrief?.negativePrompt || buildHumanPresenceNegativePrompt(promptDirectorInput.humanPresence),
+        promptDirectorInput
+      ),
+      promptDirectorInput.humanPresence
     );
 
     const imageStartedAt = Date.now();
-    const imageAttempt = await generateImageWithRetry(preparedImagePrompt, negativePrompt);
+    const imageAttempt = await generateImageWithHumanQualityControl(
+      preparedImagePrompt,
+      negativePrompt,
+      promptDirectorInput.humanPresence
+    );
     const imagePrompt = imageAttempt.finalPrompt;
     const imageResult = imageAttempt.result;
     timings.imageGenerationAttempts = imageAttempt.attempts;
@@ -1302,6 +1581,7 @@ export async function POST(request: NextRequest) {
         commentWeights,
         presets,
         userNote: effectiveUserNote,
+        humanPresence: promptDirectorInput.humanPresence,
       },
       prompt: {
         source: promptSource,
@@ -1318,6 +1598,7 @@ export async function POST(request: NextRequest) {
         finalImagePrompt: imagePrompt,
         negativePrompt,
         safetyRewrite: imageAttempt.safetyRewrite,
+        humanQualityControl: imageAttempt.qualityControl,
       },
       image: {
         attempts: imageAttempt.attemptLog,
@@ -1398,6 +1679,8 @@ export async function POST(request: NextRequest) {
       requestId: imageResult.requestId,
       usage: imageResult.usage,
       promptSafetyRewrite: imageAttempt.safetyRewrite,
+      humanPresence: promptDirectorInput.humanPresence,
+      humanQualityControl: imageAttempt.qualityControl,
       logPath,
       logRef: logPath,
       timings,

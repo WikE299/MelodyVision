@@ -267,7 +267,7 @@ function formatDuration(seconds: number) {
   return `${minutes}:${remainingSeconds}`;
 }
 
-export default function HomePageClient() {
+export default function HomePageClient({ audioLabEnabled = false }: { audioLabEnabled?: boolean }) {
   const router = useRouter();
   const { language } = useLanguage();
   const [studyMode, setStudyMode] = useState<boolean | null>(null);
@@ -1100,6 +1100,9 @@ export default function HomePageClient() {
       <div className="relative z-10 flex min-h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader
           activeStep={1}
+          utilityLink={audioLabEnabled && studyMode === false
+            ? { href: "/audio-lab", label: "Audio Lab" }
+            : undefined}
           studyStage={studyMode === true
             ? studyPayload?.session.currentPeriod === 2
               ? "experience_2"
