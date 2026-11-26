@@ -134,17 +134,18 @@ export default function FlowHeader({
         {utilityLink && (
           <Link
             href={utilityLink.href}
-            className={`hidden items-center gap-2 border px-3 text-xs font-semibold transition sm:flex ${compact ? "py-2" : "py-2.5"} ${
+            className={`flex items-center justify-center gap-2 border px-2.5 text-xs font-semibold transition sm:px-3 ${compact ? "py-2" : "py-2.5"} ${
               isDark
                 ? "border-[#b18b72]/45 bg-[#241f29]/70 text-[#f4d6aa] hover:border-[#ffd083]/80 hover:bg-[#3a2d32]"
                 : "border-[#c8b7a8] bg-white text-[#5d5060] hover:border-[#9f6f45]"
             }`}
             title="打开独立的图片生成音乐测试工具"
+            aria-label={utilityLink.label}
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
               <path d="M3 13v-2m4 6V7m5 13V4m5 13V7m4 6v-2" strokeLinecap="round" />
             </svg>
-            {utilityLink.label}
+            <span className="hidden sm:inline">{utilityLink.label}</span>
           </Link>
         )}
         <button
