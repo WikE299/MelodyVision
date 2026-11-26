@@ -1100,7 +1100,7 @@ export default function HomePageClient({ audioLabEnabled = false }: { audioLabEn
       <div className="relative z-10 flex min-h-screen flex-col px-4 py-3 lg:px-6 lg:py-4 2xl:px-14 2xl:py-6">
         <FlowHeader
           activeStep={1}
-          utilityLink={audioLabEnabled && studyMode === false
+          utilityLink={audioLabEnabled
             ? { href: "/audio-lab", label: "Audio Lab" }
             : undefined}
           studyStage={studyMode === true
